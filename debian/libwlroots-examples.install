@@ -1,0 +1,12 @@
+*/rootston/rootston         /usr/lib/wlroots/
+*/examples/idle		    /usr/lib/wlroots/
+*/examples/multi-pointer    /usr/lib/wlroots/
+*/examples/output-layout    /usr/lib/wlroots/
+*/examples/pointer          /usr/lib/wlroots/
+*/examples/rotation         /usr/lib/wlroots/
+*/examples/screenshot       /usr/lib/wlroots/
+*/examples/simple           /usr/lib/wlroots/
+*/examples/tablet           /usr/lib/wlroots/
+*/examples/touch            /usr/lib/wlroots/
+
+

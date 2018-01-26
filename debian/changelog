@@ -1,0 +1,5 @@
+wlroots (0.0.0~git20180126-1) unstable; urgency=medium
+
+  * Initial release (Closes: #888848)
+
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 26 Jan 2018 17:23:38 +0100
