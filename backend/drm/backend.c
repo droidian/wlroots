@@ -50,10 +50,17 @@ static struct wlr_egl *wlr_drm_backend_get_egl(struct wlr_backend *backend) {
 	return &drm->renderer.egl;
 }
 
+static struct wlr_renderer *wlr_drm_backend_get_renderer(
+		struct wlr_backend *backend) {
+	struct wlr_drm_backend *drm = (struct wlr_drm_backend *)backend;
+	return drm->renderer.wlr_rend;
+}
+
 static struct wlr_backend_impl backend_impl = {
 	.start = wlr_drm_backend_start,
 	.destroy = wlr_drm_backend_destroy,
-	.get_egl = wlr_drm_backend_get_egl
+	.get_egl = wlr_drm_backend_get_egl,
+	.get_renderer = wlr_drm_backend_get_renderer,
 };
 
 bool wlr_backend_is_drm(struct wlr_backend *b) {
@@ -112,7 +119,7 @@ struct wlr_backend *wlr_drm_backend_create(struct wl_display *display,
 
 	char *name = drmGetDeviceNameFromFd2(gpu_fd);
 	drmVersion *version = drmGetVersion(gpu_fd);
-	wlr_log(L_INFO, "Initalizing DRM backend for %s (%s)", name, version->name);
+	wlr_log(L_INFO, "Initializing DRM backend for %s (%s)", name, version->name);
 	free(name);
 	drmFreeVersion(version);
 
