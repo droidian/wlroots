@@ -1,19 +1,17 @@
 #ifndef BACKEND_DRM_DRM_H
 #define BACKEND_DRM_DRM_H
 
+#include <EGL/egl.h>
+#include <gbm.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <wayland-server.h>
-#include <xf86drmMode.h>
-#include <EGL/egl.h>
-#include <gbm.h>
 #include <wayland-util.h>
-
-#include <wlr/backend/session.h>
 #include <wlr/backend/drm.h>
+#include <wlr/backend/session.h>
 #include <wlr/render/egl.h>
-
+#include <xf86drmMode.h>
 #include "iface.h"
 #include "properties.h"
 #include "renderer.h"
@@ -39,8 +37,14 @@ struct wlr_drm_plane {
 
 struct wlr_drm_crtc {
 	uint32_t id;
-	uint32_t mode_id; // atomic modesetting only
+
+	// Atomic modesetting only
+	uint32_t mode_id;
+	uint32_t gamma_lut;
 	drmModeAtomicReq *atomic;
+
+	// Legacy only
+	drmModeCrtc *legacy_crtc;
 
 	union {
 		struct {
@@ -123,8 +127,8 @@ struct wlr_drm_connector {
 
 	union wlr_drm_connector_props props;
 
-	uint32_t width;
-	uint32_t height;
+	uint32_t width, height;
+	int32_t cursor_x, cursor_y;
 
 	drmModeCrtc *old_crtc;
 

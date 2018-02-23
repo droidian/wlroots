@@ -1,16 +1,18 @@
-#ifndef _ROOTSTON_VIEW_H
-#define _ROOTSTON_VIEW_H
+#ifndef ROOTSTON_VIEW_H
+#define ROOTSTON_VIEW_H
 
 #include <stdbool.h>
 #include <wlr/config.h>
 #include <wlr/types/wlr_box.h>
 #include <wlr/types/wlr_surface.h>
 #include <wlr/types/wlr_xdg_shell_v6.h>
+#include <wlr/types/wlr_xdg_shell.h>
 
 struct roots_wl_shell_surface {
 	struct roots_view *view;
 
 	struct wl_listener destroy;
+	struct wl_listener new_popup;
 	struct wl_listener request_move;
 	struct wl_listener request_resize;
 	struct wl_listener request_maximize;
@@ -23,12 +25,29 @@ struct roots_wl_shell_surface {
 struct roots_xdg_surface_v6 {
 	struct roots_view *view;
 
-	struct wl_listener commit;
 	struct wl_listener destroy;
+	struct wl_listener new_popup;
 	struct wl_listener request_move;
 	struct wl_listener request_resize;
 	struct wl_listener request_maximize;
 	struct wl_listener request_fullscreen;
+
+	struct wl_listener surface_commit;
+
+	uint32_t pending_move_resize_configure_serial;
+};
+
+struct roots_xdg_surface {
+	struct roots_view *view;
+
+	struct wl_listener destroy;
+	struct wl_listener new_popup;
+	struct wl_listener request_move;
+	struct wl_listener request_resize;
+	struct wl_listener request_maximize;
+	struct wl_listener request_fullscreen;
+
+	struct wl_listener surface_commit;
 
 	uint32_t pending_move_resize_configure_serial;
 };
@@ -51,6 +70,7 @@ struct roots_xwayland_surface {
 enum roots_view_type {
 	ROOTS_WL_SHELL_VIEW,
 	ROOTS_XDG_SHELL_V6_VIEW,
+	ROOTS_XDG_SHELL_VIEW,
 #ifdef WLR_HAS_XWAYLAND
 	ROOTS_XWAYLAND_VIEW,
 #endif
@@ -61,6 +81,7 @@ struct roots_view {
 	struct wl_list link; // roots_desktop::views
 
 	double x, y;
+	uint32_t width, height;
 	float rotation;
 
 	bool decorated;
@@ -86,6 +107,7 @@ struct roots_view {
 	union {
 		struct wlr_wl_shell_surface *wl_shell_surface;
 		struct wlr_xdg_surface_v6 *xdg_surface_v6;
+		struct wlr_xdg_surface *xdg_surface;
 #ifdef WLR_HAS_XWAYLAND
 		struct wlr_xwayland_surface *xwayland_surface;
 #endif
@@ -93,21 +115,22 @@ struct roots_view {
 	union {
 		struct roots_wl_shell_surface *roots_wl_shell_surface;
 		struct roots_xdg_surface_v6 *roots_xdg_surface_v6;
+		struct roots_xdg_surface *roots_xdg_surface;
 #ifdef WLR_HAS_XWAYLAND
 		struct roots_xwayland_surface *roots_xwayland_surface;
 #endif
 	};
+
 	struct wlr_surface *wlr_surface;
+	struct wl_list children; // roots_view_child::link
+
+	struct wl_listener new_subsurface;
 
 	struct {
 		struct wl_signal destroy;
 	} events;
 
-	// TODO: This would probably be better as a field that's updated on a
-	// configure event from the xdg_shell
-	// If not then this should follow the typical type/impl pattern we use
-	// elsewhere
-	void (*get_size)(const struct roots_view *view, struct wlr_box *box);
+	// TODO: this should follow the typical type/impl pattern we use elsewhere
 	void (*activate)(struct roots_view *view, bool active);
 	void (*move)(struct roots_view *view, double x, double y);
 	void (*resize)(struct roots_view *view, uint32_t width, uint32_t height);
@@ -116,6 +139,45 @@ struct roots_view {
 	void (*maximize)(struct roots_view *view, bool maximized);
 	void (*set_fullscreen)(struct roots_view *view, bool fullscreen);
 	void (*close)(struct roots_view *view);
+};
+
+struct roots_view_child {
+	struct roots_view *view;
+	struct wlr_surface *wlr_surface;
+	struct wl_list link;
+
+	struct wl_listener commit;
+	struct wl_listener new_subsurface;
+
+	void (*destroy)(struct roots_view_child *child);
+};
+
+struct roots_subsurface {
+	struct roots_view_child view_child;
+	struct wlr_subsurface *wlr_subsurface;
+	struct wl_listener destroy;
+};
+
+struct roots_wl_shell_popup {
+	struct roots_view_child view_child;
+	struct wlr_wl_shell_surface *wlr_wl_shell_surface;
+	struct wl_listener destroy;
+	struct wl_listener set_state;
+	struct wl_listener new_popup;
+};
+
+struct roots_xdg_popup_v6 {
+	struct roots_view_child view_child;
+	struct wlr_xdg_popup_v6 *wlr_popup;
+	struct wl_listener destroy;
+	struct wl_listener new_popup;
+};
+
+struct roots_xdg_popup {
+	struct roots_view_child view_child;
+	struct wlr_xdg_popup *wlr_popup;
+	struct wl_listener destroy;
+	struct wl_listener new_popup;
 };
 
 void view_get_box(const struct roots_view *view, struct wlr_box *box);
@@ -127,6 +189,7 @@ void view_move_resize(struct roots_view *view, double x, double y,
 void view_maximize(struct roots_view *view, bool maximized);
 void view_set_fullscreen(struct roots_view *view, bool fullscreen,
 	struct wlr_output *output);
+void view_rotate(struct roots_view *view, float rotation);
 void view_close(struct roots_view *view);
 bool view_center(struct roots_view *view);
 void view_setup(struct roots_view *view);
@@ -144,5 +207,12 @@ enum roots_deco_part {
 };
 
 enum roots_deco_part view_get_deco_part(struct roots_view *view, double sx, double sy);
+
+void view_child_init(struct roots_view_child *child, struct roots_view *view,
+	struct wlr_surface *wlr_surface);
+void view_child_finish(struct roots_view_child *child);
+
+struct roots_subsurface *subsurface_create(struct roots_view *view,
+	struct wlr_subsurface *wlr_subsurface);
 
 #endif

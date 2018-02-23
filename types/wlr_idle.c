@@ -5,6 +5,16 @@
 #include <wlr/types/wlr_idle.h>
 #include <wlr/util/log.h>
 #include "idle-protocol.h"
+#include "util/signal.h"
+
+static const struct org_kde_kwin_idle_timeout_interface idle_timeout_impl;
+
+static struct wlr_idle_timeout *idle_timeout_from_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource,
+		&org_kde_kwin_idle_timeout_interface, &idle_timeout_impl));
+	return wl_resource_get_user_data(resource);
+}
 
 static void idle_timeout_destroy(struct wlr_idle_timeout *timer) {
 	wl_list_remove(&timer->input_listener.link);
@@ -33,7 +43,7 @@ static void handle_activity(struct wlr_idle_timeout *timer) {
 }
 
 static void handle_timer_resource_destroy(struct wl_resource *timer_resource) {
-	struct wlr_idle_timeout *timer = wl_resource_get_user_data(timer_resource);
+	struct wlr_idle_timeout *timer = idle_timeout_from_resource(timer_resource);
 	if (timer != NULL) {
 		idle_timeout_destroy(timer);
 	}
@@ -53,17 +63,27 @@ static void release_idle_timeout(struct wl_client *client,
 
 static void simulate_activity(struct wl_client *client,
 		struct wl_resource *resource){
-	struct wlr_idle_timeout *timer = wl_resource_get_user_data(resource);
+	struct wlr_idle_timeout *timer = idle_timeout_from_resource(resource);
 	handle_activity(timer);
 }
 
-static struct org_kde_kwin_idle_timeout_interface idle_timeout_impl = {
+static const struct org_kde_kwin_idle_timeout_interface idle_timeout_impl = {
 	.release = release_idle_timeout,
 	.simulate_user_activity = simulate_activity,
 };
 
+static const struct org_kde_kwin_idle_interface idle_impl;
+
+static struct wlr_idle *idle_from_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &org_kde_kwin_idle_interface,
+		&idle_impl));
+	return wl_resource_get_user_data(resource);
+}
+
 static void handle_input_notification(struct wl_listener *listener, void *data) {
-	struct wlr_idle_timeout *timer = wl_container_of(listener, timer, input_listener);
+	struct wlr_idle_timeout *timer =
+		wl_container_of(listener, timer, input_listener);
 	struct wlr_seat *seat = data;
 	if (timer->seat == seat) {
 		handle_activity(timer);
@@ -71,13 +91,11 @@ static void handle_input_notification(struct wl_listener *listener, void *data) 
 }
 
 static void create_idle_timer(struct wl_client *client,
-		struct wl_resource *idle_resource,
-		uint32_t id,
-		struct wl_resource *seat_resource,
-		uint32_t timeout) {
-	struct wlr_idle *idle = wl_resource_get_user_data(idle_resource);
+		struct wl_resource *idle_resource, uint32_t id,
+		struct wl_resource *seat_resource, uint32_t timeout) {
+	struct wlr_idle *idle = idle_from_resource(idle_resource);
 	struct wlr_seat_client *client_seat =
-		wl_resource_get_user_data(seat_resource);
+		wlr_seat_client_from_resource(seat_resource);
 
 	struct wlr_idle_timeout *timer =
 		calloc(1, sizeof(struct wlr_idle_timeout));
@@ -104,7 +122,7 @@ static void create_idle_timer(struct wl_client *client,
 	wl_signal_add(&timer->seat->events.destroy, &timer->seat_destroy);
 
 	timer->input_listener.notify = handle_input_notification;
-	wl_signal_add(&idle->activity_notify, &timer->input_listener);
+	wl_signal_add(&idle->events.activity_notify, &timer->input_listener);
 	// create the timer
 	timer->idle_source =
 		wl_event_loop_add_timer(idle->event_loop, idle_notify, timer);
@@ -121,7 +139,7 @@ static void create_idle_timer(struct wl_client *client,
 	wl_event_source_timer_update(timer->idle_source, timer->timeout);
 }
 
-static struct org_kde_kwin_idle_interface idle_impl = {
+static const struct org_kde_kwin_idle_interface idle_impl = {
 	.get_idle_timeout = create_idle_timer,
 };
 
@@ -163,7 +181,7 @@ struct wlr_idle *wlr_idle_create(struct wl_display *display) {
 		return NULL;
 	}
 	wl_list_init(&idle->idle_timers);
-	wl_signal_init(&idle->activity_notify);
+	wl_signal_init(&idle->events.activity_notify);
 
 	idle->event_loop = wl_display_get_event_loop(display);
 	if (idle->event_loop == NULL) {
@@ -186,5 +204,5 @@ struct wlr_idle *wlr_idle_create(struct wl_display *display) {
 }
 
 void wlr_idle_notify_activity(struct wlr_idle *idle, struct wlr_seat *seat) {
-	wl_signal_emit(&idle->activity_notify, seat);
+	wlr_signal_emit_safe(&idle->events.activity_notify, seat);
 }

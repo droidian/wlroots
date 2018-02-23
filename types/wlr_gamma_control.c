@@ -5,6 +5,7 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/util/log.h>
 #include "gamma-control-protocol.h"
+#include "util/signal.h"
 
 static void resource_destroy(struct wl_client *client,
 		struct wl_resource *resource) {
@@ -15,16 +16,25 @@ static void gamma_control_destroy(struct wlr_gamma_control *gamma_control) {
 	if (gamma_control == NULL) {
 		return;
 	}
-	wl_signal_emit(&gamma_control->events.destroy, gamma_control);
+	wlr_signal_emit_safe(&gamma_control->events.destroy, gamma_control);
 	wl_list_remove(&gamma_control->output_destroy_listener.link);
 	wl_resource_set_user_data(gamma_control->resource, NULL);
 	wl_list_remove(&gamma_control->link);
 	free(gamma_control);
 }
 
+static const struct gamma_control_interface gamma_control_impl;
+
+struct wlr_gamma_control *gamma_control_from_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &gamma_control_interface,
+		&gamma_control_impl));
+	return wl_resource_get_user_data(resource);
+}
+
 static void gamma_control_destroy_resource(struct wl_resource *resource) {
 	struct wlr_gamma_control *gamma_control =
-		wl_resource_get_user_data(resource);
+		gamma_control_from_resource(resource);
 	gamma_control_destroy(gamma_control);
 }
 
@@ -39,7 +49,7 @@ static void gamma_control_set_gamma(struct wl_client *client,
 		struct wl_resource *gamma_control_resource, struct wl_array *red,
 		struct wl_array *green, struct wl_array *blue) {
 	struct wlr_gamma_control *gamma_control =
-		wl_resource_get_user_data(gamma_control_resource);
+		gamma_control_from_resource(gamma_control_resource);
 
 	if (red->size != green->size || red->size != blue->size) {
 		wl_resource_post_error(gamma_control_resource,
@@ -67,12 +77,21 @@ static const struct gamma_control_interface gamma_control_impl = {
 	.reset_gamma = gamma_control_reset_gamma,
 };
 
+static const struct gamma_control_manager_interface gamma_control_manager_impl;
+
+struct wlr_gamma_control_manager *gamma_control_manager_from_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &gamma_control_manager_interface,
+		&gamma_control_manager_impl));
+	return wl_resource_get_user_data(resource);
+}
+
 static void gamma_control_manager_get_gamma_control(struct wl_client *client,
 		struct wl_resource *gamma_control_manager_resource, uint32_t id,
 		struct wl_resource *output_resource) {
 	struct wlr_gamma_control_manager *manager =
-		wl_resource_get_user_data(gamma_control_manager_resource);
-	struct wlr_output *output = wl_resource_get_user_data(output_resource);
+		gamma_control_manager_from_resource(gamma_control_manager_resource);
+	struct wlr_output *output = wlr_output_from_resource(output_resource);
 
 	struct wlr_gamma_control *gamma_control =
 		calloc(1, sizeof(struct wlr_gamma_control));
@@ -108,7 +127,7 @@ static void gamma_control_manager_get_gamma_control(struct wl_client *client,
 		wlr_output_get_gamma_size(output));
 }
 
-static struct gamma_control_manager_interface gamma_control_manager_impl = {
+static const struct gamma_control_manager_interface gamma_control_manager_impl = {
 	.get_gamma_control = gamma_control_manager_get_gamma_control,
 };
 

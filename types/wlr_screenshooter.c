@@ -2,12 +2,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wayland-server.h>
-#include <wlr/render.h>
 #include <wlr/backend.h>
-#include <wlr/types/wlr_screenshooter.h>
+#include <wlr/render.h>
 #include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_screenshooter.h>
 #include <wlr/util/log.h>
 #include "screenshooter-protocol.h"
+
+static struct wlr_screenshot *screenshot_from_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &orbital_screenshot_interface,
+		NULL));
+	return wl_resource_get_user_data(resource);
+}
 
 struct screenshot_state {
 	struct wl_shm_buffer *shm_buffer;
@@ -24,7 +31,7 @@ static void screenshot_destroy(struct wlr_screenshot *screenshot) {
 static void handle_screenshot_resource_destroy(
 		struct wl_resource *screenshot_resource) {
 	struct wlr_screenshot *screenshot =
-		wl_resource_get_user_data(screenshot_resource);
+		screenshot_from_resource(screenshot_resource);
 	if (screenshot != NULL) {
 		screenshot_destroy(screenshot);
 	}
@@ -41,8 +48,8 @@ static void output_handle_frame(struct wl_listener *listener, void *_data) {
 	int32_t width = wl_shm_buffer_get_width(shm_buffer);
 	int32_t height = wl_shm_buffer_get_height(shm_buffer);
 	int32_t stride = wl_shm_buffer_get_stride(shm_buffer);
-	void *data = wl_shm_buffer_get_data(shm_buffer);
 	wl_shm_buffer_begin_access(shm_buffer);
+	void *data = wl_shm_buffer_get_data(shm_buffer);
 	bool ok = wlr_renderer_read_pixels(renderer, format, stride, width, height,
 		0, 0, 0, 0, data);
 	wl_shm_buffer_end_access(shm_buffer);
@@ -59,13 +66,22 @@ cleanup:
 	free(state);
 }
 
+static const struct orbital_screenshooter_interface screenshooter_impl;
+
+static struct wlr_screenshooter *screenshooter_from_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &orbital_screenshooter_interface,
+		&screenshooter_impl));
+	return wl_resource_get_user_data(resource);
+}
+
 static void screenshooter_shoot(struct wl_client *client,
 		struct wl_resource *screenshooter_resource, uint32_t id,
 		struct wl_resource *output_resource,
 		struct wl_resource *buffer_resource) {
 	struct wlr_screenshooter *screenshooter =
-		wl_resource_get_user_data(screenshooter_resource);
-	struct wlr_output *output = wl_resource_get_user_data(output_resource);
+		screenshooter_from_resource(screenshooter_resource);
+	struct wlr_output *output = wlr_output_from_resource(output_resource);
 
 	struct wlr_renderer *renderer = wlr_backend_get_renderer(output->backend);
 	if (renderer == NULL) {
@@ -127,9 +143,13 @@ static void screenshooter_shoot(struct wl_client *client,
 	state->screenshot = screenshot;
 	state->frame_listener.notify = output_handle_frame;
 	wl_signal_add(&output->events.swap_buffers, &state->frame_listener);
+
+	// Schedule a buffer swap
+	output->needs_swap = true;
+	wlr_output_schedule_frame(output);
 }
 
-static struct orbital_screenshooter_interface screenshooter_impl = {
+static const struct orbital_screenshooter_interface screenshooter_impl = {
 	.shoot = screenshooter_shoot,
 };
 

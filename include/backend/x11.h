@@ -1,11 +1,11 @@
-#ifndef WLR_X11_H
-#define WLR_X11_H
+#ifndef BACKEND_X11_H
+#define BACKEND_X11_H
 
 #include <stdbool.h>
-#include <xcb/xcb.h>
-#include <X11/Xlib-xcb.h>
 #include <wayland-server.h>
 #include <wlr/render/egl.h>
+#include <X11/Xlib-xcb.h>
+#include <xcb/xcb.h>
 
 struct wlr_x11_backend;
 
@@ -46,6 +46,8 @@ struct wlr_x11_backend {
 	struct {
 		struct wlr_x11_atom wm_protocols;
 		struct wlr_x11_atom wm_delete_window;
+		struct wlr_x11_atom net_wm_name;
+		struct wlr_x11_atom utf8_string;
 	} atoms;
 
 	// The time we last received an event

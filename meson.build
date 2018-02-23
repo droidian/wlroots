@@ -49,7 +49,7 @@ add_project_arguments('-DWL_HIDE_DEPRECATED', language: 'c')
 wayland_server = dependency('wayland-server')
 wayland_client = dependency('wayland-client')
 wayland_egl    = dependency('wayland-egl')
-wayland_protos = dependency('wayland-protocols')
+wayland_protos = dependency('wayland-protocols', version: '>=1.12')
 egl            = dependency('egl')
 glesv2         = dependency('glesv2')
 drm            = dependency('libdrm')
@@ -65,29 +65,33 @@ xcb_image      = dependency('xcb-image')
 xcb_render     = dependency('xcb-render')
 xcb_icccm      = dependency('xcb-icccm', required: false)
 x11_xcb        = dependency('x11-xcb')
-libcap         = dependency('libcap', required: false)
-systemd        = dependency('libsystemd', required: false)
-elogind        = dependency('libelogind', required: false)
+libcap         = dependency('libcap', required: get_option('enable_libcap') == 'true')
+systemd        = dependency('libsystemd', required: get_option('enable_systemd') == 'true')
+elogind        = dependency('libelogind', required: get_option('enable_elogind') == 'true')
 math           = cc.find_library('m', required: false)
+
+exclude_headers = []
+wlr_parts = []
+wlr_deps = []
 
 if xcb_icccm.found()
 	conf_data.set('WLR_HAS_XCB_ICCCM', true)
 endif
 
-if libcap.found() and get_option('enable_libcap')
+if libcap.found() and get_option('enable_libcap') != 'false'
 	conf_data.set('WLR_HAS_LIBCAP', true)
+	wlr_deps += libcap
 endif
 
-if systemd.found() and get_option('enable_systemd')
+if systemd.found() and get_option('enable_systemd') != 'false'
 	conf_data.set('WLR_HAS_SYSTEMD', true)
+	wlr_deps += systemd
 endif
 
-if elogind.found() and get_option('enable_elogind')
+if elogind.found() and get_option('enable_elogind') != 'false'
 	conf_data.set('WLR_HAS_ELOGIND', true)
 endif
 
-exclude_headers = []
-wlr_parts = []
 if get_option('enable_xwayland')
 	subdir('xwayland')
 	wlr_parts += [lib_wlr_xwayland]
@@ -117,7 +121,7 @@ wlr_parts += [
 	lib_wlr_xcursor,
 ]
 
-wlr_deps = [
+wlr_deps += [
 	wayland_server,
 	wayland_client,
 	wayland_egl,
@@ -133,11 +137,11 @@ wlr_deps = [
 	xcb,
 	xcb_composite,
 	x11_xcb,
-	libcap,
-	systemd,
 	math,
 ]
 
+symbols_file = 'wlroots.syms'
+symbols_flag = '-Wl,--version-script,@0@/@1@'.format(meson.current_source_dir(), symbols_file)
 lib_wlr = library(
 	meson.project_name(),
 	version: '.'.join(so_version),
@@ -145,6 +149,7 @@ lib_wlr = library(
 	dependencies: wlr_deps,
 	include_directories: wlr_inc,
 	install: true,
+	link_args : symbols_flag,
 )
 
 wlroots = declare_dependency(
@@ -155,16 +160,16 @@ wlroots = declare_dependency(
 
 
 summary = [
-  '',
-  '----------------',
-  'wlroots @0@'.format(meson.project_version()),
-  '',
-  '   libcap: @0@'.format(get_option('enable_libcap')),
-  '  systemd: @0@'.format(get_option('enable_systemd')),
-  '  elogind: @0@'.format(get_option('enable_elogind')),
-  ' xwayland: @0@'.format(get_option('enable_xwayland')),
-  '----------------',
-  ''
+	'',
+	'----------------',
+	'wlroots @0@'.format(meson.project_version()),
+	'',
+	'   libcap: @0@'.format(conf_data.get('WLR_HAS_LIBCAP', false)),
+	'  systemd: @0@'.format(conf_data.get('WLR_HAS_SYSTEMD', false)),
+	'  elogind: @0@'.format(conf_data.get('WLR_HAS_ELOGIND', false)),
+	' xwayland: @0@'.format(conf_data.get('WLR_HAS_XWAYLAND', false)),
+	'----------------',
+	''
 ]
 message('\n'.join(summary))
 
@@ -193,18 +198,18 @@ if git.found()
 	etags = find_program('etags', required: false)
 	if etags.found() and all_files.length() > 0
 		custom_target('etags',
-		   build_by_default: true,
-		   input: all_files,
-		   output: 'TAGS',
-		   command: [etags.path(), '-o', 'TAGS'] + all_files)
+			build_by_default: true,
+			input: all_files,
+			output: 'TAGS',
+			command: [etags.path(), '-o', 'TAGS'] + all_files)
 	endif
 
 	ctags = find_program('ctags', required: false)
 	if ctags.found() and all_files.length() > 0
 		custom_target('ctags',
-		   build_by_default: true,
-		   input: all_files,
-		   output: 'tags',
-		   command: [ctags.path(), '-o', 'tags'] + all_files)
+			build_by_default: true,
+			input: all_files,
+			output: 'tags',
+			command: [ctags.path(), '-o', 'tags'] + all_files)
 	endif
 endif

@@ -2,12 +2,13 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include <assert.h>
-#include <wayland-server.h>
-#include <wlr/util/log.h>
-#include <wlr/types/wlr_surface.h>
-#include <wlr/types/wlr_wl_shell.h>
 #include <stdlib.h>
 #include <wayland-server-protocol.h>
+#include <wayland-server.h>
+#include <wlr/types/wlr_surface.h>
+#include <wlr/types/wlr_wl_shell.h>
+#include <wlr/util/log.h>
+#include "util/signal.h"
 
 static const char *wlr_wl_shell_surface_role = "wl-shell-surface";
 
@@ -93,10 +94,19 @@ static const struct wlr_pointer_grab_interface shell_pointer_grab_impl = {
 	.axis = shell_pointer_grab_axis,
 };
 
+static const struct wl_shell_surface_interface shell_surface_impl;
+
+static struct wlr_wl_shell_surface *shell_surface_from_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &wl_shell_surface_interface,
+		&shell_surface_impl));
+	return wl_resource_get_user_data(resource);
+}
+
 static void shell_surface_protocol_pong(struct wl_client *client,
 		struct wl_resource *resource, uint32_t serial) {
 	wlr_log(L_DEBUG, "got shell surface pong");
-	struct wlr_wl_shell_surface *surface = wl_resource_get_user_data(resource);
+	struct wlr_wl_shell_surface *surface = shell_surface_from_resource(resource);
 	if (surface->ping_serial != serial) {
 		return;
 	}
@@ -108,9 +118,8 @@ static void shell_surface_protocol_pong(struct wl_client *client,
 static void shell_surface_protocol_move(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *seat_resource,
 		uint32_t serial) {
-	struct wlr_wl_shell_surface *surface = wl_resource_get_user_data(resource);
-	struct wlr_seat_client *seat =
-		wl_resource_get_user_data(seat_resource);
+	struct wlr_wl_shell_surface *surface = shell_surface_from_resource(resource);
+	struct wlr_seat_client *seat = wlr_seat_client_from_resource(seat_resource);
 
 	if (!wlr_seat_validate_grab_serial(seat->seat, serial)) {
 		wlr_log(L_DEBUG, "invalid serial for grab");
@@ -123,7 +132,7 @@ static void shell_surface_protocol_move(struct wl_client *client,
 		.serial = serial,
 	};
 
-	wl_signal_emit(&surface->events.request_move, &event);
+	wlr_signal_emit_safe(&surface->events.request_move, &event);
 }
 
 static struct wlr_wl_shell_popup_grab *shell_popup_grab_from_seat(
@@ -171,9 +180,8 @@ static void shell_surface_destroy_popup_state(
 static void shell_surface_protocol_resize(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *seat_resource,
 		uint32_t serial, enum wl_shell_surface_resize edges) {
-	struct wlr_wl_shell_surface *surface = wl_resource_get_user_data(resource);
-	struct wlr_seat_client *seat =
-		wl_resource_get_user_data(seat_resource);
+	struct wlr_wl_shell_surface *surface = shell_surface_from_resource(resource);
+	struct wlr_seat_client *seat = wlr_seat_client_from_resource(seat_resource);
 
 	if (!wlr_seat_validate_grab_serial(seat->seat, serial)) {
 		wlr_log(L_DEBUG, "invalid serial for grab");
@@ -187,7 +195,7 @@ static void shell_surface_protocol_resize(struct wl_client *client,
 		.edges = edges,
 	};
 
-	wl_signal_emit(&surface->events.request_resize, &event);
+	wlr_signal_emit_safe(&surface->events.request_resize, &event);
 }
 
 static void shell_surface_set_state(struct wlr_wl_shell_surface *surface,
@@ -200,13 +208,13 @@ static void shell_surface_set_state(struct wlr_wl_shell_surface *surface,
 	shell_surface_destroy_popup_state(surface);
 	surface->popup_state = popup_state;
 
-	wl_signal_emit(&surface->events.set_state, surface);
+	wlr_signal_emit_safe(&surface->events.set_state, surface);
 }
 
 static void shell_surface_protocol_set_toplevel(struct wl_client *client,
 		struct wl_resource *resource) {
 	wlr_log(L_DEBUG, "got shell surface toplevel");
-	struct wlr_wl_shell_surface *surface = wl_resource_get_user_data(resource);
+	struct wlr_wl_shell_surface *surface = shell_surface_from_resource(resource);
 	shell_surface_set_state(surface, WLR_WL_SHELL_SURFACE_STATE_TOPLEVEL, NULL,
 		NULL);
 }
@@ -221,6 +229,7 @@ static void shell_surface_popup_set_parent(struct wlr_wl_shell_surface *surface,
 	if (parent) {
 		wl_list_remove(&surface->popup_link);
 		wl_list_insert(&parent->popups, &surface->popup_link);
+		wlr_signal_emit_safe(&parent->events.new_popup, surface);
 	}
 }
 
@@ -241,9 +250,8 @@ static void shell_surface_protocol_set_transient(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *parent_resource,
 		int32_t x, int32_t y, enum wl_shell_surface_transient flags) {
 	wlr_log(L_DEBUG, "got shell surface transient");
-	struct wlr_wl_shell_surface *surface = wl_resource_get_user_data(resource);
-	struct wlr_surface *parent =
-		wl_resource_get_user_data(parent_resource);
+	struct wlr_wl_shell_surface *surface = shell_surface_from_resource(resource);
+	struct wlr_surface *parent = wlr_surface_from_resource(parent_resource);
 	// TODO: check if parent_resource == NULL?
 
 	struct wlr_wl_shell_surface *wl_parent =
@@ -273,10 +281,10 @@ static void shell_surface_protocol_set_fullscreen(struct wl_client *client,
 		struct wl_resource *resource,
 		enum wl_shell_surface_fullscreen_method method, uint32_t framerate,
 		struct wl_resource *output_resource) {
-	struct wlr_wl_shell_surface *surface = wl_resource_get_user_data(resource);
+	struct wlr_wl_shell_surface *surface = shell_surface_from_resource(resource);
 	struct wlr_output *output = NULL;
 	if (output_resource != NULL) {
-		output = wl_resource_get_user_data(output_resource);
+		output = wlr_output_from_resource(output_resource);
 	}
 
 	shell_surface_set_state(surface, WLR_WL_SHELL_SURFACE_STATE_FULLSCREEN,
@@ -289,18 +297,17 @@ static void shell_surface_protocol_set_fullscreen(struct wl_client *client,
 		.output = output,
 	};
 
-	wl_signal_emit(&surface->events.request_fullscreen, &event);
+	wlr_signal_emit_safe(&surface->events.request_fullscreen, &event);
 }
 
 static void shell_surface_protocol_set_popup(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *seat_resource,
 		uint32_t serial, struct wl_resource *parent_resource, int32_t x,
 		int32_t y, enum wl_shell_surface_transient flags) {
-	struct wlr_wl_shell_surface *surface = wl_resource_get_user_data(resource);
+	struct wlr_wl_shell_surface *surface = shell_surface_from_resource(resource);
 	struct wlr_seat_client *seat_client =
-		wl_resource_get_user_data(seat_resource);
-	struct wlr_surface *parent =
-		wl_resource_get_user_data(parent_resource);
+		wlr_seat_client_from_resource(seat_resource);
+	struct wlr_surface *parent = wlr_surface_from_resource(parent_resource);
 	struct wlr_wl_shell_popup_grab *grab =
 		shell_popup_grab_from_seat(surface->shell, seat_client->seat);
 	if (!grab) {
@@ -353,10 +360,10 @@ static void shell_surface_protocol_set_popup(struct wl_client *client,
 
 static void shell_surface_protocol_set_maximized(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *output_resource) {
-	struct wlr_wl_shell_surface *surface = wl_resource_get_user_data(resource);
+	struct wlr_wl_shell_surface *surface = shell_surface_from_resource(resource);
 	struct wlr_output *output = NULL;
 	if (output_resource != NULL) {
-		output = wl_resource_get_user_data(output_resource);
+		output = wlr_output_from_resource(output_resource);
 	}
 
 	shell_surface_set_state(surface, WLR_WL_SHELL_SURFACE_STATE_MAXIMIZED,
@@ -367,13 +374,13 @@ static void shell_surface_protocol_set_maximized(struct wl_client *client,
 		.output = output,
 	};
 
-	wl_signal_emit(&surface->events.request_maximize, &event);
+	wlr_signal_emit_safe(&surface->events.request_maximize, &event);
 }
 
 static void shell_surface_protocol_set_title(struct wl_client *client,
 		struct wl_resource *resource, const char *title) {
 	wlr_log(L_DEBUG, "new shell surface title: %s", title);
-	struct wlr_wl_shell_surface *surface = wl_resource_get_user_data(resource);
+	struct wlr_wl_shell_surface *surface = shell_surface_from_resource(resource);
 
 	char *tmp = strdup(title);
 	if (tmp == NULL) {
@@ -383,13 +390,13 @@ static void shell_surface_protocol_set_title(struct wl_client *client,
 	free(surface->title);
 	surface->title = tmp;
 
-	wl_signal_emit(&surface->events.set_title, surface);
+	wlr_signal_emit_safe(&surface->events.set_title, surface);
 }
 
 static void shell_surface_protocol_set_class(struct wl_client *client,
 		struct wl_resource *resource, const char *class) {
 	wlr_log(L_DEBUG, "new shell surface class: %s", class);
-	struct wlr_wl_shell_surface *surface = wl_resource_get_user_data(resource);
+	struct wlr_wl_shell_surface *surface = shell_surface_from_resource(resource);
 
 	char *tmp = strdup(class);
 	if (tmp == NULL) {
@@ -399,7 +406,7 @@ static void shell_surface_protocol_set_class(struct wl_client *client,
 	free(surface->class);
 	surface->class = tmp;
 
-	wl_signal_emit(&surface->events.set_class, surface);
+	wlr_signal_emit_safe(&surface->events.set_class, surface);
 }
 
 static const struct wl_shell_surface_interface shell_surface_impl = {
@@ -416,7 +423,7 @@ static const struct wl_shell_surface_interface shell_surface_impl = {
 };
 
 static void shell_surface_destroy(struct wlr_wl_shell_surface *surface) {
-	wl_signal_emit(&surface->events.destroy, surface);
+	wlr_signal_emit_safe(&surface->events.destroy, surface);
 	shell_surface_destroy_popup_state(surface);
 	wl_resource_set_user_data(surface->resource, NULL);
 
@@ -437,7 +444,7 @@ static void shell_surface_destroy(struct wlr_wl_shell_surface *surface) {
 }
 
 static void shell_surface_resource_destroy(struct wl_resource *resource) {
-	struct wlr_wl_shell_surface *surface = wl_resource_get_user_data(resource);
+	struct wlr_wl_shell_surface *surface = shell_surface_from_resource(resource);
 	if (surface != NULL) {
 		shell_surface_destroy(surface);
 	}
@@ -456,7 +463,7 @@ static void handle_wlr_surface_committed(struct wlr_surface *wlr_surface,
 			wlr_surface_has_buffer(surface->surface) &&
 			surface->state != WLR_WL_SHELL_SURFACE_STATE_NONE) {
 		surface->configured = true;
-		wl_signal_emit(&surface->shell->events.new_surface, surface);
+		wlr_signal_emit_safe(&surface->shell->events.new_surface, surface);
 	}
 
 	if (surface->popup_mapped &&
@@ -472,22 +479,30 @@ static void handle_wlr_surface_committed(struct wlr_surface *wlr_surface,
 
 static int shell_surface_ping_timeout(void *user_data) {
 	struct wlr_wl_shell_surface *surface = user_data;
-	wl_signal_emit(&surface->events.ping_timeout, surface);
+	wlr_signal_emit_safe(&surface->events.ping_timeout, surface);
 
 	surface->ping_serial = 0;
 	return 1;
 }
 
+static const struct wl_shell_interface shell_impl;
+
+static struct wlr_wl_shell *shell_from_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &wl_shell_interface, &shell_impl));
+	return wl_resource_get_user_data(resource);
+}
+
 static void shell_protocol_get_shell_surface(struct wl_client *client,
 		struct wl_resource *shell_resource, uint32_t id,
 		struct wl_resource *surface_resource) {
-	struct wlr_surface *surface = wl_resource_get_user_data(surface_resource);
+	struct wlr_surface *surface = wlr_surface_from_resource(surface_resource);
 	if (wlr_surface_set_role(surface, wlr_wl_shell_surface_role,
 			shell_resource, WL_SHELL_ERROR_ROLE)) {
 		return;
 	}
 
-	struct wlr_wl_shell *wl_shell = wl_resource_get_user_data(shell_resource);
+	struct wlr_wl_shell *wl_shell = shell_from_resource(shell_resource);
 	struct wlr_wl_shell_surface *wl_surface =
 		calloc(1, sizeof(struct wlr_wl_shell_surface));
 	if (wl_surface == NULL) {
@@ -519,6 +534,7 @@ static void shell_protocol_get_shell_surface(struct wl_client *client,
 
 	wl_signal_init(&wl_surface->events.destroy);
 	wl_signal_init(&wl_surface->events.ping_timeout);
+	wl_signal_init(&wl_surface->events.new_popup);
 	wl_signal_init(&wl_surface->events.request_move);
 	wl_signal_init(&wl_surface->events.request_resize);
 	wl_signal_init(&wl_surface->events.request_fullscreen);
@@ -545,7 +561,7 @@ static void shell_protocol_get_shell_surface(struct wl_client *client,
 	wl_list_insert(&wl_shell->surfaces, &wl_surface->link);
 }
 
-static struct wl_shell_interface shell_impl = {
+static const struct wl_shell_interface shell_impl = {
 	.get_shell_surface = shell_protocol_get_shell_surface
 };
 

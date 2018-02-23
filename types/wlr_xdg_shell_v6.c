@@ -6,10 +6,11 @@
 #include <string.h>
 #include <wayland-server.h>
 #include <wlr/config.h>
-#include <wlr/types/wlr_xdg_shell_v6.h>
-#include <wlr/types/wlr_surface.h>
 #include <wlr/types/wlr_seat.h>
+#include <wlr/types/wlr_surface.h>
+#include <wlr/types/wlr_xdg_shell_v6.h>
 #include <wlr/util/log.h>
+#include "util/signal.h"
 #include "xdg-shell-unstable-v6-protocol.h"
 
 static const char *wlr_desktop_xdg_toplevel_role = "xdg_toplevel";
@@ -160,7 +161,7 @@ static struct wlr_xdg_popup_grab_v6 *xdg_shell_popup_grab_from_seat(
 
 static void xdg_surface_destroy(struct wlr_xdg_surface_v6 *surface) {
 	// TODO: probably need to ungrab before this event
-	wl_signal_emit(&surface->events.destroy, surface);
+	wlr_signal_emit_safe(&surface->events.destroy, surface);
 
 	if (surface->configure_idle) {
 		wl_event_source_remove(surface->configure_idle);
@@ -206,7 +207,7 @@ static void xdg_surface_destroy(struct wlr_xdg_surface_v6 *surface) {
 			}
 		}
 
-		wl_list_remove(&surface->popup_link);
+		wl_list_remove(&surface->popup_state->link);
 		free(surface->popup_state);
 	}
 
@@ -222,9 +223,19 @@ static void xdg_surface_destroy(struct wlr_xdg_surface_v6 *surface) {
 }
 
 
+static const struct zxdg_positioner_v6_interface
+	zxdg_positioner_v6_implementation;
+
+static struct wlr_xdg_positioner_v6 *xdg_positioner_from_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &zxdg_positioner_v6_interface,
+		&zxdg_positioner_v6_implementation));
+	return wl_resource_get_user_data(resource);
+}
+
 static void xdg_positioner_destroy(struct wl_resource *resource) {
 	struct wlr_xdg_positioner_v6 *positioner =
-		wl_resource_get_user_data(resource);
+		xdg_positioner_from_resource(resource);
 	free(positioner);
 
 }
@@ -232,12 +243,12 @@ static void xdg_positioner_destroy(struct wl_resource *resource) {
 static void xdg_positioner_protocol_set_size(struct wl_client *client,
 		struct wl_resource *resource, int32_t width, int32_t height) {
 	struct wlr_xdg_positioner_v6 *positioner =
-		wl_resource_get_user_data(resource);
+		xdg_positioner_from_resource(resource);
 
 	if (width < 1 || height < 1) {
 		wl_resource_post_error(resource,
 			ZXDG_POSITIONER_V6_ERROR_INVALID_INPUT,
-			"width and height must be positives and non-zero");
+			"width and height must be positive and non-zero");
 		return;
 	}
 
@@ -249,12 +260,12 @@ static void xdg_positioner_protocol_set_anchor_rect(struct wl_client *client,
 		struct wl_resource *resource, int32_t x, int32_t y, int32_t width,
 		int32_t height) {
 	struct wlr_xdg_positioner_v6 *positioner =
-		wl_resource_get_user_data(resource);
+		xdg_positioner_from_resource(resource);
 
 	if (width < 1 || height < 1) {
 		wl_resource_post_error(resource,
 			ZXDG_POSITIONER_V6_ERROR_INVALID_INPUT,
-			"width and height must be positives and non-zero");
+			"width and height must be positive and non-zero");
 		return;
 	}
 
@@ -267,7 +278,7 @@ static void xdg_positioner_protocol_set_anchor_rect(struct wl_client *client,
 static void xdg_positioner_protocol_set_anchor(struct wl_client *client,
 		struct wl_resource *resource, uint32_t anchor) {
 	struct wlr_xdg_positioner_v6 *positioner =
-		wl_resource_get_user_data(resource);
+		xdg_positioner_from_resource(resource);
 
 	if (((anchor & ZXDG_POSITIONER_V6_ANCHOR_TOP ) &&
 				(anchor & ZXDG_POSITIONER_V6_ANCHOR_BOTTOM)) ||
@@ -285,7 +296,7 @@ static void xdg_positioner_protocol_set_anchor(struct wl_client *client,
 static void xdg_positioner_protocol_set_gravity(struct wl_client *client,
 		struct wl_resource *resource, uint32_t gravity) {
 	struct wlr_xdg_positioner_v6 *positioner =
-		wl_resource_get_user_data(resource);
+		xdg_positioner_from_resource(resource);
 
 	if (((gravity & ZXDG_POSITIONER_V6_GRAVITY_TOP) &&
 				(gravity & ZXDG_POSITIONER_V6_GRAVITY_BOTTOM)) ||
@@ -304,7 +315,7 @@ static void xdg_positioner_protocol_set_constraint_adjustment(
 		struct wl_client *client, struct wl_resource *resource,
 		uint32_t constraint_adjustment) {
 	struct wlr_xdg_positioner_v6 *positioner =
-		wl_resource_get_user_data(resource);
+		xdg_positioner_from_resource(resource);
 
 	positioner->constraint_adjustment = constraint_adjustment;
 }
@@ -312,7 +323,7 @@ static void xdg_positioner_protocol_set_constraint_adjustment(
 static void xdg_positioner_protocol_set_offset(struct wl_client *client,
 		struct wl_resource *resource, int32_t x, int32_t y) {
 	struct wlr_xdg_positioner_v6 *positioner =
-		wl_resource_get_user_data(resource);
+		xdg_positioner_from_resource(resource);
 
 	positioner->offset.x = x;
 	positioner->offset.y = y;
@@ -353,52 +364,6 @@ static void xdg_shell_create_positioner(struct wl_client *wl_client,
 		&zxdg_positioner_v6_implementation,
 		positioner, xdg_positioner_destroy);
 }
-
-static void xdg_popup_protocol_grab(struct wl_client *client,
-		struct wl_resource *resource, struct wl_resource *seat_resource,
-		uint32_t serial) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
-	struct wlr_seat_client *seat_client = wl_resource_get_user_data(seat_resource);
-
-	if (surface->popup_state->committed) {
-		wl_resource_post_error(surface->popup_state->resource,
-			ZXDG_POPUP_V6_ERROR_INVALID_GRAB,
-			"xdg_popup is already mapped");
-		return;
-	}
-
-	struct wlr_xdg_popup_grab_v6 *popup_grab =
-		xdg_shell_popup_grab_from_seat(surface->client->shell,
-			seat_client->seat);
-
-	struct wlr_xdg_surface_v6 *topmost = xdg_popup_grab_get_topmost(popup_grab);
-	bool parent_is_toplevel =
-		surface->popup_state->parent->role == WLR_XDG_SURFACE_V6_ROLE_TOPLEVEL;
-
-	if ((topmost == NULL && !parent_is_toplevel) ||
-			(topmost != NULL && topmost != surface->popup_state->parent)) {
-		wl_resource_post_error(surface->client->resource,
-			ZXDG_SHELL_V6_ERROR_NOT_THE_TOPMOST_POPUP,
-			"xdg_popup was not created on the topmost popup");
-		return;
-	}
-
-	popup_grab->client = surface->client->client;
-	surface->popup_state->seat = seat_client->seat;
-
-	wl_list_insert(&popup_grab->popups, &surface->popup_state->grab_link);
-
-	wlr_seat_pointer_start_grab(seat_client->seat,
-		&popup_grab->pointer_grab);
-	wlr_seat_keyboard_start_grab(seat_client->seat,
-		&popup_grab->keyboard_grab);
-}
-
-static const struct zxdg_popup_v6_interface zxdg_popup_v6_implementation = {
-	.destroy = resource_destroy,
-	.grab = xdg_popup_protocol_grab,
-};
-
 
 static struct wlr_box xdg_positioner_get_geometry(
 		struct wlr_xdg_positioner_v6 *positioner,
@@ -455,11 +420,78 @@ static struct wlr_box xdg_positioner_get_geometry(
 	return geometry;
 }
 
+
+static const struct zxdg_popup_v6_interface zxdg_popup_v6_implementation;
+
+static struct wlr_xdg_surface_v6 *xdg_surface_from_xdg_popup_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &zxdg_popup_v6_interface,
+		&zxdg_popup_v6_implementation));
+	return wl_resource_get_user_data(resource);
+}
+
+static void xdg_popup_protocol_grab(struct wl_client *client,
+		struct wl_resource *resource, struct wl_resource *seat_resource,
+		uint32_t serial) {
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_popup_resource(resource);
+	struct wlr_seat_client *seat_client =
+		wlr_seat_client_from_resource(seat_resource);
+
+	if (surface->popup_state->committed) {
+		wl_resource_post_error(surface->popup_state->resource,
+			ZXDG_POPUP_V6_ERROR_INVALID_GRAB,
+			"xdg_popup is already mapped");
+		return;
+	}
+
+	struct wlr_xdg_popup_grab_v6 *popup_grab =
+		xdg_shell_popup_grab_from_seat(surface->client->shell,
+			seat_client->seat);
+
+	struct wlr_xdg_surface_v6 *topmost = xdg_popup_grab_get_topmost(popup_grab);
+	bool parent_is_toplevel =
+		surface->popup_state->parent->role == WLR_XDG_SURFACE_V6_ROLE_TOPLEVEL;
+
+	if ((topmost == NULL && !parent_is_toplevel) ||
+			(topmost != NULL && topmost != surface->popup_state->parent)) {
+		wl_resource_post_error(surface->client->resource,
+			ZXDG_SHELL_V6_ERROR_NOT_THE_TOPMOST_POPUP,
+			"xdg_popup was not created on the topmost popup");
+		return;
+	}
+
+	popup_grab->client = surface->client->client;
+	surface->popup_state->seat = seat_client->seat;
+
+	wl_list_insert(&popup_grab->popups, &surface->popup_state->grab_link);
+
+	wlr_seat_pointer_start_grab(seat_client->seat,
+		&popup_grab->pointer_grab);
+	wlr_seat_keyboard_start_grab(seat_client->seat,
+		&popup_grab->keyboard_grab);
+}
+
+static const struct zxdg_popup_v6_interface zxdg_popup_v6_implementation = {
+	.destroy = resource_destroy,
+	.grab = xdg_popup_protocol_grab,
+};
+
 static void xdg_popup_resource_destroy(struct wl_resource *resource) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_popup_resource(resource);
 	if (surface != NULL) {
 		xdg_surface_destroy(surface);
 	}
+}
+
+static const struct zxdg_surface_v6_interface zxdg_surface_v6_implementation;
+
+static struct wlr_xdg_surface_v6 *xdg_surface_from_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &zxdg_surface_v6_interface,
+		&zxdg_surface_v6_implementation));
+	return wl_resource_get_user_data(resource);
 }
 
 static void xdg_surface_get_popup(struct wl_client *client,
@@ -467,11 +499,11 @@ static void xdg_surface_get_popup(struct wl_client *client,
 		struct wl_resource *parent_resource,
 		struct wl_resource *positioner_resource) {
 	struct wlr_xdg_surface_v6 *surface =
-		wl_resource_get_user_data(resource);
+		xdg_surface_from_resource(resource);
 	struct wlr_xdg_surface_v6 *parent =
-		wl_resource_get_user_data(parent_resource);
+		xdg_surface_from_resource(parent_resource);
 	struct wlr_xdg_positioner_v6 *positioner =
-		wl_resource_get_user_data(positioner_resource);
+		xdg_positioner_from_resource(positioner_resource);
 
 	if (positioner->size.width == 0 || positioner->anchor_rect.width == 0) {
 		wl_resource_post_error(resource,
@@ -505,22 +537,33 @@ static void xdg_surface_get_popup(struct wl_client *client,
 	surface->popup_state->parent = parent;
 	surface->popup_state->geometry =
 		xdg_positioner_get_geometry(positioner, surface, parent);
-	wl_list_insert(&surface->popup_state->parent->popups,
-		&surface->popup_link);
+	wl_list_insert(&parent->popups, &surface->popup_state->link);
 
 	wl_resource_set_implementation(surface->popup_state->resource,
 		&zxdg_popup_v6_implementation, surface,
 		xdg_popup_resource_destroy);
+
+	wlr_signal_emit_safe(&parent->events.new_popup, surface->popup_state);
 }
 
 
+static const struct zxdg_toplevel_v6_interface zxdg_toplevel_v6_implementation;
+
+static struct wlr_xdg_surface_v6 *xdg_surface_from_xdg_toplevel_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &zxdg_toplevel_v6_interface,
+		&zxdg_toplevel_v6_implementation));
+	return wl_resource_get_user_data(resource);
+}
+
 static void xdg_toplevel_protocol_set_parent(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *parent_resource) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
-	struct wlr_xdg_surface_v6 *parent = NULL;
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
 
+	struct wlr_xdg_surface_v6 *parent = NULL;
 	if (parent_resource != NULL) {
-		parent = wl_resource_get_user_data(parent_resource);
+		parent = xdg_surface_from_xdg_toplevel_resource(parent_resource);
 	}
 
 	surface->toplevel_state->parent = parent;
@@ -528,10 +571,10 @@ static void xdg_toplevel_protocol_set_parent(struct wl_client *client,
 
 static void xdg_toplevel_protocol_set_title(struct wl_client *client,
 		struct wl_resource *resource, const char *title) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
-	char *tmp;
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
 
-	tmp = strdup(title);
+	char *tmp = strdup(title);
 	if (tmp == NULL) {
 		return;
 	}
@@ -542,10 +585,10 @@ static void xdg_toplevel_protocol_set_title(struct wl_client *client,
 
 static void xdg_toplevel_protocol_set_app_id(struct wl_client *client,
 		struct wl_resource *resource, const char *app_id) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
-	char *tmp;
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
 
-	tmp = strdup(app_id);
+	char *tmp = strdup(app_id);
 	if (tmp == NULL) {
 		return;
 	}
@@ -557,9 +600,10 @@ static void xdg_toplevel_protocol_set_app_id(struct wl_client *client,
 static void xdg_toplevel_protocol_show_window_menu(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *seat_resource,
 		uint32_t serial, int32_t x, int32_t y) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
 	struct wlr_seat_client *seat =
-		wl_resource_get_user_data(seat_resource);
+		wlr_seat_client_from_resource(seat_resource);
 
 	if (!surface->configured) {
 		wl_resource_post_error(surface->toplevel_state->resource,
@@ -581,15 +625,16 @@ static void xdg_toplevel_protocol_show_window_menu(struct wl_client *client,
 		.y = y,
 	};
 
-	wl_signal_emit(&surface->events.request_show_window_menu, &event);
+	wlr_signal_emit_safe(&surface->events.request_show_window_menu, &event);
 }
 
 static void xdg_toplevel_protocol_move(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *seat_resource,
 		uint32_t serial) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
 	struct wlr_seat_client *seat =
-		wl_resource_get_user_data(seat_resource);
+		wlr_seat_client_from_resource(seat_resource);
 
 	if (!surface->configured) {
 		wl_resource_post_error(surface->toplevel_state->resource,
@@ -609,15 +654,16 @@ static void xdg_toplevel_protocol_move(struct wl_client *client,
 		.serial = serial,
 	};
 
-	wl_signal_emit(&surface->events.request_move, &event);
+	wlr_signal_emit_safe(&surface->events.request_move, &event);
 }
 
 static void xdg_toplevel_protocol_resize(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *seat_resource,
 		uint32_t serial, uint32_t edges) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
 	struct wlr_seat_client *seat =
-		wl_resource_get_user_data(seat_resource);
+		wlr_seat_client_from_resource(seat_resource);
 
 	if (!surface->configured) {
 		wl_resource_post_error(surface->toplevel_state->resource,
@@ -638,44 +684,49 @@ static void xdg_toplevel_protocol_resize(struct wl_client *client,
 		.edges = edges,
 	};
 
-	wl_signal_emit(&surface->events.request_resize, &event);
+	wlr_signal_emit_safe(&surface->events.request_resize, &event);
 }
 
 static void xdg_toplevel_protocol_set_max_size(struct wl_client *client,
 		struct wl_resource *resource, int32_t width, int32_t height) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
 	surface->toplevel_state->next.max_width = width;
 	surface->toplevel_state->next.max_height = height;
 }
 
 static void xdg_toplevel_protocol_set_min_size(struct wl_client *client,
 		struct wl_resource *resource, int32_t width, int32_t height) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
 	surface->toplevel_state->next.min_width = width;
 	surface->toplevel_state->next.min_height = height;
 }
 
 static void xdg_toplevel_protocol_set_maximized(struct wl_client *client,
 		struct wl_resource *resource) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
 	surface->toplevel_state->next.maximized = true;
-	wl_signal_emit(&surface->events.request_maximize, surface);
+	wlr_signal_emit_safe(&surface->events.request_maximize, surface);
 }
 
 static void xdg_toplevel_protocol_unset_maximized(struct wl_client *client,
 		struct wl_resource *resource) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
 	surface->toplevel_state->next.maximized = false;
-	wl_signal_emit(&surface->events.request_maximize, surface);
+	wlr_signal_emit_safe(&surface->events.request_maximize, surface);
 }
 
 static void xdg_toplevel_protocol_set_fullscreen(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *output_resource) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
 
 	struct wlr_output *output = NULL;
 	if (output_resource != NULL) {
-		output = wl_resource_get_user_data(output_resource);
+		output = wlr_output_from_resource(output_resource);
 	}
 
 	surface->toplevel_state->next.fullscreen = true;
@@ -686,12 +737,13 @@ static void xdg_toplevel_protocol_set_fullscreen(struct wl_client *client,
 		.output = output,
 	};
 
-	wl_signal_emit(&surface->events.request_fullscreen, &event);
+	wlr_signal_emit_safe(&surface->events.request_fullscreen, &event);
 }
 
 static void xdg_toplevel_protocol_unset_fullscreen(struct wl_client *client,
 		struct wl_resource *resource) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
 
 	surface->toplevel_state->next.fullscreen = false;
 
@@ -701,13 +753,14 @@ static void xdg_toplevel_protocol_unset_fullscreen(struct wl_client *client,
 		.output = NULL,
 	};
 
-	wl_signal_emit(&surface->events.request_fullscreen, &event);
+	wlr_signal_emit_safe(&surface->events.request_fullscreen, &event);
 }
 
 static void xdg_toplevel_protocol_set_minimized(struct wl_client *client,
 		struct wl_resource *resource) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
-	wl_signal_emit(&surface->events.request_minimize, surface);
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
+	wlr_signal_emit_safe(&surface->events.request_minimize, surface);
 }
 
 static const struct zxdg_toplevel_v6_interface zxdg_toplevel_v6_implementation =
@@ -729,14 +782,15 @@ static const struct zxdg_toplevel_v6_interface zxdg_toplevel_v6_implementation =
 };
 
 static void xdg_surface_resource_destroy(struct wl_resource *resource) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface = xdg_surface_from_resource(resource);
 	if (surface != NULL) {
 		xdg_surface_destroy(surface);
 	}
 }
 
 static void xdg_toplevel_resource_destroy(struct wl_resource *resource) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface =
+		xdg_surface_from_xdg_toplevel_resource(resource);
 	if (surface != NULL) {
 		xdg_surface_destroy(surface);
 	}
@@ -744,7 +798,7 @@ static void xdg_toplevel_resource_destroy(struct wl_resource *resource) {
 
 static void xdg_surface_get_toplevel(struct wl_client *client,
 		struct wl_resource *resource, uint32_t id) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface = xdg_surface_from_resource(resource);
 
 	if (wlr_surface_set_role(surface->surface, wlr_desktop_xdg_toplevel_role,
 			resource, ZXDG_SHELL_V6_ERROR_ROLE)) {
@@ -786,7 +840,7 @@ static void wlr_xdg_toplevel_v6_ack_configure(
 
 static void xdg_surface_ack_configure(struct wl_client *client,
 		struct wl_resource *resource, uint32_t serial) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface = xdg_surface_from_resource(resource);
 
 	if (surface->role == WLR_XDG_SURFACE_V6_ROLE_NONE) {
 		wl_resource_post_error(surface->resource,
@@ -836,7 +890,7 @@ static void xdg_surface_ack_configure(struct wl_client *client,
 static void xdg_surface_set_window_geometry(struct wl_client *client,
 		struct wl_resource *resource, int32_t x, int32_t y, int32_t width,
 		int32_t height) {
-	struct wlr_xdg_surface_v6 *surface = wl_resource_get_user_data(resource);
+	struct wlr_xdg_surface_v6 *surface = xdg_surface_from_resource(resource);
 
 	if (surface->role == WLR_XDG_SURFACE_V6_ROLE_NONE) {
 		wl_resource_post_error(surface->resource,
@@ -865,9 +919,7 @@ static bool wlr_xdg_surface_v6_toplevel_state_compare(
 		struct wlr_xdg_toplevel_v6 *state) {
 	struct {
 		struct wlr_xdg_toplevel_v6_state state;
-		uint32_t width;
-		uint32_t height;
-
+		uint32_t width, height;
 	} configured;
 
 	// is pending state different from current state?
@@ -1122,15 +1174,24 @@ static void handle_wlr_surface_committed(struct wlr_surface *wlr_surface,
 
 	if (surface->configured && !surface->added) {
 		surface->added = true;
-		wl_signal_emit(&surface->client->shell->events.new_surface, surface);
+		wlr_signal_emit_safe(&surface->client->shell->events.new_surface, surface);
 	}
+}
+
+static const struct zxdg_shell_v6_interface xdg_shell_impl;
+
+static struct wlr_xdg_client_v6 *xdg_client_from_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &zxdg_shell_v6_interface,
+		&xdg_shell_impl));
+	return wl_resource_get_user_data(resource);
 }
 
 static void xdg_shell_get_xdg_surface(struct wl_client *wl_client,
 		struct wl_resource *client_resource, uint32_t id,
 		struct wl_resource *surface_resource) {
 	struct wlr_xdg_client_v6 *client =
-		wl_resource_get_user_data(client_resource);
+		xdg_client_from_resource(client_resource);
 
 	struct wlr_xdg_surface_v6 *surface;
 	if (!(surface = calloc(1, sizeof(struct wlr_xdg_surface_v6)))) {
@@ -1153,7 +1214,7 @@ static void xdg_shell_get_xdg_surface(struct wl_client *wl_client,
 
 	surface->client = client;
 	surface->role = WLR_XDG_SURFACE_V6_ROLE_NONE;
-	surface->surface = wl_resource_get_user_data(surface_resource);
+	surface->surface = wlr_surface_from_resource(surface_resource);
 	surface->resource = wl_resource_create(wl_client,
 		&zxdg_surface_v6_interface, wl_resource_get_version(client_resource),
 		id);
@@ -1187,6 +1248,7 @@ static void xdg_shell_get_xdg_surface(struct wl_client *wl_client,
 	wl_signal_init(&surface->events.request_show_window_menu);
 	wl_signal_init(&surface->events.destroy);
 	wl_signal_init(&surface->events.ping_timeout);
+	wl_signal_init(&surface->events.new_popup);
 
 	wl_signal_add(&surface->surface->events.destroy,
 		&surface->surface_destroy_listener);
@@ -1203,7 +1265,7 @@ static void xdg_shell_get_xdg_surface(struct wl_client *wl_client,
 
 static void xdg_shell_pong(struct wl_client *wl_client,
 		struct wl_resource *resource, uint32_t serial) {
-	struct wlr_xdg_client_v6 *client = wl_resource_get_user_data(resource);
+	struct wlr_xdg_client_v6 *client = xdg_client_from_resource(resource);
 
 	if (client->ping_serial != serial) {
 		return;
@@ -1213,7 +1275,7 @@ static void xdg_shell_pong(struct wl_client *wl_client,
 	client->ping_serial = 0;
 }
 
-static struct zxdg_shell_v6_interface xdg_shell_impl = {
+static const struct zxdg_shell_v6_interface xdg_shell_impl = {
 	.destroy = resource_destroy,
 	.create_positioner = xdg_shell_create_positioner,
 	.get_xdg_surface = xdg_shell_get_xdg_surface,
@@ -1221,7 +1283,7 @@ static struct zxdg_shell_v6_interface xdg_shell_impl = {
 };
 
 static void wlr_xdg_client_v6_destroy(struct wl_resource *resource) {
-	struct wlr_xdg_client_v6 *client = wl_resource_get_user_data(resource);
+	struct wlr_xdg_client_v6 *client = xdg_client_from_resource(resource);
 
 	struct wlr_xdg_surface_v6 *surface, *tmp = NULL;
 	wl_list_for_each_safe(surface, tmp, &client->surfaces, link) {
@@ -1241,7 +1303,7 @@ static int wlr_xdg_client_v6_ping_timeout(void *user_data) {
 
 	struct wlr_xdg_surface_v6 *surface;
 	wl_list_for_each(surface, &client->surfaces, link) {
-		wl_signal_emit(&surface->events.ping_timeout, surface);
+		wlr_signal_emit_safe(&surface->events.ping_timeout, surface);
 	}
 
 	client->ping_serial = 0;
@@ -1404,14 +1466,16 @@ struct wlr_xdg_surface_v6 *wlr_xdg_surface_v6_popup_at(
 	// XXX: I think this is so complicated because we're mixing geometry
 	// coordinates with surface coordinates. Input handling should only deal
 	// with surface coordinates.
-	struct wlr_xdg_surface_v6 *popup;
-	wl_list_for_each(popup, &surface->popups, popup_link) {
+	struct wlr_xdg_popup_v6 *popup_state;
+	wl_list_for_each(popup_state, &surface->popups, link) {
+		struct wlr_xdg_surface_v6 *popup = popup_state->base;
+
 		double _popup_sx =
-			surface->geometry->x + popup->popup_state->geometry.x;
+			surface->geometry->x + popup_state->geometry.x;
 		double _popup_sy =
-			surface->geometry->y + popup->popup_state->geometry.y;
-		int popup_width =  popup->popup_state->geometry.width;
-		int popup_height =  popup->popup_state->geometry.height;
+			surface->geometry->y + popup_state->geometry.y;
+		int popup_width =  popup_state->geometry.width;
+		int popup_height =  popup_state->geometry.height;
 
 		struct wlr_xdg_surface_v6 *_popup =
 			wlr_xdg_surface_v6_popup_at(popup,

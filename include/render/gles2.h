@@ -1,13 +1,13 @@
 #ifndef RENDER_GLES2_H
 #define RENDER_GLES2_H
 
-#include <stdint.h>
-#include <string.h>
-#include <stdbool.h>
-#include <GLES2/gl2.h>
-#include <GLES2/gl2ext.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
 #include <wlr/backend.h>
 #include <wlr/render.h>
 #include <wlr/render/egl.h>
@@ -62,7 +62,7 @@ extern const GLchar fragment_src_external[];
 
 bool _gles2_flush_errors(const char *file, int line);
 #define gles2_flush_errors(...) \
-	_gles2_flush_errors(_strip_path(__FILE__), __LINE__)
+	_gles2_flush_errors(wlr_strip_path(__FILE__), __LINE__)
 
 #define GL_CALL(func) func; gles2_flush_errors()
 

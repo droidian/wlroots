@@ -1,8 +1,9 @@
-#ifndef WLR_EGL_H
-#define WLR_EGL_H
+#ifndef WLR_RENDER_EGL_H
+#define WLR_RENDER_EGL_H
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <pixman.h>
 #include <stdbool.h>
 #include <wayland-server.h>
 
@@ -11,8 +12,13 @@ struct wlr_egl {
 	EGLConfig config;
 	EGLContext context;
 
-	const char *egl_exts;
-	const char *gl_exts;
+	const char *egl_exts_str;
+	const char *gl_exts_str;
+
+	struct {
+		bool buffer_age;
+		bool swap_buffers_with_damage;
+	} egl_exts;
 
 	struct wl_display *wl_display;
 };
@@ -64,5 +70,11 @@ bool wlr_egl_destroy_image(struct wlr_egl *egl, EGLImageKHR image);
  * Returns a string for the last error ocurred with egl.
  */
 const char *egl_error(void);
+
+bool wlr_egl_make_current(struct wlr_egl *egl, EGLSurface surface,
+	int *buffer_age);
+
+bool wlr_egl_swap_buffers(struct wlr_egl *egl, EGLSurface surface,
+	pixman_region32_t *damage);
 
 #endif

@@ -1,27 +1,31 @@
-#include <stdio.h>
 #include <assert.h>
+#include <GLES2/gl2.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/types.h>
 #include <sys/mman.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <wayland-client.h>
-#include <GLES2/gl2.h>
 #include <wlr/interfaces/wlr_output.h>
 #include <wlr/util/log.h>
 #include "backend/wayland.h"
+#include "util/signal.h"
 #include "xdg-shell-unstable-v6-client-protocol.h"
 
 int os_create_anonymous_file(off_t size);
 
 static struct wl_callback_listener frame_listener;
 
-static void surface_frame_callback(void *data, struct wl_callback *cb, uint32_t time) {
-	struct wlr_output *wlr_output = data;
-	assert(wlr_output);
-	wl_signal_emit(&wlr_output->events.frame, wlr_output);
+static void surface_frame_callback(void *data, struct wl_callback *cb,
+		uint32_t time) {
+	struct wlr_wl_backend_output *output = data;
+	assert(output);
 	wl_callback_destroy(cb);
+	output->frame_callback = NULL;
+
+	wlr_output_send_frame(&output->wlr_output);
 }
 
 static struct wl_callback_listener frame_listener = {
@@ -36,22 +40,29 @@ static bool wlr_wl_output_set_custom_mode(struct wlr_output *_output,
 	return true;
 }
 
-static void wlr_wl_output_make_current(struct wlr_output *_output) {
-	struct wlr_wl_backend_output *output = (struct wlr_wl_backend_output *)_output;
-	if (!eglMakeCurrent(output->backend->egl.display,
-		output->egl_surface, output->egl_surface,
-		output->backend->egl.context)) {
-		wlr_log(L_ERROR, "eglMakeCurrent failed: %s", egl_error());
-	}
+static bool wlr_wl_output_make_current(struct wlr_output *wlr_output,
+		int *buffer_age) {
+	struct wlr_wl_backend_output *output =
+		(struct wlr_wl_backend_output *)wlr_output;
+	return wlr_egl_make_current(&output->backend->egl, output->egl_surface,
+		buffer_age);
 }
 
-static void wlr_wl_output_swap_buffers(struct wlr_output *_output) {
-	struct wlr_wl_backend_output *output = (struct wlr_wl_backend_output *)_output;
+static bool wlr_wl_output_swap_buffers(struct wlr_output *wlr_output,
+		pixman_region32_t *damage) {
+	struct wlr_wl_backend_output *output =
+		(struct wlr_wl_backend_output *)wlr_output;
+
+	if (output->frame_callback != NULL) {
+		wlr_log(L_ERROR, "Skipping buffer swap");
+		return false;
+	}
+
 	output->frame_callback = wl_surface_frame(output->surface);
 	wl_callback_add_listener(output->frame_callback, &frame_listener, output);
-	if (!eglSwapBuffers(output->backend->egl.display, output->egl_surface)) {
-		wlr_log(L_ERROR, "eglSwapBuffers failed: %s", egl_error());
-	}
+
+	return wlr_egl_swap_buffers(&output->backend->egl, output->egl_surface,
+		damage);
 }
 
 static void wlr_wl_output_transform(struct wlr_output *_output,
@@ -148,11 +159,12 @@ static bool wlr_wl_output_set_cursor(struct wlr_output *_output,
 	return true;
 }
 
-static void wlr_wl_output_destroy(struct wlr_output *_output) {
+static void wlr_wl_output_destroy(struct wlr_output *wlr_output) {
 	struct wlr_wl_backend_output *output =
-		(struct wlr_wl_backend_output *)_output;
-	wl_signal_emit(&output->backend->backend.events.output_remove,
-		&output->wlr_output);
+		(struct wlr_wl_backend_output *)wlr_output;
+	if (output == NULL) {
+		return;
+	}
 
 	wl_list_remove(&output->link);
 
@@ -327,7 +339,7 @@ struct wlr_output *wlr_wl_output_create(struct wlr_backend *_backend) {
 
 	wl_list_insert(&backend->outputs, &output->link);
 	wlr_output_update_enabled(wlr_output, true);
-	wl_signal_emit(&backend->backend.events.output_add, wlr_output);
+	wlr_signal_emit_safe(&backend->backend.events.new_output, wlr_output);
 	return wlr_output;
 
 error:

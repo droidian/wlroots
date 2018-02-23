@@ -1,17 +1,36 @@
 #define _XOPEN_SOURCE 700
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <assert.h>
 #include <unistd.h>
 #include <wayland-server.h>
-#include <wlr/util/log.h>
-#include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_seat.h>
+#include <wlr/util/log.h>
+#include "util/signal.h"
 
 #define ALL_ACTIONS (WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY | \
 		WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE | \
 		WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK)
+
+static const struct wl_data_offer_interface data_offer_impl;
+
+static struct wlr_data_offer *data_offer_from_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &wl_data_offer_interface,
+		&data_offer_impl));
+	return wl_resource_get_user_data(resource);
+}
+
+static const struct wl_data_source_interface data_source_impl;
+
+static struct client_data_source *client_data_source_from_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &wl_data_source_interface,
+		&data_source_impl));
+	return wl_resource_get_user_data(resource);
+}
 
 static uint32_t data_offer_choose_action(struct wlr_data_offer *offer) {
 	uint32_t offer_actions, preferred_action = 0;
@@ -77,7 +96,7 @@ static void data_offer_update_action(struct wlr_data_offer *offer) {
 
 static void data_offer_accept(struct wl_client *client,
 		struct wl_resource *resource, uint32_t serial, const char *mime_type) {
-	struct wlr_data_offer *offer = wl_resource_get_user_data(resource);
+	struct wlr_data_offer *offer = data_offer_from_resource(resource);
 
 	if (!offer->source || offer != offer->source->offer) {
 		return;
@@ -93,7 +112,7 @@ static void data_offer_accept(struct wl_client *client,
 
 static void data_offer_receive(struct wl_client *client,
 		struct wl_resource *resource, const char *mime_type, int32_t fd) {
-	struct wlr_data_offer *offer = wl_resource_get_user_data(resource);
+	struct wlr_data_offer *offer = data_offer_from_resource(resource);
 
 	if (offer->source && offer == offer->source->offer) {
 		offer->source->send(offer->source, mime_type, fd);
@@ -125,7 +144,7 @@ static void data_source_notify_finish(struct wlr_data_source *source) {
 
 static void data_offer_finish(struct wl_client *client,
 		struct wl_resource *resource) {
-	struct wlr_data_offer *offer = wl_resource_get_user_data(resource);
+	struct wlr_data_offer *offer = data_offer_from_resource(resource);
 
 	if (!offer->source || offer->source->offer != offer) {
 		return;
@@ -137,7 +156,7 @@ static void data_offer_finish(struct wl_client *client,
 static void data_offer_set_actions(struct wl_client *client,
 		struct wl_resource *resource, uint32_t actions,
 		uint32_t preferred_action) {
-	struct wlr_data_offer *offer = wl_resource_get_user_data(resource);
+	struct wlr_data_offer *offer = data_offer_from_resource(resource);
 
 	if (actions & ~ALL_ACTIONS) {
 		wl_resource_post_error(offer->resource,
@@ -161,7 +180,7 @@ static void data_offer_set_actions(struct wl_client *client,
 }
 
 static void data_offer_resource_destroy(struct wl_resource *resource) {
-	struct wlr_data_offer *offer = wl_resource_get_user_data(resource);
+	struct wlr_data_offer *offer = data_offer_from_resource(resource);
 
 	if (!offer->source) {
 		goto out;
@@ -290,7 +309,7 @@ static void seat_client_selection_data_source_destroy(
 
 	seat->selection_data_source = NULL;
 
-	wl_signal_emit(&seat->events.selection, seat);
+	wlr_signal_emit_safe(&seat->events.selection, seat);
 }
 
 void wlr_seat_set_selection(struct wlr_seat *seat,
@@ -321,7 +340,7 @@ void wlr_seat_set_selection(struct wlr_seat *seat,
 		wlr_seat_client_send_selection(focused_client);
 	}
 
-	wl_signal_emit(&seat->events.selection, seat);
+	wlr_signal_emit_safe(&seat->events.selection, seat);
 
 	if (source) {
 		seat->selection_data_source_destroy.notify =
@@ -331,16 +350,25 @@ void wlr_seat_set_selection(struct wlr_seat *seat,
 	}
 }
 
+static const struct wl_data_device_interface data_device_impl;
+
+static struct wlr_seat_client *seat_client_from_data_device_resource(
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &wl_data_device_interface,
+		&data_device_impl));
+	return wl_resource_get_user_data(resource);
+}
+
 static void data_device_set_selection(struct wl_client *client,
-		struct wl_resource *dd_resource, struct wl_resource *source_resource,
-		uint32_t serial) {
+		struct wl_resource *device_resource,
+		struct wl_resource *source_resource, uint32_t serial) {
 	struct client_data_source *source = NULL;
 	if (source_resource != NULL) {
-		source = wl_resource_get_user_data(source_resource);
+		source = client_data_source_from_resource(source_resource);
 	}
 
 	struct wlr_seat_client *seat_client =
-		wl_resource_get_user_data(dd_resource);
+		seat_client_from_data_device_resource(device_resource);
 
 	struct wlr_data_source *wlr_source = (struct wlr_data_source *)source;
 	wlr_seat_set_selection(seat_client->seat, wlr_source, serial);
@@ -457,6 +485,7 @@ static void wlr_drag_end(struct wlr_drag *drag) {
 		if (drag->icon) {
 			drag->icon->mapped = false;
 			wl_list_remove(&drag->icon_destroy.link);
+			wlr_signal_emit_safe(&drag->icon->events.map, drag->icon);
 		}
 
 		free(drag);
@@ -633,7 +662,7 @@ static void wlr_drag_icon_destroy(struct wlr_drag_icon *icon) {
 	if (!icon) {
 		return;
 	}
-	wl_signal_emit(&icon->events.destroy, icon);
+	wlr_signal_emit_safe(&icon->events.destroy, icon);
 	wlr_surface_set_role_committed(icon->surface, NULL, NULL);
 	wl_list_remove(&icon->surface_destroy.link);
 	wl_list_remove(&icon->seat_client_destroy.link);
@@ -676,8 +705,8 @@ static struct wlr_drag_icon *wlr_drag_icon_create(
 	icon->is_pointer = is_pointer;
 	icon->touch_id = touch_id;
 	icon->mapped = true;
-	wl_list_insert(&client->seat->drag_icons, &icon->link);
 
+	wl_signal_init(&icon->events.map);
 	wl_signal_init(&icon->events.destroy);
 
 	wl_signal_add(&icon->surface->events.destroy, &icon->surface_destroy);
@@ -688,6 +717,9 @@ static struct wlr_drag_icon *wlr_drag_icon_create(
 
 	wl_signal_add(&client->events.destroy, &icon->seat_client_destroy);
 	icon->seat_client_destroy.notify = handle_drag_icon_seat_client_destroy;
+
+	wl_list_insert(&client->seat->drag_icons, &icon->link);
+	wlr_signal_emit_safe(&client->seat->events.new_drag_icon, icon);
 
 	return icon;
 }
@@ -778,17 +810,19 @@ static void data_device_start_drag(struct wl_client *client,
 		struct wl_resource *origin_resource, struct wl_resource *icon_resource,
 		uint32_t serial) {
 	struct wlr_seat_client *seat_client =
-		wl_resource_get_user_data(device_resource);
-	struct wlr_surface *origin = wl_resource_get_user_data(origin_resource);
+		seat_client_from_data_device_resource(device_resource);
+	struct wlr_surface *origin = wlr_surface_from_resource(origin_resource);
 	struct wlr_data_source *source = NULL;
 	struct wlr_surface *icon = NULL;
 
 	if (source_resource) {
-		source = wl_resource_get_user_data(source_resource);
+		struct client_data_source *client_source =
+			client_data_source_from_resource(source_resource);
+		source = (struct wlr_data_source *)client_source;
 	}
 
 	if (icon_resource) {
-		icon = wl_resource_get_user_data(icon_resource);
+		icon = wlr_surface_from_resource(icon_resource);
 	}
 	if (icon) {
 		if (wlr_surface_set_role(icon, "wl_data_device-icon",
@@ -871,7 +905,7 @@ static void data_source_destroy(struct wl_client *client,
 static void data_source_set_actions(struct wl_client *client,
 		struct wl_resource *resource, uint32_t dnd_actions) {
 	struct client_data_source *source =
-		wl_resource_get_user_data(resource);
+		client_data_source_from_resource(resource);
 
 	if (source->source.actions >= 0) {
 		wl_resource_post_error(source->resource,
@@ -900,7 +934,8 @@ static void data_source_set_actions(struct wl_client *client,
 
 static void data_source_offer(struct wl_client *client,
 		struct wl_resource *resource, const char *mime_type) {
-	struct client_data_source *source = wl_resource_get_user_data(resource);
+	struct client_data_source *source =
+		client_data_source_from_resource(resource);
 
 	char **p = wl_array_add(&source->source.mime_types, sizeof(*p));
 	if (p) {
@@ -914,14 +949,15 @@ static void data_source_offer(struct wl_client *client,
 	}
 }
 
-static struct wl_data_source_interface data_source_impl = {
+static const struct wl_data_source_interface data_source_impl = {
 	.offer = data_source_offer,
 	.destroy = data_source_destroy,
 	.set_actions = data_source_set_actions,
 };
 
 static void data_source_resource_handle_destroy(struct wl_resource *resource) {
-	struct client_data_source *source = wl_resource_get_user_data(resource);
+	struct client_data_source *source =
+		client_data_source_from_resource(resource);
 	wlr_data_source_finish(&source->source);
 	free(source);
 }
@@ -937,7 +973,7 @@ void wlr_data_source_finish(struct wlr_data_source *source) {
 		return;
 	}
 
-	wl_signal_emit(&source->events.destroy, source);
+	wlr_signal_emit_safe(&source->events.destroy, source);
 
 	char **p;
 	wl_array_for_each(p, &source->mime_types) {
@@ -951,7 +987,7 @@ void data_device_manager_get_data_device(struct wl_client *client,
 		struct wl_resource *manager_resource, uint32_t id,
 		struct wl_resource *seat_resource) {
 	struct wlr_seat_client *seat_client =
-		wl_resource_get_user_data(seat_resource);
+		wlr_seat_client_from_resource(seat_resource);
 
 	struct wl_resource *resource = wl_resource_create(client,
 		&wl_data_device_interface, wl_resource_get_version(manager_resource),

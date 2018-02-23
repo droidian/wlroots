@@ -2,9 +2,9 @@
 #define WLR_INTERFACES_WLR_OUTPUT_H
 
 #include <stdbool.h>
+#include <wlr/backend.h>
 #include <wlr/types/wlr_box.h>
 #include <wlr/types/wlr_output.h>
-#include <wlr/backend.h>
 
 struct wlr_output_impl {
 	void (*enable)(struct wlr_output *output, bool enable);
@@ -18,8 +18,8 @@ struct wlr_output_impl {
 		int32_t hotspot_x, int32_t hotspot_y, bool update_pixels);
 	bool (*move_cursor)(struct wlr_output *output, int x, int y);
 	void (*destroy)(struct wlr_output *output);
-	void (*make_current)(struct wlr_output *output);
-	void (*swap_buffers)(struct wlr_output *output);
+	bool (*make_current)(struct wlr_output *output, int *buffer_age);
+	bool (*swap_buffers)(struct wlr_output *output, pixman_region32_t *damage);
 	void (*set_gamma)(struct wlr_output *output,
 		uint32_t size, uint16_t *r, uint16_t *g, uint16_t *b);
 	uint32_t (*get_gamma_size)(struct wlr_output *output);
@@ -32,5 +32,7 @@ void wlr_output_update_mode(struct wlr_output *output,
 void wlr_output_update_custom_mode(struct wlr_output *output, int32_t width,
 	int32_t height, int32_t refresh);
 void wlr_output_update_enabled(struct wlr_output *output, bool enabled);
+void wlr_output_update_needs_swap(struct wlr_output *output);
+void wlr_output_send_frame(struct wlr_output *output);
 
 #endif

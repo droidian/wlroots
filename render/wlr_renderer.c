@@ -1,5 +1,5 @@
-#include <stdlib.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <wlr/render/interface.h>
 
 void wlr_renderer_init(struct wlr_renderer *renderer,
@@ -21,6 +21,14 @@ void wlr_renderer_begin(struct wlr_renderer *r, struct wlr_output *o) {
 
 void wlr_renderer_end(struct wlr_renderer *r) {
 	r->impl->end(r);
+}
+
+void wlr_renderer_clear(struct wlr_renderer *r, const float (*color)[4]) {
+	r->impl->clear(r, color);
+}
+
+void wlr_renderer_scissor(struct wlr_renderer *r, struct wlr_box *box) {
+	r->impl->scissor(r, box);
 }
 
 struct wlr_texture *wlr_render_texture_create(struct wlr_renderer *r) {

@@ -1,10 +1,11 @@
-#include <stdlib.h>
 #include <assert.h>
 #include <libinput.h>
-#include <wlr/backend/session.h>
+#include <stdlib.h>
 #include <wlr/backend/interface.h>
+#include <wlr/backend/session.h>
 #include <wlr/util/log.h>
 #include "backend/libinput.h"
+#include "util/signal.h"
 
 static int wlr_libinput_open_restricted(const char *path,
 		int flags, void *_backend) {
@@ -95,22 +96,23 @@ static bool wlr_libinput_backend_start(struct wlr_backend *_backend) {
 	return true;
 }
 
-static void wlr_libinput_backend_destroy(struct wlr_backend *_backend) {
-	if (!_backend) {
+static void wlr_libinput_backend_destroy(struct wlr_backend *wlr_backend) {
+	if (!wlr_backend) {
 		return;
 	}
 	struct wlr_libinput_backend *backend =
-		(struct wlr_libinput_backend *)_backend;
+		(struct wlr_libinput_backend *)wlr_backend;
 
 	for (size_t i = 0; i < backend->wlr_device_lists.length; i++) {
 		struct wl_list *wlr_devices = backend->wlr_device_lists.items[i];
 		struct wlr_input_device *wlr_dev, *next;
 		wl_list_for_each_safe(wlr_dev, next, wlr_devices, link) {
-			wl_signal_emit(&backend->backend.events.input_remove, wlr_dev);
 			wlr_input_device_destroy(wlr_dev);
 		}
 		free(wlr_devices);
 	}
+
+	wlr_signal_emit_safe(&wlr_backend->events.destroy, wlr_backend);
 
 	wl_list_remove(&backend->display_destroy.link);
 	wl_list_remove(&backend->session_signal.link);

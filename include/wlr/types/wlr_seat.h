@@ -1,10 +1,11 @@
 #ifndef WLR_TYPES_WLR_SEAT_H
 #define WLR_TYPES_WLR_SEAT_H
+
 #include <time.h>
-#include <wlr/types/wlr_surface.h>
+#include <wayland-server.h>
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_keyboard.h>
-#include <wayland-server.h>
+#include <wlr/types/wlr_surface.h>
 
 /**
  * Contains state for a single client's bound wl_seat resource and can be used
@@ -208,6 +209,8 @@ struct wlr_seat {
 
 		struct wl_signal selection;
 		struct wl_signal primary_selection;
+
+		struct wl_signal new_drag_icon;
 
 		struct wl_signal destroy;
 	} events;
@@ -526,5 +529,7 @@ bool wlr_seat_touch_has_grab(struct wlr_seat *seat);
  * interactive move or resize.
  */
 bool wlr_seat_validate_grab_serial(struct wlr_seat *seat, uint32_t serial);
+
+struct wlr_seat_client *wlr_seat_client_from_resource(struct wl_resource *resource);
 
 #endif

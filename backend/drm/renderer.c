@@ -1,18 +1,16 @@
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <gbm.h>
+#include <GLES2/gl2.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <unistd.h>
-
-#include <gbm.h>
-#include <GLES2/gl2.h>
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
 #include <wayland-util.h>
-
-#include <wlr/util/log.h>
-#include <wlr/render/egl.h>
-#include <wlr/render/matrix.h>
-#include <wlr/render/gles2.h>
 #include <wlr/render.h>
+#include <wlr/render/egl.h>
+#include <wlr/render/gles2.h>
+#include <wlr/render/matrix.h>
+#include <wlr/util/log.h>
 #include "backend/drm/drm.h"
 #include "glapi.h"
 
@@ -128,17 +126,18 @@ void wlr_drm_surface_finish(struct wlr_drm_surface *surf) {
 	memset(surf, 0, sizeof(*surf));
 }
 
-void wlr_drm_surface_make_current(struct wlr_drm_surface *surf) {
-	eglMakeCurrent(surf->renderer->egl.display, surf->egl, surf->egl,
-		surf->renderer->egl.context);
+bool wlr_drm_surface_make_current(struct wlr_drm_surface *surf,
+		int *buffer_damage) {
+	return wlr_egl_make_current(&surf->renderer->egl, surf->egl, buffer_damage);
 }
 
-struct gbm_bo *wlr_drm_surface_swap_buffers(struct wlr_drm_surface *surf) {
+struct gbm_bo *wlr_drm_surface_swap_buffers(struct wlr_drm_surface *surf,
+		pixman_region32_t *damage) {
 	if (surf->front) {
 		gbm_surface_release_buffer(surf->gbm, surf->front);
 	}
 
-	eglSwapBuffers(surf->renderer->egl.display, surf->egl);
+	wlr_egl_swap_buffers(&surf->renderer->egl, surf->egl, damage);
 
 	surf->front = surf->back;
 	surf->back = gbm_surface_lock_front_buffer(surf->gbm);
@@ -150,11 +149,11 @@ struct gbm_bo *wlr_drm_surface_get_front(struct wlr_drm_surface *surf) {
 		return surf->front;
 	}
 
-	wlr_drm_surface_make_current(surf);
+	wlr_drm_surface_make_current(surf, NULL);
 	glViewport(0, 0, surf->width, surf->height);
 	glClearColor(0.0, 0.0, 0.0, 1.0);
 	glClear(GL_COLOR_BUFFER_BIT);
-	return wlr_drm_surface_swap_buffers(surf);
+	return wlr_drm_surface_swap_buffers(surf, NULL);
 }
 
 void wlr_drm_surface_post(struct wlr_drm_surface *surf) {
@@ -222,8 +221,9 @@ static struct wlr_texture *get_tex_for_bo(struct wlr_drm_renderer *renderer, str
 	return tex->tex;
 }
 
-struct gbm_bo *wlr_drm_surface_mgpu_copy(struct wlr_drm_surface *dest, struct gbm_bo *src) {
-	wlr_drm_surface_make_current(dest);
+struct gbm_bo *wlr_drm_surface_mgpu_copy(struct wlr_drm_surface *dest,
+		struct gbm_bo *src) {
+	wlr_drm_surface_make_current(dest, NULL);
 
 	struct wlr_texture *tex = get_tex_for_bo(dest->renderer, src);
 
@@ -241,7 +241,7 @@ struct gbm_bo *wlr_drm_surface_mgpu_copy(struct wlr_drm_surface *dest, struct gb
 	glClear(GL_COLOR_BUFFER_BIT);
 	wlr_render_with_matrix(dest->renderer->wlr_rend, tex, &matrix);
 
-	return wlr_drm_surface_swap_buffers(dest);
+	return wlr_drm_surface_swap_buffers(dest, NULL);
 }
 
 bool wlr_drm_plane_surfaces_init(struct wlr_drm_plane *plane, struct wlr_drm_backend *drm,

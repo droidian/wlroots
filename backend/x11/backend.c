@@ -1,28 +1,29 @@
 #define _POSIX_C_SOURCE 200112L
+#include <EGL/egl.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <EGL/egl.h>
 #include <wayland-server.h>
-#include <xcb/xcb.h>
-#include <xcb/glx.h>
+#include <wlr/backend/interface.h>
+#include <wlr/backend/x11.h>
+#include <wlr/interfaces/wlr_input_device.h>
+#include <wlr/interfaces/wlr_keyboard.h>
+#include <wlr/interfaces/wlr_output.h>
+#include <wlr/interfaces/wlr_pointer.h>
+#include <wlr/render/egl.h>
+#include <wlr/render/gles2.h>
+#include <wlr/util/log.h>
 #include <X11/Xlib-xcb.h>
+#include <xcb/glx.h>
+#include <xcb/xcb.h>
 #ifdef __linux__
 #include <linux/input-event-codes.h>
 #elif __FreeBSD__
 #include <dev/evdev/input-event-codes.h>
 #endif
-#include <wlr/backend/interface.h>
-#include <wlr/backend/x11.h>
-#include <wlr/render/egl.h>
-#include <wlr/render/gles2.h>
-#include <wlr/interfaces/wlr_output.h>
-#include <wlr/interfaces/wlr_input_device.h>
-#include <wlr/interfaces/wlr_keyboard.h>
-#include <wlr/interfaces/wlr_pointer.h>
-#include <wlr/util/log.h>
 #include "backend/x11.h"
+#include "util/signal.h"
 
 static struct wlr_backend_impl backend_impl;
 static struct wlr_output_impl output_impl;
@@ -45,7 +46,7 @@ static bool handle_x11_event(struct wlr_x11_backend *x11, xcb_generic_event_t *e
 
 	switch (event->response_type) {
 	case XCB_EXPOSE: {
-		wl_signal_emit(&output->wlr_output.events.frame, output);
+		wlr_output_send_frame(&output->wlr_output);
 		break;
 	}
 	case XCB_KEY_PRESS:
@@ -77,7 +78,7 @@ static bool handle_x11_event(struct wlr_x11_backend *x11, xcb_generic_event_t *e
 				.orientation = WLR_AXIS_ORIENTATION_VERTICAL,
 				.delta = delta,
 			};
-			wl_signal_emit(&x11->pointer.events.axis, &axis);
+			wlr_signal_emit_safe(&x11->pointer.events.axis, &axis);
 			x11->time = ev->time;
 			break;
 		}
@@ -96,7 +97,7 @@ static bool handle_x11_event(struct wlr_x11_backend *x11, xcb_generic_event_t *e
 					WLR_BUTTON_PRESSED : WLR_BUTTON_RELEASED,
 			};
 
-			wl_signal_emit(&x11->pointer.events.button, &button);
+			wlr_signal_emit_safe(&x11->pointer.events.button, &button);
 		}
 		x11->time = ev->time;
 		break;
@@ -112,7 +113,7 @@ static bool handle_x11_event(struct wlr_x11_backend *x11, xcb_generic_event_t *e
 			.height_mm = output->wlr_output.height,
 		};
 
-		wl_signal_emit(&x11->pointer.events.motion_absolute, &abs);
+		wlr_signal_emit_safe(&x11->pointer.events.motion_absolute, &abs);
 		x11->time = ev->time;
 		break;
 	}
@@ -140,7 +141,7 @@ static bool handle_x11_event(struct wlr_x11_backend *x11, xcb_generic_event_t *e
 			.height_mm = output->wlr_output.height,
 		};
 
-		wl_signal_emit(&x11->pointer.events.motion_absolute, &abs);
+		wlr_signal_emit_safe(&x11->pointer.events.motion_absolute, &abs);
 		break;
 	}
 	case XCB_GLX_DELETE_QUERIES_ARB: {
@@ -175,7 +176,7 @@ static int x11_event(int fd, uint32_t mask, void *data) {
 
 static int signal_frame(void *data) {
 	struct wlr_x11_backend *x11 = data;
-	wl_signal_emit(&x11->output.wlr_output.events.frame, &x11->output);
+	wlr_output_send_frame(&x11->output.wlr_output);
 	wl_event_source_timer_update(x11->frame_timer, 16);
 	return 0;
 }
@@ -220,18 +221,28 @@ static bool wlr_x11_backend_start(struct wlr_backend *backend) {
 
 	init_atom(x11, &x11->atoms.wm_protocols, 1, "WM_PROTOCOLS");
 	init_atom(x11, &x11->atoms.wm_delete_window, 0, "WM_DELETE_WINDOW");
+	init_atom(x11, &x11->atoms.net_wm_name, 1, "_NET_WM_NAME");
+	init_atom(x11, &x11->atoms.utf8_string, 0, "UTF8_STRING");
 
 	xcb_change_property(x11->xcb_conn, XCB_PROP_MODE_REPLACE, output->win,
 		x11->atoms.wm_protocols.reply->atom, XCB_ATOM_ATOM, 32, 1,
 		&x11->atoms.wm_delete_window.reply->atom);
 
+	char title[32];
+	if (snprintf(title, sizeof(title), "wlroots - %s", output->wlr_output.name)) {
+		xcb_change_property(x11->xcb_conn, XCB_PROP_MODE_REPLACE, output->win,
+			x11->atoms.net_wm_name.reply->atom,
+			x11->atoms.utf8_string.reply->atom, 8,
+			strlen(title), title);
+	}
+
 	xcb_map_window(x11->xcb_conn, output->win);
 	xcb_flush(x11->xcb_conn);
 	wlr_output_update_enabled(&output->wlr_output, true);
 
-	wl_signal_emit(&x11->backend.events.output_add, output);
-	wl_signal_emit(&x11->backend.events.input_add, &x11->keyboard_dev);
-	wl_signal_emit(&x11->backend.events.input_add, &x11->pointer_dev);
+	wlr_signal_emit_safe(&x11->backend.events.new_output, output);
+	wlr_signal_emit_safe(&x11->backend.events.new_input, &x11->keyboard_dev);
+	wlr_signal_emit_safe(&x11->backend.events.new_input, &x11->pointer_dev);
 
 	wl_event_source_timer_update(x11->frame_timer, 16);
 
@@ -248,8 +259,8 @@ static void wlr_x11_backend_destroy(struct wlr_backend *backend) {
 	struct wlr_x11_output *output = &x11->output;
 	wlr_output_destroy(&output->wlr_output);
 
-	wl_signal_emit(&backend->events.input_remove, &x11->pointer_dev);
-	wl_signal_emit(&backend->events.input_remove, &x11->keyboard_dev);
+	wlr_signal_emit_safe(&x11->pointer_dev.events.destroy, &x11->pointer_dev);
+	wlr_signal_emit_safe(&x11->keyboard_dev.events.destroy, &x11->keyboard_dev);
 	// TODO probably need to use wlr_keyboard_destroy, but the devices need to
 	// be malloced for that to work
 	if (x11->keyboard_dev.keyboard->keymap) {
@@ -258,6 +269,8 @@ static void wlr_x11_backend_destroy(struct wlr_backend *backend) {
 	if (x11->keyboard_dev.keyboard->xkb_state) {
 		xkb_state_unref(x11->keyboard_dev.keyboard->xkb_state);
 	}
+
+	wlr_signal_emit_safe(&backend->events.destroy, backend);
 
 	wl_list_remove(&x11->display_destroy.link);
 
@@ -392,22 +405,19 @@ static void output_destroy(struct wlr_output *wlr_output) {
 	// output has been allocated on the stack, do not free it
 }
 
-static void output_make_current(struct wlr_output *wlr_output) {
+static bool output_make_current(struct wlr_output *wlr_output, int *buffer_age) {
 	struct wlr_x11_output *output = (struct wlr_x11_output *)wlr_output;
 	struct wlr_x11_backend *x11 = output->x11;
 
-	if (!eglMakeCurrent(x11->egl.display, output->surf, output->surf, x11->egl.context)) {
-		wlr_log(L_ERROR, "eglMakeCurrent failed: %s", egl_error());
-	}
+	return wlr_egl_make_current(&x11->egl, output->surf, buffer_age);
 }
 
-static void output_swap_buffers(struct wlr_output *wlr_output) {
+static bool output_swap_buffers(struct wlr_output *wlr_output,
+		pixman_region32_t *damage) {
 	struct wlr_x11_output *output = (struct wlr_x11_output *)wlr_output;
 	struct wlr_x11_backend *x11 = output->x11;
 
-	if (!eglSwapBuffers(x11->egl.display, output->surf)) {
-		wlr_log(L_ERROR, "eglSwapBuffers failed: %s", egl_error());
-	}
+	return wlr_egl_swap_buffers(&x11->egl, output->surf, damage);
 }
 
 static struct wlr_output_impl output_impl = {

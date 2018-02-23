@@ -1,28 +1,30 @@
 #include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <inttypes.h>
-#include <errno.h>
-#include <time.h>
-#include <xf86drm.h>
-#include <xf86drmMode.h>
 #include <drm_mode.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <errno.h>
 #include <gbm.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 #include <wayland-server.h>
+#include <wayland-util.h>
 #include <wlr/backend/interface.h>
 #include <wlr/interfaces/wlr_output.h>
-#include <wlr/util/log.h>
-#include <wlr/render/matrix.h>
-#include <wlr/render/gles2.h>
 #include <wlr/render.h>
+#include <wlr/render/gles2.h>
+#include <wlr/render/matrix.h>
+#include <wlr/util/log.h>
+#include <xf86drm.h>
+#include <xf86drmMode.h>
 #include "backend/drm/drm.h"
 #include "backend/drm/iface.h"
 #include "backend/drm/util.h"
+#include "util/signal.h"
 
 bool wlr_drm_check_features(struct wlr_drm_backend *drm) {
 	if (drmSetClientCap(drm->fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1)) {
@@ -139,6 +141,7 @@ bool wlr_drm_resources_init(struct wlr_drm_backend *drm) {
 	for (size_t i = 0; i < drm->num_crtcs; ++i) {
 		struct wlr_drm_crtc *crtc = &drm->crtcs[i];
 		crtc->id = res->crtcs[i];
+		crtc->legacy_crtc = drmModeGetCrtc(drm->fd, crtc->id);
 		wlr_drm_get_crtc_props(drm->fd, crtc->id, &crtc->props);
 	}
 
@@ -165,8 +168,12 @@ void wlr_drm_resources_free(struct wlr_drm_backend *drm) {
 	for (size_t i = 0; i < drm->num_crtcs; ++i) {
 		struct wlr_drm_crtc *crtc = &drm->crtcs[i];
 		drmModeAtomicFree(crtc->atomic);
+		drmModeFreeCrtc(crtc->legacy_crtc);
 		if (crtc->mode_id) {
 			drmModeDestroyPropertyBlob(drm->fd, crtc->mode_id);
+		}
+		if (crtc->gamma_lut) {
+			drmModeDestroyPropertyBlob(drm->fd, crtc->gamma_lut);
 		}
 	}
 	for (size_t i = 0; i < drm->num_planes; ++i) {
@@ -183,47 +190,70 @@ void wlr_drm_resources_free(struct wlr_drm_backend *drm) {
 	free(drm->planes);
 }
 
-static void wlr_drm_connector_make_current(struct wlr_output *output) {
+static bool wlr_drm_connector_make_current(struct wlr_output *output,
+		int *buffer_age) {
 	struct wlr_drm_connector *conn = (struct wlr_drm_connector *)output;
-	wlr_drm_surface_make_current(&conn->crtc->primary->surf);
+	return wlr_drm_surface_make_current(&conn->crtc->primary->surf, buffer_age);
 }
 
-static void wlr_drm_connector_swap_buffers(struct wlr_output *output) {
+static bool wlr_drm_connector_swap_buffers(struct wlr_output *output,
+		pixman_region32_t *damage) {
 	struct wlr_drm_connector *conn = (struct wlr_drm_connector *)output;
 	struct wlr_drm_backend *drm = (struct wlr_drm_backend *)output->backend;
+	if (!drm->session->active) {
+		return false;
+	}
 
 	struct wlr_drm_crtc *crtc = conn->crtc;
 	if (!crtc) {
-		return;
+		return false;
 	}
 	struct wlr_drm_plane *plane = crtc->primary;
 
-	struct gbm_bo *bo = wlr_drm_surface_swap_buffers(&plane->surf);
+	struct gbm_bo *bo = wlr_drm_surface_swap_buffers(&plane->surf, damage);
 	if (drm->parent) {
 		bo = wlr_drm_surface_mgpu_copy(&plane->mgpu_surf, bo);
 	}
-
 	uint32_t fb_id = get_fb_for_bo(bo);
 
-	if (drm->iface->crtc_pageflip(drm, conn, crtc, fb_id, NULL)) {
-		conn->pageflip_pending = true;
-	} else {
-		wl_event_source_timer_update(conn->retry_pageflip,
-			1000.0f / conn->output.current_mode->refresh);
+	if (conn->pageflip_pending) {
+		wlr_log(L_ERROR, "Skipping pageflip");
+		return false;
 	}
+
+	if (!drm->iface->crtc_pageflip(drm, conn, crtc, fb_id, NULL)) {
+		return false;
+	}
+
+	conn->pageflip_pending = true;
+	wlr_output_update_enabled(output, true);
+	return true;
 }
 
 static void wlr_drm_connector_set_gamma(struct wlr_output *output,
 		uint32_t size, uint16_t *r, uint16_t *g, uint16_t *b) {
 	struct wlr_drm_connector *conn = (struct wlr_drm_connector *)output;
 	struct wlr_drm_backend *drm = (struct wlr_drm_backend *)output->backend;
-	drmModeCrtcSetGamma(drm->fd, conn->crtc->id, size, r, g, b);
+	bool ok;
+
+	if (conn->crtc) {
+		ok = drm->iface->crtc_set_gamma(drm, conn->crtc, r, g, b, size);
+		if (ok) {
+			wlr_output_update_needs_swap(output);
+		}
+	}
+
 }
 
 static uint32_t wlr_drm_connector_get_gamma_size(struct wlr_output *output) {
 	struct wlr_drm_connector *conn = (struct wlr_drm_connector *)output;
-	drmModeCrtc *crtc = conn->old_crtc;
-	return crtc ? crtc->gamma_size : 0;
+	struct wlr_drm_backend *drm = (struct wlr_drm_backend *)output->backend;
+
+	if (conn->crtc) {
+		return drm->iface->crtc_get_gamma_size(drm, conn->crtc);
+	}
+
+	return 0;
 }
 
 void wlr_drm_connector_start_renderer(struct wlr_drm_connector *conn) {
@@ -245,9 +275,10 @@ void wlr_drm_connector_start_renderer(struct wlr_drm_connector *conn) {
 	struct wlr_drm_mode *mode = (struct wlr_drm_mode *)conn->output.current_mode;
 	if (drm->iface->crtc_pageflip(drm, conn, crtc, fb_id, &mode->drm_mode)) {
 		conn->pageflip_pending = true;
+		wlr_output_update_enabled(&conn->output, true);
 	} else {
 		wl_event_source_timer_update(conn->retry_pageflip,
-			1000.0f / conn->output.current_mode->refresh);
+			1000000.0f / conn->output.current_mode->refresh);
 	}
 }
 
@@ -528,6 +559,9 @@ static bool wlr_drm_connector_set_cursor(struct wlr_output *output,
 	if (!buf && update_pixels) {
 		// Hide the cursor
 		plane->cursor_enabled = false;
+		if (!drm->session->active) {
+			return true;
+		}
 		return drm->iface->crtc_set_cursor(drm, crtc, NULL);
 	}
 	plane->cursor_enabled = true;
@@ -574,17 +608,15 @@ static bool wlr_drm_connector_set_cursor(struct wlr_output *output,
 	}
 
 	struct wlr_box hotspot = {
-		.width = plane->surf.width,
-		.height = plane->surf.height,
 		.x = hotspot_x,
 		.y = hotspot_y,
 	};
 	enum wl_output_transform transform =
 		wlr_output_transform_invert(output->transform);
-	struct wlr_box transformed_hotspot;
-	wlr_box_transform(&hotspot, transform, &transformed_hotspot);
-	plane->cursor_hotspot_x = transformed_hotspot.x;
-	plane->cursor_hotspot_y = transformed_hotspot.y;
+	wlr_box_transform(&hotspot, transform,
+		plane->surf.width, plane->surf.height, &hotspot);
+	plane->cursor_hotspot_x = hotspot.x;
+	plane->cursor_hotspot_y = hotspot.y;
 
 	if (!update_pixels) {
 		// Only update the cursor hotspot
@@ -603,7 +635,7 @@ static bool wlr_drm_connector_set_cursor(struct wlr_output *output,
 		return false;
 	}
 
-	wlr_drm_surface_make_current(&plane->surf);
+	wlr_drm_surface_make_current(&plane->surf, NULL);
 
 	wlr_texture_upload_pixels(plane->wlr_tex, WL_SHM_FORMAT_ARGB8888,
 		stride, width, height, buf);
@@ -623,39 +655,56 @@ static bool wlr_drm_connector_set_cursor(struct wlr_output *output,
 		GL_UNSIGNED_BYTE, bo_data);
 	glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, 0);
 
-	wlr_drm_surface_swap_buffers(&plane->surf);
+	wlr_drm_surface_swap_buffers(&plane->surf, NULL);
 
 	gbm_bo_unmap(bo, bo_data);
 
-	return drm->iface->crtc_set_cursor(drm, crtc, bo);
+	if (!drm->session->active) {
+		return true;
+	}
+
+	bool ok = drm->iface->crtc_set_cursor(drm, crtc, bo);
+	if (ok) {
+		wlr_output_update_needs_swap(output);
+	}
+	return ok;
 }
 
 static bool wlr_drm_connector_move_cursor(struct wlr_output *output,
 		int x, int y) {
 	struct wlr_drm_connector *conn = (struct wlr_drm_connector *)output;
 	struct wlr_drm_backend *drm = (struct wlr_drm_backend *)output->backend;
-	if (!conn || !conn->crtc) {
+	if (!conn->crtc) {
 		return false;
 	}
 	struct wlr_drm_plane *plane = conn->crtc->cursor;
 
-	struct wlr_box box;
-	box.x = x;
-	box.y = y;
-	wlr_output_effective_resolution(output, &box.width, &box.height);
+	struct wlr_box box = { .x = x, .y = y };
+
+	int width, height;
+	wlr_output_transformed_resolution(output, &width, &height);
 
 	enum wl_output_transform transform =
 		wlr_output_transform_invert(output->transform);
-	struct wlr_box transformed_box;
-	wlr_box_transform(&box, transform, &transformed_box);
+	wlr_box_transform(&box, transform, width, height, &box);
 
 	if (plane != NULL) {
-		transformed_box.x -= plane->cursor_hotspot_x;
-		transformed_box.y -= plane->cursor_hotspot_y;
+		box.x -= plane->cursor_hotspot_x;
+		box.y -= plane->cursor_hotspot_y;
 	}
 
-	return drm->iface->crtc_move_cursor(drm, conn->crtc, transformed_box.x,
-		transformed_box.y);
+	conn->cursor_x = box.x;
+	conn->cursor_y = box.y;
+
+	if (!drm->session->active) {
+		return true;
+	}
+
+	bool ok = drm->iface->crtc_move_cursor(drm, conn->crtc, box.x, box.y);
+	if (ok) {
+		wlr_output_update_needs_swap(output);
+	}
+	return ok;
 }
 
 static void wlr_drm_connector_destroy(struct wlr_output *output) {
@@ -757,21 +806,10 @@ void wlr_drm_scan_connectors(struct wlr_drm_backend *drm) {
 				wlr_conn->old_crtc = drmModeGetCrtc(drm->fd, curr_enc->crtc_id);
 			}
 
-			wlr_conn->output.phys_width = drm_conn->mmWidth;
-			wlr_conn->output.phys_height = drm_conn->mmHeight;
-			wlr_conn->output.subpixel = subpixel_map[drm_conn->subpixel];
 			snprintf(wlr_conn->output.name, sizeof(wlr_conn->output.name),
 				"%s-%"PRIu32,
 				 conn_get_name(drm_conn->connector_type),
 				 drm_conn->connector_type_id);
-
-			wlr_drm_get_connector_props(drm->fd, wlr_conn->id, &wlr_conn->props);
-
-			size_t edid_len = 0;
-			uint8_t *edid = wlr_drm_get_prop_blob(drm->fd,
-				wlr_conn->id, wlr_conn->props.edid, &edid_len);
-			parse_edid(&wlr_conn->output, edid_len, edid);
-			free(edid);
 
 			wl_list_insert(&drm->outputs, &wlr_conn->link);
 			wlr_log(L_INFO, "Found display '%s'", wlr_conn->output.name);
@@ -793,6 +831,21 @@ void wlr_drm_scan_connectors(struct wlr_drm_backend *drm) {
 		if (wlr_conn->state == WLR_DRM_CONN_DISCONNECTED &&
 				drm_conn->connection == DRM_MODE_CONNECTED) {
 			wlr_log(L_INFO, "'%s' connected", wlr_conn->output.name);
+
+			wlr_conn->output.phys_width = drm_conn->mmWidth;
+			wlr_conn->output.phys_height = drm_conn->mmHeight;
+			wlr_log(L_INFO, "Physical size: %"PRId32"x%"PRId32,
+				wlr_conn->output.phys_width, wlr_conn->output.phys_height);
+			wlr_conn->output.subpixel = subpixel_map[drm_conn->subpixel];
+
+			wlr_drm_get_connector_props(drm->fd, wlr_conn->id, &wlr_conn->props);
+
+			size_t edid_len = 0;
+			uint8_t *edid = wlr_drm_get_prop_blob(drm->fd,
+				wlr_conn->id, wlr_conn->props.edid, &edid_len);
+			parse_edid(&wlr_conn->output, edid_len, edid);
+			free(edid);
+
 			wlr_log(L_INFO, "Detected modes:");
 
 			for (int i = 0; i < drm_conn->count_modes; ++i) {
@@ -818,7 +871,8 @@ void wlr_drm_scan_connectors(struct wlr_drm_backend *drm) {
 			wlr_conn->state = WLR_DRM_CONN_NEEDS_MODESET;
 			wlr_log(L_INFO, "Sending modesetting signal for '%s'",
 				wlr_conn->output.name);
-			wl_signal_emit(&drm->backend.events.output_add, &wlr_conn->output);
+			wlr_signal_emit_safe(&drm->backend.events.new_output,
+				&wlr_conn->output);
 		} else if (wlr_conn->state == WLR_DRM_CONN_CONNECTED &&
 				drm_conn->connection != DRM_MODE_CONNECTED) {
 			wlr_log(L_INFO, "'%s' disconnected", wlr_conn->output.name);
@@ -867,7 +921,7 @@ static void page_flip_handler(int fd, unsigned seq,
 	}
 
 	if (drm->session->active) {
-		wl_signal_emit(&conn->output.events.frame, &conn->output);
+		wlr_output_send_frame(&conn->output);
 	}
 }
 
@@ -926,8 +980,6 @@ void wlr_drm_connector_cleanup(struct wlr_drm_connector *conn) {
 		return;
 	}
 
-	struct wlr_drm_backend *drm = (struct wlr_drm_backend *)conn->output.backend;
-
 	switch (conn->state) {
 	case WLR_DRM_CONN_CONNECTED:
 	case WLR_DRM_CONN_CLEANUP:;
@@ -945,13 +997,24 @@ void wlr_drm_connector_cleanup(struct wlr_drm_connector *conn) {
 			}
 		}
 
+		struct wlr_drm_mode *mode;
+		struct wlr_drm_mode *tmp;
+		wl_list_for_each_safe(mode, tmp, &conn->output.modes, wlr_mode.link) {
+			wl_list_remove(&mode->wlr_mode.link);
+			free(mode);
+		}
+
+		memset(&conn->output.make, 0, sizeof(conn->output.make));
+		memset(&conn->output.model, 0, sizeof(conn->output.model));
+		memset(&conn->output.serial, 0, sizeof(conn->output.serial));
+
 		conn->crtc = NULL;
 		conn->possible_crtc = 0;
 		/* Fallthrough */
 	case WLR_DRM_CONN_NEEDS_MODESET:
 		wlr_log(L_INFO, "Emitting destruction signal for '%s'",
-				conn->output.name);
-		wl_signal_emit(&drm->backend.events.output_remove, &conn->output);
+			conn->output.name);
+		wlr_signal_emit_safe(&conn->output.events.destroy, &conn->output);
 		break;
 	case WLR_DRM_CONN_DISCONNECTED:
 		break;

@@ -1,10 +1,11 @@
-#include <stdlib.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
+#include <stdlib.h>
 #include <wlr/interfaces/wlr_output.h>
 #include <wlr/util/log.h>
 #include "backend/headless.h"
+#include "util/signal.h"
 
 static EGLSurface egl_create_surface(struct wlr_egl *egl, unsigned int width,
 		unsigned int height) {
@@ -48,25 +49,21 @@ static void output_transform(struct wlr_output *wlr_output,
 	output->wlr_output.transform = transform;
 }
 
-static void output_make_current(struct wlr_output *wlr_output) {
+static bool output_make_current(struct wlr_output *wlr_output, int *buffer_age) {
 	struct wlr_headless_output *output =
 		(struct wlr_headless_output *)wlr_output;
-	if (!eglMakeCurrent(output->backend->egl.display,
-		output->egl_surface, output->egl_surface,
-		output->backend->egl.context)) {
-		wlr_log(L_ERROR, "eglMakeCurrent failed: %s", egl_error());
-	}
+	return wlr_egl_make_current(&output->backend->egl, output->egl_surface,
+		buffer_age);
 }
 
-static void output_swap_buffers(struct wlr_output *wlr_output) {
-	// No-op
+static bool output_swap_buffers(struct wlr_output *wlr_output,
+		pixman_region32_t *damage) {
+	return true; // No-op
 }
 
 static void output_destroy(struct wlr_output *wlr_output) {
 	struct wlr_headless_output *output =
 		(struct wlr_headless_output *)wlr_output;
-	wl_signal_emit(&output->backend->backend.events.output_remove,
-		&output->wlr_output);
 
 	wl_list_remove(&output->link);
 
@@ -88,7 +85,7 @@ bool wlr_output_is_headless(struct wlr_output *wlr_output) {
 
 static int signal_frame(void *data) {
 	struct wlr_headless_output *output = data;
-	wl_signal_emit(&output->wlr_output.events.frame, &output->wlr_output);
+	wlr_output_send_frame(&output->wlr_output);
 	wl_event_source_timer_update(output->frame_timer, output->frame_delay);
 	return 0;
 }
@@ -140,7 +137,7 @@ struct wlr_output *wlr_headless_add_output(struct wlr_backend *wlr_backend,
 	if (backend->started) {
 		wl_event_source_timer_update(output->frame_timer, output->frame_delay);
 		wlr_output_update_enabled(wlr_output, true);
-		wl_signal_emit(&backend->backend.events.output_add, wlr_output);
+		wlr_signal_emit_safe(&backend->backend.events.new_output, wlr_output);
 	}
 
 	return wlr_output;

@@ -1,11 +1,12 @@
-#include <wlr/util/log.h>
-#include <wlr/types/wlr_output.h>
-#include <wlr/types/wlr_output_layout.h>
-#include <wlr/types/wlr_box.h>
-#include <limits.h>
-#include <float.h>
-#include <stdlib.h>
 #include <assert.h>
+#include <float.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <wlr/types/wlr_box.h>
+#include <wlr/types/wlr_output_layout.h>
+#include <wlr/types/wlr_output.h>
+#include <wlr/util/log.h>
+#include "util/signal.h"
 
 struct wlr_output_layout_state {
 	struct wlr_box _box; // should never be read directly, use the getter
@@ -46,7 +47,7 @@ struct wlr_output_layout *wlr_output_layout_create() {
 
 static void wlr_output_layout_output_destroy(
 		struct wlr_output_layout_output *l_output) {
-	wl_signal_emit(&l_output->events.destroy, l_output);
+	wlr_signal_emit_safe(&l_output->events.destroy, l_output);
 	wl_list_remove(&l_output->state->mode.link);
 	wl_list_remove(&l_output->state->scale.link);
 	wl_list_remove(&l_output->state->transform.link);
@@ -61,7 +62,7 @@ void wlr_output_layout_destroy(struct wlr_output_layout *layout) {
 		return;
 	}
 
-	wl_signal_emit(&layout->events.destroy, layout);
+	wlr_signal_emit_safe(&layout->events.destroy, layout);
 
 	struct wlr_output_layout_output *l_output, *temp = NULL;
 	wl_list_for_each_safe(l_output, temp, &layout->outputs, link) {
@@ -129,7 +130,7 @@ static void wlr_output_layout_reconfigure(struct wlr_output_layout *layout) {
 		wlr_output_set_position(l_output->output, l_output->x, l_output->y);
 	}
 
-	wl_signal_emit(&layout->events.change, layout);
+	wlr_signal_emit_safe(&layout->events.change, layout);
 }
 
 static void handle_output_mode(struct wl_listener *listener, void *data) {
@@ -204,7 +205,7 @@ void wlr_output_layout_add(struct wlr_output_layout *layout,
 	l_output->state->auto_configured = false;
 	wlr_output_layout_reconfigure(layout);
 	wlr_output_create_global(output);
-	wl_signal_emit(&layout->events.add, l_output);
+	wlr_signal_emit_safe(&layout->events.add, l_output);
 }
 
 struct wlr_output_layout_output *wlr_output_layout_get(
@@ -327,7 +328,11 @@ void wlr_output_layout_closest_point(struct wlr_output_layout *layout,
 		output_distance =
 			(x - output_x) * (x - output_x) + (y - output_y) * (y - output_y);
 
-		if (output_distance < min_distance) {
+		if (!isfinite(output_distance)) {
+			output_distance = DBL_MAX;
+		}
+
+		if (output_distance <= min_distance) {
 			min_x = output_x;
 			min_y = output_y;
 			min_distance = output_distance;
@@ -397,7 +402,7 @@ void wlr_output_layout_add_auto(struct wlr_output_layout *layout,
 	l_output->state->auto_configured = true;
 	wlr_output_layout_reconfigure(layout);
 	wlr_output_create_global(output);
-	wl_signal_emit(&layout->events.add, l_output);
+	wlr_signal_emit_safe(&layout->events.add, l_output);
 }
 
 struct wlr_output *wlr_output_layout_get_center_output(
@@ -415,4 +420,53 @@ struct wlr_output *wlr_output_layout_get_center_output(
 		&dest_x, &dest_y);
 
 	return wlr_output_layout_output_at(layout, dest_x, dest_y);
+}
+
+
+struct wlr_output *wlr_output_layout_adjacent_output(
+		struct wlr_output_layout *layout, enum wlr_direction direction,
+		struct wlr_output *reference, double ref_x, double ref_y) {
+	assert(reference);
+
+	struct wlr_box *ref_box = wlr_output_layout_get_box(layout, reference);
+
+	double min_distance = DBL_MAX;
+	struct wlr_output *closest_output = NULL;
+	struct wlr_output_layout_output *l_output;
+	wl_list_for_each(l_output, &layout->outputs, link) {
+		if (reference != NULL && reference == l_output->output) {
+			continue;
+		}
+		struct wlr_box *box = wlr_output_layout_output_get_box(l_output);
+
+		bool match = false;
+		// test to make sure this output is in the given direction
+		if (direction & WLR_DIRECTION_LEFT) {
+			match = box->x + box->width <= ref_box->x || match;
+		}
+		if (direction & WLR_DIRECTION_RIGHT) {
+			match = box->x >= ref_box->x + ref_box->width || match;
+		}
+		if (direction & WLR_DIRECTION_UP) {
+			match = box->y + box->height <= ref_box->y || match;
+		}
+		if (direction & WLR_DIRECTION_DOWN) {
+			match = box->y >= ref_box->y + ref_box->height || match;
+		}
+		if (!match) {
+			continue;
+		}
+
+		// calculate distance from the given reference point
+		double x, y;
+		wlr_output_layout_closest_point(layout, l_output->output,
+			ref_x, ref_y, &x, &y);
+		double distance =
+			(x - ref_x) * (x - ref_x) + (y - ref_y) * (y - ref_y);
+		if (distance < min_distance) {
+			min_distance = distance;
+			closest_output = l_output->output;
+		}
+	}
+	return closest_output;
 }

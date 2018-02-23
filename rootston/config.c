@@ -2,20 +2,20 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include <assert.h>
-#include <stdlib.h>
-#include <limits.h>
 #include <getopt.h>
+#include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <unistd.h>
 #include <sys/param.h>
+#include <unistd.h>
 #include <wlr/config.h>
-#include <wlr/util/log.h>
 #include <wlr/types/wlr_box.h>
+#include <wlr/util/log.h>
 #include "rootston/config.h"
+#include "rootston/ini.h"
 #include "rootston/input.h"
 #include "rootston/keyboard.h"
-#include "rootston/ini.h"
 
 static void usage(const char *name, int ret) {
 	fprintf(stderr,
@@ -281,7 +281,7 @@ static int config_ini_handler(void *user, const char *section, const char *name,
 			oc->y = strtol(value, NULL, 10);
 		} else if (strcmp(name, "scale") == 0) {
 			oc->scale = strtof(value, NULL);
-			assert(oc->scale >= 1);
+			assert(oc->scale > 0);
 		} else if (strcmp(name, "rotate") == 0) {
 			if (strcmp(value, "normal") == 0) {
 				oc->transform = WL_OUTPUT_TRANSFORM_NORMAL;

@@ -1,9 +1,10 @@
 #ifndef WLR_TYPES_WLR_SURFACE_H
 #define WLR_TYPES_WLR_SURFACE_H
-#include <stdint.h>
-#include <stdbool.h>
-#include <time.h>
+
 #include <pixman.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <time.h>
 #include <wayland-server.h>
 #include <wlr/types/wlr_output.h>
 
@@ -56,6 +57,10 @@ struct wlr_subsurface {
 	struct wl_list parent_pending_link;
 
 	struct wl_listener parent_destroy_listener;
+
+	struct {
+		struct wl_signal destroy;
+	} events;
 };
 
 struct wlr_surface {
@@ -70,6 +75,7 @@ struct wlr_surface {
 
 	struct {
 		struct wl_signal commit;
+		struct wl_signal new_subsurface;
 		struct wl_signal destroy;
 	} events;
 
@@ -157,5 +163,7 @@ void wlr_surface_send_frame_done(struct wlr_surface *surface,
 void wlr_surface_set_role_committed(struct wlr_surface *surface,
 		void (*role_committed)(struct wlr_surface *surface, void *role_data),
 		void *role_data);
+
+struct wlr_surface *wlr_surface_from_resource(struct wl_resource *resource);
 
 #endif
