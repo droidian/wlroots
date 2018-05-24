@@ -4,6 +4,7 @@
 #include <wayland-server.h>
 #include "rootston/input.h"
 #include "rootston/keyboard.h"
+#include "rootston/layers.h"
 
 struct roots_seat {
 	struct roots_input *input;
@@ -14,6 +15,12 @@ struct roots_seat {
 	// coordinates of the first touch point if it exists
 	int32_t touch_id;
 	double touch_x, touch_y;
+
+	// If the focused layer is set, views cannot receive keyboard focus
+	struct wlr_layer_surface *focused_layer;
+
+	// If non-null, only this client can receive input events
+	struct wl_client *exclusive_client;
 
 	struct wl_list views; // roots_seat_view::link
 	bool has_focus;
@@ -39,6 +46,7 @@ struct roots_seat_view {
 
 	struct wl_list link; // roots_seat::views
 
+	struct wl_listener view_unmap;
 	struct wl_listener view_destroy;
 };
 
@@ -99,6 +107,9 @@ struct roots_view *roots_seat_get_focus(struct roots_seat *seat);
 
 void roots_seat_set_focus(struct roots_seat *seat, struct roots_view *view);
 
+void roots_seat_set_focus_layer(struct roots_seat *seat,
+		struct wlr_layer_surface *layer);
+
 void roots_seat_cycle_focus(struct roots_seat *seat);
 
 void roots_seat_begin_move(struct roots_seat *seat, struct roots_view *view);
@@ -116,5 +127,11 @@ struct roots_seat_view *roots_seat_view_from_view( struct roots_seat *seat,
 void roots_drag_icon_update_position(struct roots_drag_icon *icon);
 
 void roots_drag_icon_damage_whole(struct roots_drag_icon *icon);
+
+void roots_seat_set_exclusive_client(struct roots_seat *seat,
+		struct wl_client *client);
+
+bool roots_seat_allow_input(struct roots_seat *seat,
+		struct wl_resource *resource);
 
 #endif

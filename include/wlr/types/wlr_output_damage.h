@@ -3,6 +3,7 @@
 
 #include <pixman.h>
 #include <time.h>
+#include <wlr/types/wlr_box.h>
 #include <wlr/types/wlr_output.h>
 
 /**
@@ -22,6 +23,7 @@
  */
 struct wlr_output_damage {
 	struct wlr_output *output;
+	int max_rects; // max number of damaged rectangles
 
 	pixman_region32_t current; // in output-local coordinates
 

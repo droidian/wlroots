@@ -14,7 +14,7 @@
 
 void wlr_input_device_init(struct wlr_input_device *dev,
 		enum wlr_input_device_type type,
-		struct wlr_input_device_impl *impl,
+		const struct wlr_input_device_impl *impl,
 		const char *name, int vendor, int product) {
 	dev->type = type;
 	dev->impl = impl;
@@ -56,6 +56,7 @@ void wlr_input_device_destroy(struct wlr_input_device *dev) {
 		}
 	}
 	free(dev->name);
+	free(dev->output_name);
 	if (dev->impl && dev->impl->destroy) {
 		dev->impl->destroy(dev);
 	} else {

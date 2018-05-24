@@ -10,6 +10,7 @@
 #include <dev/evdev/input-event-codes.h>
 #endif
 #include "rootston/cursor.h"
+#include "rootston/desktop.h"
 #include "rootston/xcursor.h"
 
 struct roots_cursor *roots_cursor_create(struct roots_seat *seat) {
@@ -98,51 +99,62 @@ static void seat_view_deco_button(struct roots_seat_view *view, double sx,
 	}
 }
 
-static void roots_cursor_update_position(struct roots_cursor *cursor,
+static void roots_passthrough_cursor(struct roots_cursor *cursor,
 		uint32_t time) {
-	struct roots_desktop *desktop = cursor->seat->input->server->desktop;
-	struct roots_seat *seat = cursor->seat;
-	struct roots_view *view;
-	struct wlr_surface *surface = NULL;
 	double sx, sy;
-	switch (cursor->mode) {
-	case ROOTS_CURSOR_PASSTHROUGH:
-		view = desktop_view_at(desktop, cursor->cursor->x, cursor->cursor->y,
-			&surface, &sx, &sy);
+	struct roots_view *view = NULL;
+	struct roots_seat *seat = cursor->seat;
+	struct roots_desktop *desktop = seat->input->server->desktop;
+	struct wlr_surface *surface = desktop_surface_at(desktop,
+			cursor->cursor->x, cursor->cursor->y, &sx, &sy, &view);
+	struct wl_client *client = NULL;
+	if (surface) {
+		client = wl_resource_get_client(surface->resource);
+	}
+	if (surface && !roots_seat_allow_input(cursor->seat, surface->resource)) {
+		return;
+	}
+
+	if (cursor->cursor_client != client) {
+		wlr_xcursor_manager_set_cursor_image(cursor->xcursor_manager,
+			cursor->default_xcursor, cursor->cursor);
+		cursor->cursor_client = client;
+	}
+
+	if (view) {
 		struct roots_seat_view *seat_view =
 			roots_seat_view_from_view(seat, view);
-		if (cursor->pointer_view && (surface || seat_view != cursor->pointer_view)) {
+		if (cursor->pointer_view && (surface ||
+					seat_view != cursor->pointer_view)) {
 			seat_view_deco_leave(cursor->pointer_view);
 			cursor->pointer_view = NULL;
 		}
-		bool set_compositor_cursor = !view && !surface && cursor->cursor_client;
-		if (view && surface) {
-			struct wl_client *view_client =
-				wl_resource_get_client(view->wlr_surface->resource);
-			set_compositor_cursor = view_client != cursor->cursor_client;
+		if (!surface) {
+			cursor->pointer_view = seat_view;
+			seat_view_deco_motion(seat_view, sx, sy);
 		}
-		if (set_compositor_cursor) {
-			wlr_xcursor_manager_set_cursor_image(cursor->xcursor_manager,
-				cursor->default_xcursor, cursor->cursor);
-			cursor->cursor_client = NULL;
-		}
-		if (view && !surface) {
-			if (seat_view) {
-				cursor->pointer_view = seat_view;
-				seat_view_deco_motion(seat_view, sx, sy);
-			}
-		} if (view && surface) {
-			// motion over a view surface
-			wlr_seat_pointer_notify_enter(seat->seat, surface, sx, sy);
-			wlr_seat_pointer_notify_motion(seat->seat, time, sx, sy);
-		} else {
-			wlr_seat_pointer_clear_focus(seat->seat);
-		}
+	}
 
-		struct roots_drag_icon *drag_icon;
-		wl_list_for_each(drag_icon, &seat->drag_icons, link) {
-			roots_drag_icon_update_position(drag_icon);
-		}
+	if (surface) {
+		wlr_seat_pointer_notify_enter(seat->seat, surface, sx, sy);
+		wlr_seat_pointer_notify_motion(seat->seat, time, sx, sy);
+	} else {
+		wlr_seat_pointer_clear_focus(seat->seat);
+	}
+
+	struct roots_drag_icon *drag_icon;
+	wl_list_for_each(drag_icon, &seat->drag_icons, link) {
+		roots_drag_icon_update_position(drag_icon);
+	}
+}
+
+static void roots_cursor_update_position(
+		struct roots_cursor *cursor, uint32_t time) {
+	struct roots_seat *seat = cursor->seat;
+	struct roots_view *view;
+	switch (cursor->mode) {
+	case ROOTS_CURSOR_PASSTHROUGH:
+		roots_passthrough_cursor(cursor, time);
 		break;
 	case ROOTS_CURSOR_MOVE:
 		view = roots_seat_get_focus(seat);
@@ -180,15 +192,9 @@ static void roots_cursor_update_position(struct roots_cursor *cursor,
 			} else if (cursor->resize_edges & WLR_EDGE_RIGHT) {
 				width += dx;
 			}
-
-			if (width < 1) {
-				width = 1;
-			}
-			if (height < 1) {
-				height = 1;
-			}
-
-			view_move_resize(view, x, y, width, height);
+			view_move_resize(view, x, y,
+					width < 1 ? 1 : width,
+					height < 1 ? 1 : height);
 		}
 		break;
 	case ROOTS_CURSOR_ROTATE:
@@ -200,7 +206,7 @@ static void roots_cursor_update_position(struct roots_cursor *cursor,
 				uy = cursor->offs_y - oy;
 			int vx = cursor->cursor->x - ox,
 				vy = cursor->cursor->y - oy;
-			float angle = atan2(vx*uy - vy*ux, vx*ux + vy*uy);
+			float angle = atan2(ux*vy - uy*vx, vx*ux + vy*uy);
 			int steps = 12;
 			angle = round(angle/M_PI*steps) / (steps/M_PI);
 			view_rotate(view, cursor->view_rotation + angle);
@@ -214,15 +220,15 @@ static void roots_cursor_press_button(struct roots_cursor *cursor,
 		uint32_t state, double lx, double ly) {
 	struct roots_seat *seat = cursor->seat;
 	struct roots_desktop *desktop = seat->input->server->desktop;
+
 	bool is_touch = device->type == WLR_INPUT_DEVICE_TOUCH;
 
-	struct wlr_surface *surface = NULL;
 	double sx, sy;
-	struct roots_view *view =
-		desktop_view_at(desktop, lx, ly, &surface, &sx, &sy);
+	struct roots_view *view;
+	struct wlr_surface *surface = desktop_surface_at(desktop,
+			lx, ly, &sx, &sy, &view);
 
-	if (state == WLR_BUTTON_PRESSED &&
-			view &&
+	if (state == WLR_BUTTON_PRESSED && view &&
 			roots_seat_has_meta_pressed(seat)) {
 		roots_seat_set_focus(seat, view);
 
@@ -250,11 +256,9 @@ static void roots_cursor_press_button(struct roots_cursor *cursor,
 			break;
 		}
 	} else {
-
-		if (view && !surface) {
-			if (cursor->pointer_view) {
-				seat_view_deco_button(cursor->pointer_view, sx, sy, button, state);
-			}
+		if (view && !surface && cursor->pointer_view) {
+			seat_view_deco_button(cursor->pointer_view,
+					sx, sy, button, state);
 		}
 
 		if (state == WLR_BUTTON_RELEASED &&
@@ -270,6 +274,13 @@ static void roots_cursor_press_button(struct roots_cursor *cursor,
 			break;
 		case WLR_BUTTON_PRESSED:
 			roots_seat_set_focus(seat, view);
+			if (surface && wlr_surface_is_layer_surface(surface)) {
+				struct wlr_layer_surface *layer =
+					wlr_layer_surface_from_wlr_surface(surface);
+				if (layer->current.keyboard_interactive) {
+					roots_seat_set_focus_layer(seat, layer);
+				}
+			}
 			break;
 		}
 	}
@@ -288,8 +299,8 @@ void roots_cursor_handle_motion(struct roots_cursor *cursor,
 
 void roots_cursor_handle_motion_absolute(struct roots_cursor *cursor,
 		struct wlr_event_pointer_motion_absolute *event) {
-	wlr_cursor_warp_absolute(cursor->cursor, event->device,
-		event->x_mm / event->width_mm, event->y_mm / event->height_mm);
+	wlr_cursor_warp_absolute(cursor->cursor,
+			event->device, event->x, event->y);
 	roots_cursor_update_position(cursor, event->time_msec);
 }
 
@@ -302,26 +313,22 @@ void roots_cursor_handle_button(struct roots_cursor *cursor,
 void roots_cursor_handle_axis(struct roots_cursor *cursor,
 		struct wlr_event_pointer_axis *event) {
 	wlr_seat_pointer_notify_axis(cursor->seat->seat, event->time_msec,
-		event->orientation, event->delta);
+		event->orientation, event->delta, event->delta_discrete, event->source);
 }
 
 void roots_cursor_handle_touch_down(struct roots_cursor *cursor,
 		struct wlr_event_touch_down *event) {
 	struct roots_desktop *desktop = cursor->seat->input->server->desktop;
-	struct wlr_surface *surface = NULL;
 	double lx, ly;
-	bool result =
-		wlr_cursor_absolute_to_layout_coords(cursor->cursor,
-			event->device, event->x_mm, event->y_mm, event->width_mm,
-			event->height_mm, &lx, &ly);
-	if (!result) {
-		return;
-	}
+	wlr_cursor_absolute_to_layout_coords(cursor->cursor, event->device,
+		event->x, event->y, &lx, &ly);
+
 	double sx, sy;
-	desktop_view_at(desktop, lx, ly, &surface, &sx, &sy);
+	struct wlr_surface *surface = desktop_surface_at(
+			desktop, lx, ly, &sx, &sy, NULL);
 
 	uint32_t serial = 0;
-	if (surface) {
+	if (surface && roots_seat_allow_input(cursor->seat, surface->resource)) {
 		serial = wlr_seat_touch_notify_down(cursor->seat->seat, surface,
 			event->time_msec, event->touch_id, sx, sy);
 	}
@@ -361,20 +368,15 @@ void roots_cursor_handle_touch_motion(struct roots_cursor *cursor,
 		return;
 	}
 
-	struct wlr_surface *surface = NULL;
 	double lx, ly;
-	bool result =
-		wlr_cursor_absolute_to_layout_coords(cursor->cursor,
-			event->device, event->x_mm, event->y_mm, event->width_mm,
-			event->height_mm, &lx, &ly);
-	if (!result) {
-		return;
-	}
+	wlr_cursor_absolute_to_layout_coords(cursor->cursor, event->device,
+		event->x, event->y, &lx, &ly);
 
 	double sx, sy;
-	desktop_view_at(desktop, lx, ly, &surface, &sx, &sy);
+	struct wlr_surface *surface = desktop_surface_at(
+			desktop, lx, ly, &sx, &sy, NULL);
 
-	if (surface) {
+	if (surface && roots_seat_allow_input(cursor->seat, surface->resource)) {
 		wlr_seat_touch_point_focus(cursor->seat->seat, surface,
 			event->time_msec, event->touch_id, sx, sy);
 		wlr_seat_touch_notify_motion(cursor->seat->seat, event->time_msec,
@@ -395,15 +397,13 @@ void roots_cursor_handle_tool_axis(struct roots_cursor *cursor,
 	if ((event->updated_axes & WLR_TABLET_TOOL_AXIS_X) &&
 			(event->updated_axes & WLR_TABLET_TOOL_AXIS_Y)) {
 		wlr_cursor_warp_absolute(cursor->cursor, event->device,
-			event->x_mm / event->width_mm, event->y_mm / event->height_mm);
+			event->x, event->y);
 		roots_cursor_update_position(cursor, event->time_msec);
 	} else if ((event->updated_axes & WLR_TABLET_TOOL_AXIS_X)) {
-		wlr_cursor_warp_absolute(cursor->cursor, event->device,
-			event->x_mm / event->width_mm, -1);
+		wlr_cursor_warp_absolute(cursor->cursor, event->device, event->x, -1);
 		roots_cursor_update_position(cursor, event->time_msec);
 	} else if ((event->updated_axes & WLR_TABLET_TOOL_AXIS_Y)) {
-		wlr_cursor_warp_absolute(cursor->cursor, event->device,
-			-1, event->y_mm / event->height_mm);
+		wlr_cursor_warp_absolute(cursor->cursor, event->device, -1, event->y);
 		roots_cursor_update_position(cursor, event->time_msec);
 	}
 }
@@ -431,7 +431,6 @@ void roots_cursor_handle_request_set_cursor(struct roots_cursor *cursor,
 		return;
 	}
 
-	wlr_log(L_DEBUG, "Setting client cursor");
 	wlr_cursor_set_surface(cursor->cursor, event->surface, event->hotspot_x,
 		event->hotspot_y);
 	cursor->cursor_client = event->seat_client->client;

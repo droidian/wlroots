@@ -106,24 +106,23 @@ static void set_fullscreen(struct roots_view *view, bool fullscreen) {
 	wlr_xwayland_surface_set_fullscreen(view->xwayland_surface, fullscreen);
 }
 
-static void handle_destroy(struct wl_listener *listener, void *data) {
-	struct roots_xwayland_surface *roots_surface =
-		wl_container_of(listener, roots_surface, destroy);
-	struct wlr_xwayland_surface *xwayland_surface =
-		roots_surface->view->xwayland_surface;
+static void destroy(struct roots_view *view) {
+	assert(view->type == ROOTS_XWAYLAND_VIEW);
+	struct roots_xwayland_surface *roots_surface = view->roots_xwayland_surface;
 	wl_list_remove(&roots_surface->destroy.link);
 	wl_list_remove(&roots_surface->request_configure.link);
 	wl_list_remove(&roots_surface->request_move.link);
 	wl_list_remove(&roots_surface->request_resize.link);
 	wl_list_remove(&roots_surface->request_maximize.link);
-	wl_list_remove(&roots_surface->map_notify.link);
-	wl_list_remove(&roots_surface->unmap_notify.link);
-	if (xwayland_surface->mapped) {
-		wl_list_remove(&roots_surface->view->link);
-	}
-	view_finish(roots_surface->view);
-	free(roots_surface->view);
+	wl_list_remove(&roots_surface->map.link);
+	wl_list_remove(&roots_surface->unmap.link);
 	free(roots_surface);
+}
+
+static void handle_destroy(struct wl_listener *listener, void *data) {
+	struct roots_xwayland_surface *roots_surface =
+		wl_container_of(listener, roots_surface, destroy);
+	view_destroy(roots_surface->view);
 }
 
 static void handle_request_configure(struct wl_listener *listener, void *data) {
@@ -226,56 +225,44 @@ static void handle_surface_commit(struct wl_listener *listener, void *data) {
 	view_update_position(view, x, y);
 }
 
-static void handle_map_notify(struct wl_listener *listener, void *data) {
+static void handle_map(struct wl_listener *listener, void *data) {
 	struct roots_xwayland_surface *roots_surface =
-		wl_container_of(listener, roots_surface, map_notify);
-	struct wlr_xwayland_surface *xsurface = data;
+		wl_container_of(listener, roots_surface, map);
+	struct wlr_xwayland_surface *surface = data;
 	struct roots_view *view = roots_surface->view;
-	struct roots_desktop *desktop = view->desktop;
 
-	view->wlr_surface = xsurface->surface;
-	view->x = xsurface->x;
-	view->y = xsurface->y;
-	view->width = xsurface->surface->current->width;
-	view->height = xsurface->surface->current->height;
-	wl_list_insert(&desktop->views, &view->link);
-
-	struct wlr_subsurface *subsurface;
-	wl_list_for_each(subsurface, &view->wlr_surface->subsurface_list,
-			parent_link) {
-		subsurface_create(view, subsurface);
-	}
-
-	view_damage_whole(view);
+	view->x = surface->x;
+	view->y = surface->y;
+	view->width = surface->surface->current->width;
+	view->height = surface->surface->current->height;
 
 	roots_surface->surface_commit.notify = handle_surface_commit;
-	wl_signal_add(&xsurface->surface->events.commit,
+	wl_signal_add(&surface->surface->events.commit,
 		&roots_surface->surface_commit);
+
+	view_map(view, surface->surface);
+
+	if (!surface->override_redirect) {
+		if (surface->decorations == WLR_XWAYLAND_SURFACE_DECORATIONS_ALL) {
+			view->decorated = true;
+			view->border_width = 4;
+			view->titlebar_height = 12;
+		}
+
+		view_setup(view);
+	} else {
+		view_initial_focus(view);
+	}
 }
 
-static void handle_unmap_notify(struct wl_listener *listener, void *data) {
+static void handle_unmap(struct wl_listener *listener, void *data) {
 	struct roots_xwayland_surface *roots_surface =
-		wl_container_of(listener, roots_surface, unmap_notify);
+		wl_container_of(listener, roots_surface, unmap);
 	struct roots_view *view = roots_surface->view;
 
 	wl_list_remove(&roots_surface->surface_commit.link);
 
-	view_damage_whole(view);
-
-	struct roots_view_child *child, *tmp;
-	wl_list_for_each_safe(child, tmp, &view->children, link) {
-		child->destroy(child);
-	}
-
-	if (view->fullscreen_output != NULL) {
-		output_damage_whole(view->fullscreen_output);
-		view->fullscreen_output->fullscreen_view = NULL;
-		view->fullscreen_output = NULL;
-	}
-
-	view->wlr_surface = NULL;
-	view->width = view->height = 0;
-	wl_list_remove(&view->link);
+	view_unmap(view);
 }
 
 void handle_xwayland_surface(struct wl_listener *listener, void *data) {
@@ -285,6 +272,7 @@ void handle_xwayland_surface(struct wl_listener *listener, void *data) {
 	struct wlr_xwayland_surface *surface = data;
 	wlr_log(L_DEBUG, "new xwayland surface: title=%s, class=%s, instance=%s",
 		surface->title, surface->class, surface->instance);
+	wlr_xwayland_surface_ping(surface);
 
 	struct roots_xwayland_surface *roots_surface =
 		calloc(1, sizeof(struct roots_xwayland_surface));
@@ -297,10 +285,10 @@ void handle_xwayland_surface(struct wl_listener *listener, void *data) {
 	roots_surface->request_configure.notify = handle_request_configure;
 	wl_signal_add(&surface->events.request_configure,
 		&roots_surface->request_configure);
-	roots_surface->map_notify.notify = handle_map_notify;
-	wl_signal_add(&surface->events.map_notify, &roots_surface->map_notify);
-	roots_surface->unmap_notify.notify = handle_unmap_notify;
-	wl_signal_add(&surface->events.unmap_notify, &roots_surface->unmap_notify);
+	roots_surface->map.notify = handle_map;
+	wl_signal_add(&surface->events.map, &roots_surface->map);
+	roots_surface->unmap.notify = handle_unmap;
+	wl_signal_add(&surface->events.unmap, &roots_surface->unmap);
 	roots_surface->request_move.notify = handle_request_move;
 	wl_signal_add(&surface->events.request_move, &roots_surface->request_move);
 	roots_surface->request_resize.notify = handle_request_resize;
@@ -313,11 +301,7 @@ void handle_xwayland_surface(struct wl_listener *listener, void *data) {
 	wl_signal_add(&surface->events.request_fullscreen,
 		&roots_surface->request_fullscreen);
 
-	roots_surface->surface_commit.notify = handle_surface_commit;
-	wl_signal_add(&surface->surface->events.commit,
-		&roots_surface->surface_commit);
-
-	struct roots_view *view = calloc(1, sizeof(struct roots_view));
+	struct roots_view *view = view_create(desktop);
 	if (view == NULL) {
 		free(roots_surface);
 		return;
@@ -325,12 +309,9 @@ void handle_xwayland_surface(struct wl_listener *listener, void *data) {
 	view->type = ROOTS_XWAYLAND_VIEW;
 	view->x = (double)surface->x;
 	view->y = (double)surface->y;
-	view->width = surface->surface->current->width;
-	view->height = surface->surface->current->height;
 
 	view->xwayland_surface = surface;
 	view->roots_xwayland_surface = roots_surface;
-	view->wlr_surface = surface->surface;
 	view->activate = activate;
 	view->resize = resize;
 	view->move = move;
@@ -338,17 +319,6 @@ void handle_xwayland_surface(struct wl_listener *listener, void *data) {
 	view->maximize = maximize;
 	view->set_fullscreen = set_fullscreen;
 	view->close = close;
+	view->destroy = destroy;
 	roots_surface->view = view;
-	view_init(view, desktop);
-	wl_list_insert(&desktop->views, &view->link);
-
-	if (!surface->override_redirect) {
-		if (surface->decorations == WLR_XWAYLAND_SURFACE_DECORATIONS_ALL) {
-			view->decorated = true;
-			view->border_width = 4;
-			view->titlebar_height = 12;
-		}
-
-		view_setup(view);
-	}
 }

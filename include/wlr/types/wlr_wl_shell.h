@@ -142,12 +142,25 @@ void wlr_wl_shell_surface_configure(struct wlr_wl_shell_surface *surface,
 	enum wl_shell_surface_resize edges, int32_t width, int32_t height);
 
 /**
- * Find a popup within this surface at the surface-local coordinates. Returns
- * the popup and coordinates in the topmost surface coordinate system or NULL if
- * no popup is found at that location.
+ * Find a surface within this wl-shell surface tree at the given surface-local
+ * coordinates. Returns the surface and coordinates in the leaf surface
+ * coordinate system or NULL if no surface is found at that location.
  */
-struct wlr_wl_shell_surface *wlr_wl_shell_surface_popup_at(
+struct wlr_surface *wlr_wl_shell_surface_surface_at(
 		struct wlr_wl_shell_surface *surface, double sx, double sy,
-		double *popup_sx, double *popup_sy);
+		double *sub_sx, double *sub_sy);
+
+bool wlr_surface_is_wl_shell_surface(struct wlr_surface *surface);
+
+struct wlr_wl_surface *wlr_wl_shell_surface_from_wlr_surface(
+		struct wlr_surface *surface);
+
+/**
+ * Call `iterator` on each surface in the shell surface tree, with the surface's
+ * position relative to the root xdg-surface. The function is called from root to
+ * leaves (in rendering order).
+ */
+void wlr_wl_shell_surface_for_each_surface(struct wlr_wl_shell_surface *surface,
+	wlr_surface_iterator_func_t iterator, void *user_data);
 
 #endif

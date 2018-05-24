@@ -12,6 +12,17 @@
 
 static const char *wlr_wl_shell_surface_role = "wl-shell-surface";
 
+bool wlr_surface_is_wl_shell_surface(struct wlr_surface *surface) {
+	return surface->role != NULL &&
+		strcmp(surface->role, wlr_wl_shell_surface_role) == 0;
+}
+
+struct wlr_wl_surface *wlr_wl_shell_surface_from_wlr_surface(
+		struct wlr_surface *surface) {
+	assert(wlr_surface_is_wl_shell_surface(surface));
+	return (struct wlr_wl_surface *)surface->role_data;
+}
+
 static void shell_pointer_grab_end(struct wlr_seat_pointer_grab *grab) {
 	struct wlr_wl_shell_popup_grab *popup_grab = grab->data;
 
@@ -82,8 +93,10 @@ static void shell_pointer_grab_cancel(struct wlr_seat_pointer_grab *grab) {
 }
 
 static void shell_pointer_grab_axis(struct wlr_seat_pointer_grab *grab,
-		uint32_t time, enum wlr_axis_orientation orientation, double value) {
-	wlr_seat_pointer_send_axis(grab->seat, time, orientation, value);
+		uint32_t time, enum wlr_axis_orientation orientation, double value,
+		int32_t value_discrete, enum wlr_axis_source source) {
+	wlr_seat_pointer_send_axis(grab->seat, time, orientation, value,
+		value_discrete, source);
 }
 
 static const struct wlr_pointer_grab_interface shell_pointer_grab_impl = {
@@ -450,13 +463,13 @@ static void shell_surface_resource_destroy(struct wl_resource *resource) {
 	}
 }
 
-static void handle_wlr_surface_destroyed(struct wl_listener *listener,
+static void shell_surface_handle_surface_destroy(struct wl_listener *listener,
 		void *data) {
 	struct wlr_wl_shell_surface *surface =
 		wl_container_of(listener, surface, surface_destroy_listener);
 	shell_surface_destroy(surface);
 }
-static void handle_wlr_surface_committed(struct wlr_surface *wlr_surface,
+static void handle_surface_committed(struct wlr_surface *wlr_surface,
 		void *role_data) {
 	struct wlr_wl_shell_surface *surface = role_data;
 	if (!surface->configured &&
@@ -545,9 +558,10 @@ static void shell_protocol_get_shell_surface(struct wl_client *client,
 
 	wl_signal_add(&wl_surface->surface->events.destroy,
 		&wl_surface->surface_destroy_listener);
-	wl_surface->surface_destroy_listener.notify = handle_wlr_surface_destroyed;
+	wl_surface->surface_destroy_listener.notify =
+		shell_surface_handle_surface_destroy;
 
-	wlr_surface_set_role_committed(surface, handle_wlr_surface_committed,
+	wlr_surface_set_role_committed(surface, handle_surface_committed,
 		wl_surface);
 
 	struct wl_display *display = wl_client_get_display(client);
@@ -648,42 +662,62 @@ void wlr_wl_shell_surface_configure(struct wlr_wl_shell_surface *surface,
 	wl_shell_surface_send_configure(surface->resource, edges, width, height);
 }
 
-struct wlr_wl_shell_surface *wlr_wl_shell_surface_popup_at(
+struct wlr_surface *wlr_wl_shell_surface_surface_at(
 		struct wlr_wl_shell_surface *surface, double sx, double sy,
-		double *popup_sx, double *popup_sy) {
+		double *sub_sx, double *sub_sy) {
 	struct wlr_wl_shell_surface *popup;
 	wl_list_for_each(popup, &surface->popups, popup_link) {
 		if (!popup->popup_mapped) {
 			continue;
 		}
-		double _popup_sx = popup->transient_state->x;
-		double _popup_sy = popup->transient_state->y;
-		int popup_width =
-			popup->surface->current->buffer_width;
-		int popup_height =
-			popup->surface->current->buffer_height;
 
-		struct wlr_wl_shell_surface *_popup =
-			wlr_wl_shell_surface_popup_at(popup,
-				popup->transient_state->x,
-				popup->transient_state->y,
-				popup_sx, popup_sy);
-		if (_popup) {
-			*popup_sx = sx + _popup_sx;
-			*popup_sy = sy + _popup_sy;
-			return _popup;
-		}
-
-		if ((sx > _popup_sx && sx < _popup_sx + popup_width) &&
-				(sy > _popup_sy && sy < _popup_sy + popup_height)) {
-			if (pixman_region32_contains_point(&popup->surface->current->input,
-						sx - _popup_sx, sy - _popup_sy, NULL)) {
-				*popup_sx = _popup_sx;
-				*popup_sy = _popup_sy;
-				return popup;
-			}
+		double popup_sx = popup->transient_state->x;
+		double popup_sy = popup->transient_state->y;
+		struct wlr_surface *sub = wlr_wl_shell_surface_surface_at(popup,
+			sx - popup_sx, sy - popup_sy, sub_sx, sub_sy);
+		if (sub != NULL) {
+			return sub;
 		}
 	}
 
-	return NULL;
+	return wlr_surface_surface_at(surface->surface, sx, sy, sub_sx, sub_sy);
+}
+
+struct wl_shell_surface_iterator_data {
+	wlr_surface_iterator_func_t user_iterator;
+	void *user_data;
+	int x, y;
+};
+
+static void wl_shell_surface_iterator(struct wlr_surface *surface,
+		int sx, int sy, void *data) {
+	struct wl_shell_surface_iterator_data *iter_data = data;
+	iter_data->user_iterator(surface, iter_data->x + sx, iter_data->y + sy,
+		iter_data->user_data);
+}
+
+static void wl_shell_surface_for_each_surface(
+		struct wlr_wl_shell_surface *surface, int x, int y,
+		wlr_surface_iterator_func_t iterator, void *user_data) {
+	struct wl_shell_surface_iterator_data data = {
+		.user_iterator = iterator,
+		.user_data = user_data,
+		.x = x, .y = y,
+	};
+	wlr_surface_for_each_surface(surface->surface, wl_shell_surface_iterator,
+		&data);
+
+	struct wlr_wl_shell_surface *popup;
+	wl_list_for_each(popup, &surface->popups, popup_link) {
+		double popup_x = popup->transient_state->x;
+		double popup_y = popup->transient_state->y;
+
+		wl_shell_surface_for_each_surface(popup, x + popup_x, y + popup_y,
+			iterator, user_data);
+	}
+}
+
+void wlr_wl_shell_surface_for_each_surface(struct wlr_wl_shell_surface *surface,
+		wlr_surface_iterator_func_t iterator, void *user_data) {
+	wl_shell_surface_for_each_surface(surface, 0, 0, iterator, user_data);
 }

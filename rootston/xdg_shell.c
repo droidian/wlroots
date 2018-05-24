@@ -18,6 +18,8 @@ static void popup_destroy(struct roots_view_child *child) {
 	}
 	wl_list_remove(&popup->destroy.link);
 	wl_list_remove(&popup->new_popup.link);
+	wl_list_remove(&popup->map.link);
+	wl_list_remove(&popup->unmap.link);
 	view_child_finish(&popup->view_child);
 	free(popup);
 }
@@ -28,6 +30,16 @@ static void popup_handle_destroy(struct wl_listener *listener, void *data) {
 	popup_destroy((struct roots_view_child *)popup);
 }
 
+static void popup_handle_map(struct wl_listener *listener, void *data) {
+	struct roots_xdg_popup *popup = wl_container_of(listener, popup, map);
+	view_damage_whole(popup->view_child.view);
+}
+
+static void popup_handle_unmap(struct wl_listener *listener, void *data) {
+	struct roots_xdg_popup *popup = wl_container_of(listener, popup, unmap);
+	view_damage_whole(popup->view_child.view);
+}
+
 static struct roots_xdg_popup *popup_create(struct roots_view *view,
 	struct wlr_xdg_popup *wlr_popup);
 
@@ -36,6 +48,59 @@ static void popup_handle_new_popup(struct wl_listener *listener, void *data) {
 		wl_container_of(listener, popup, new_popup);
 	struct wlr_xdg_popup *wlr_popup = data;
 	popup_create(popup->view_child.view, wlr_popup);
+}
+
+static void popup_unconstrain(struct roots_xdg_popup *popup) {
+	// get the output of the popup's positioner anchor point and convert it to
+	// the toplevel parent's coordinate system and then pass it to
+	// wlr_xdg_popup_v6_unconstrain_from_box
+
+	// TODO: unconstrain popups for rotated windows
+	if (popup->view_child.view->rotation != 0.0) {
+		return;
+	}
+
+	struct roots_view *view = popup->view_child.view;
+	struct wlr_output_layout *layout = view->desktop->layout;
+	struct wlr_xdg_popup *wlr_popup = popup->wlr_popup;
+
+	int anchor_lx, anchor_ly;
+	wlr_xdg_popup_get_anchor_point(wlr_popup, &anchor_lx, &anchor_ly);
+
+	int popup_lx, popup_ly;
+	wlr_xdg_popup_get_toplevel_coords(wlr_popup, wlr_popup->geometry.x,
+		wlr_popup->geometry.y, &popup_lx, &popup_ly);
+	popup_lx += view->x;
+	popup_ly += view->y;
+
+	anchor_lx += popup_lx;
+	anchor_ly += popup_ly;
+
+	double dest_x = 0, dest_y = 0;
+	wlr_output_layout_closest_point(layout, NULL, anchor_lx, anchor_ly,
+		&dest_x, &dest_y);
+
+	struct wlr_output *output =
+		wlr_output_layout_output_at(layout, dest_x, dest_y);
+
+	if (output == NULL) {
+		return;
+	}
+
+	int width = 0, height = 0;
+	wlr_output_effective_resolution(output, &width, &height);
+
+	// the output box expressed in the coordinate system of the toplevel parent
+	// of the popup
+	struct wlr_box output_toplevel_sx_box = {
+		.x = output->lx - view->x,
+		.y = output->ly - view->y,
+		.width = width,
+		.height = height
+	};
+
+	wlr_xdg_popup_unconstrain_from_box(
+			popup->wlr_popup, &output_toplevel_sx_box);
 }
 
 static struct roots_xdg_popup *popup_create(struct roots_view *view,
@@ -50,8 +115,15 @@ static struct roots_xdg_popup *popup_create(struct roots_view *view,
 	view_child_init(&popup->view_child, view, wlr_popup->base->surface);
 	popup->destroy.notify = popup_handle_destroy;
 	wl_signal_add(&wlr_popup->base->events.destroy, &popup->destroy);
+	popup->map.notify = popup_handle_map;
+	wl_signal_add(&wlr_popup->base->events.map, &popup->map);
+	popup->unmap.notify = popup_handle_unmap;
+	wl_signal_add(&wlr_popup->base->events.unmap, &popup->unmap);
 	popup->new_popup.notify = popup_handle_new_popup;
 	wl_signal_add(&wlr_popup->base->events.new_popup, &popup->new_popup);
+
+	popup_unconstrain(popup);
+
 	return popup;
 }
 
@@ -60,12 +132,14 @@ static void get_size(const struct roots_view *view, struct wlr_box *box) {
 	assert(view->type == ROOTS_XDG_SHELL_VIEW);
 	struct wlr_xdg_surface *surface = view->xdg_surface;
 
-	if (surface->geometry->width > 0 && surface->geometry->height > 0) {
-		box->width = surface->geometry->width;
-		box->height = surface->geometry->height;
-	} else {
+	if (surface->geometry.width > 0 && surface->geometry.height > 0) {
+		box->width = surface->geometry.width;
+		box->height = surface->geometry.height;
+	} else if (view->wlr_surface != NULL) {
 		box->width = view->wlr_surface->current->width;
 		box->height = view->wlr_surface->current->height;
+	} else {
+		box->width = box->height = 0;
 	}
 }
 
@@ -83,7 +157,7 @@ static void apply_size_constraints(struct wlr_xdg_surface *surface,
 	*dest_width = width;
 	*dest_height = height;
 
-	struct wlr_xdg_toplevel_state *state = &surface->toplevel_state->current;
+	struct wlr_xdg_toplevel_state *state = &surface->toplevel->current;
 	if (width < state->min_width) {
 		*dest_width = state->min_width;
 	} else if (state->max_width > 0 &&
@@ -175,9 +249,26 @@ static void set_fullscreen(struct roots_view *view, bool fullscreen) {
 static void close(struct roots_view *view) {
 	assert(view->type == ROOTS_XDG_SHELL_VIEW);
 	struct wlr_xdg_surface *surface = view->xdg_surface;
-	if (surface->role == WLR_XDG_SURFACE_ROLE_TOPLEVEL) {
-		wlr_xdg_toplevel_send_close(surface);
+	struct wlr_xdg_popup *popup = NULL;
+	wl_list_for_each(popup, &surface->popups, link) {
+		wlr_xdg_surface_send_close(popup->base);
 	}
+	wlr_xdg_surface_send_close(surface);
+}
+
+static void destroy(struct roots_view *view) {
+	assert(view->type == ROOTS_XDG_SHELL_VIEW);
+	struct roots_xdg_surface *roots_xdg_surface = view->roots_xdg_surface;
+	wl_list_remove(&roots_xdg_surface->surface_commit.link);
+	wl_list_remove(&roots_xdg_surface->destroy.link);
+	wl_list_remove(&roots_xdg_surface->new_popup.link);
+	wl_list_remove(&roots_xdg_surface->map.link);
+	wl_list_remove(&roots_xdg_surface->unmap.link);
+	wl_list_remove(&roots_xdg_surface->request_move.link);
+	wl_list_remove(&roots_xdg_surface->request_resize.link);
+	wl_list_remove(&roots_xdg_surface->request_maximize.link);
+	wl_list_remove(&roots_xdg_surface->request_fullscreen.link);
+	free(roots_xdg_surface);
 }
 
 static void handle_request_move(struct wl_listener *listener, void *data) {
@@ -219,7 +310,7 @@ static void handle_request_maximize(struct wl_listener *listener, void *data) {
 		return;
 	}
 
-	view_maximize(view, surface->toplevel_state->next.maximized);
+	view_maximize(view, surface->toplevel->client_pending.maximized);
 }
 
 static void handle_request_fullscreen(struct wl_listener *listener,
@@ -242,6 +333,10 @@ static void handle_surface_commit(struct wl_listener *listener, void *data) {
 		wl_container_of(listener, roots_surface, surface_commit);
 	struct roots_view *view = roots_surface->view;
 	struct wlr_xdg_surface *surface = view->xdg_surface;
+
+	if (!surface->mapped) {
+		return;
+	}
 
 	view_apply_damage(view);
 
@@ -277,20 +372,30 @@ static void handle_new_popup(struct wl_listener *listener, void *data) {
 	popup_create(roots_xdg_surface->view, wlr_popup);
 }
 
+static void handle_map(struct wl_listener *listener, void *data) {
+	struct roots_xdg_surface *roots_xdg_surface =
+		wl_container_of(listener, roots_xdg_surface, map);
+	struct roots_view *view = roots_xdg_surface->view;
+
+	struct wlr_box box;
+	get_size(view, &box);
+	view->width = box.width;
+	view->height = box.height;
+
+	view_map(view, view->xdg_surface->surface);
+	view_setup(view);
+}
+
+static void handle_unmap(struct wl_listener *listener, void *data) {
+	struct roots_xdg_surface *roots_xdg_surface =
+		wl_container_of(listener, roots_xdg_surface, unmap);
+	view_unmap(roots_xdg_surface->view);
+}
+
 static void handle_destroy(struct wl_listener *listener, void *data) {
 	struct roots_xdg_surface *roots_xdg_surface =
 		wl_container_of(listener, roots_xdg_surface, destroy);
-	wl_list_remove(&roots_xdg_surface->surface_commit.link);
-	wl_list_remove(&roots_xdg_surface->destroy.link);
-	wl_list_remove(&roots_xdg_surface->new_popup.link);
-	wl_list_remove(&roots_xdg_surface->request_move.link);
-	wl_list_remove(&roots_xdg_surface->request_resize.link);
-	wl_list_remove(&roots_xdg_surface->request_maximize.link);
-	wl_list_remove(&roots_xdg_surface->request_fullscreen.link);
-	wl_list_remove(&roots_xdg_surface->view->link);
-	view_finish(roots_xdg_surface->view);
-	free(roots_xdg_surface->view);
-	free(roots_xdg_surface);
+	view_destroy(roots_xdg_surface->view);
 }
 
 void handle_xdg_shell_surface(struct wl_listener *listener, void *data) {
@@ -306,7 +411,7 @@ void handle_xdg_shell_surface(struct wl_listener *listener, void *data) {
 		wl_container_of(listener, desktop, xdg_shell_surface);
 
 	wlr_log(L_DEBUG, "new xdg toplevel: title=%s, app_id=%s",
-		surface->title, surface->app_id);
+		surface->toplevel->title, surface->toplevel->app_id);
 	wlr_xdg_surface_ping(surface);
 
 	struct roots_xdg_surface *roots_surface =
@@ -319,21 +424,26 @@ void handle_xdg_shell_surface(struct wl_listener *listener, void *data) {
 		&roots_surface->surface_commit);
 	roots_surface->destroy.notify = handle_destroy;
 	wl_signal_add(&surface->events.destroy, &roots_surface->destroy);
+	roots_surface->map.notify = handle_map;
+	wl_signal_add(&surface->events.map, &roots_surface->map);
+	roots_surface->unmap.notify = handle_unmap;
+	wl_signal_add(&surface->events.unmap, &roots_surface->unmap);
 	roots_surface->request_move.notify = handle_request_move;
-	wl_signal_add(&surface->events.request_move, &roots_surface->request_move);
+	wl_signal_add(&surface->toplevel->events.request_move,
+		&roots_surface->request_move);
 	roots_surface->request_resize.notify = handle_request_resize;
-	wl_signal_add(&surface->events.request_resize,
+	wl_signal_add(&surface->toplevel->events.request_resize,
 		&roots_surface->request_resize);
 	roots_surface->request_maximize.notify = handle_request_maximize;
-	wl_signal_add(&surface->events.request_maximize,
+	wl_signal_add(&surface->toplevel->events.request_maximize,
 		&roots_surface->request_maximize);
 	roots_surface->request_fullscreen.notify = handle_request_fullscreen;
-	wl_signal_add(&surface->events.request_fullscreen,
+	wl_signal_add(&surface->toplevel->events.request_fullscreen,
 		&roots_surface->request_fullscreen);
 	roots_surface->new_popup.notify = handle_new_popup;
 	wl_signal_add(&surface->events.new_popup, &roots_surface->new_popup);
 
-	struct roots_view *view = calloc(1, sizeof(struct roots_view));
+	struct roots_view *view = view_create(desktop);
 	if (!view) {
 		free(roots_surface);
 		return;
@@ -342,22 +452,19 @@ void handle_xdg_shell_surface(struct wl_listener *listener, void *data) {
 
 	view->xdg_surface = surface;
 	view->roots_xdg_surface = roots_surface;
-	view->wlr_surface = surface->surface;
 	view->activate = activate;
 	view->resize = resize;
 	view->move_resize = move_resize;
 	view->maximize = maximize;
 	view->set_fullscreen = set_fullscreen;
 	view->close = close;
+	view->destroy = destroy;
 	roots_surface->view = view;
 
-	struct wlr_box box;
-	get_size(view, &box);
-	view->width = box.width;
-	view->height = box.height;
-
-	view_init(view, desktop);
-	wl_list_insert(&desktop->views, &view->link);
-
-	view_setup(view);
+	if (surface->toplevel->client_pending.maximized) {
+		view_maximize(view, true);
+	}
+	if (surface->toplevel->client_pending.fullscreen) {
+		view_set_fullscreen(view, true, NULL);
+	}
 }

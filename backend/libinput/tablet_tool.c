@@ -8,7 +8,7 @@
 #include "backend/libinput.h"
 #include "util/signal.h"
 
-struct wlr_tablet_tool *wlr_libinput_tablet_tool_create(
+struct wlr_tablet_tool *create_libinput_tablet_tool(
 		struct libinput_device *libinput_dev) {
 	assert(libinput_dev);
 	struct wlr_tablet_tool *wlr_tablet_tool = calloc(1, sizeof(struct wlr_tablet_tool));
@@ -34,14 +34,13 @@ void handle_tablet_tool_axis(struct libinput_event *event,
 	wlr_event.device = wlr_dev;
 	wlr_event.time_msec =
 		usec_to_msec(libinput_event_tablet_tool_get_time_usec(tevent));
-	libinput_device_get_size(libinput_dev, &wlr_event.width_mm, &wlr_event.height_mm);
 	if (libinput_event_tablet_tool_x_has_changed(tevent)) {
 		wlr_event.updated_axes |= WLR_TABLET_TOOL_AXIS_X;
-		wlr_event.x_mm = libinput_event_tablet_tool_get_x(tevent);
+		wlr_event.x = libinput_event_tablet_tool_get_x_transformed(tevent, 1);
 	}
 	if (libinput_event_tablet_tool_y_has_changed(tevent)) {
 		wlr_event.updated_axes |= WLR_TABLET_TOOL_AXIS_Y;
-		wlr_event.y_mm = libinput_event_tablet_tool_get_y(tevent);
+		wlr_event.y = libinput_event_tablet_tool_get_y_transformed(tevent, 1);
 	}
 	if (libinput_event_tablet_tool_pressure_has_changed(tevent)) {
 		wlr_event.updated_axes |= WLR_TABLET_TOOL_AXIS_PRESSURE;
@@ -71,8 +70,6 @@ void handle_tablet_tool_axis(struct libinput_event *event,
 		wlr_event.updated_axes |= WLR_TABLET_TOOL_AXIS_WHEEL;
 		wlr_event.wheel_delta = libinput_event_tablet_tool_get_wheel_delta(tevent);
 	}
-	wlr_log(L_DEBUG, "Tablet tool axis event %d @ %f,%f",
-			wlr_event.updated_axes, wlr_event.x_mm, wlr_event.y_mm);
 	wlr_signal_emit_safe(&wlr_dev->tablet_tool->events.axis, &wlr_event);
 }
 

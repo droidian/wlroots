@@ -8,29 +8,31 @@
 #include <wlr/types/wlr_seat.h>
 #include <xcb/xcb.h>
 
-#ifdef WLR_HAS_XCB_ICCCM
-	#include <xcb/xcb_icccm.h>
-#endif
-
 struct wlr_xwm;
 struct wlr_xwayland_cursor;
 
 struct wlr_xwayland {
 	pid_t pid;
-	int display;
-	int x_fd[2], wl_fd[2], wm_fd[2];
 	struct wl_client *client;
-	struct wl_display *wl_display;
-	struct wlr_compositor *compositor;
-	time_t server_start;
-
 	struct wl_event_source *sigusr1_source;
 	struct wl_listener client_destroy;
-	struct wl_listener display_destroy;
 	struct wlr_xwm *xwm;
 	struct wlr_xwayland_cursor *cursor;
+	int wm_fd[2], wl_fd[2];
 
-	/* Anything above seat is reset on Xwayland restart, rest is conserved */
+	time_t server_start;
+
+	/* Anything above display is reset on Xwayland restart, rest is conserved */
+
+	int display;
+	int x_fd[2];
+	struct wl_event_source *x_fd_read_event[2];
+	struct wl_listener display_destroy;
+
+	bool lazy;
+
+	struct wl_display *wl_display;
+	struct wlr_compositor *compositor;
 	struct wlr_seat *seat;
 	struct wl_listener seat_destroy;
 
@@ -79,6 +81,15 @@ struct wlr_xwayland_surface_size_hints {
 	uint32_t win_gravity;
 };
 
+/**
+ * An Xwayland user interface component. It has an absolute position in
+ * layout-local coordinates.
+ *
+ * When a surface is ready to be displayed, the `map` event is emitted. When a
+ * surface should no longer be displayed, the `unmap` event is emitted. The
+ * `unmap` event is guaranteed to be emitted before the `destroy` event if the
+ * view is destroyed when mapped.
+ */
 struct wlr_xwayland_surface {
 	xcb_window_t window_id;
 	struct wlr_xwm *xwm;
@@ -93,12 +104,12 @@ struct wlr_xwayland_surface {
 	uint16_t saved_width, saved_height;
 	bool override_redirect;
 	bool mapped;
-	bool added;
 
 	char *title;
 	char *class;
 	char *instance;
 	pid_t pid;
+	bool has_utf8_title;
 
 	struct wl_list children; // wlr_xwayland_surface::parent_link
 	struct wlr_xwayland_surface *parent;
@@ -115,10 +126,12 @@ struct wlr_xwayland_surface {
 	uint32_t hints_urgency;
 	struct wlr_xwayland_surface_size_hints *size_hints;
 
+	bool pinging;
+	struct wl_event_source *ping_timer;
+
 	// _NET_WM_STATE
 	bool fullscreen;
-	bool maximized_vert;
-	bool maximized_horz;
+	bool maximized_vert, maximized_horz;
 
 	bool has_alpha;
 
@@ -130,13 +143,14 @@ struct wlr_xwayland_surface {
 		struct wl_signal request_maximize;
 		struct wl_signal request_fullscreen;
 
-		struct wl_signal map_notify;
-		struct wl_signal unmap_notify;
+		struct wl_signal map;
+		struct wl_signal unmap;
 		struct wl_signal set_title;
 		struct wl_signal set_class;
 		struct wl_signal set_parent;
 		struct wl_signal set_pid;
 		struct wl_signal set_window_type;
+		struct wl_signal ping_timeout;
 	} events;
 
 	struct wl_listener surface_destroy;
@@ -161,7 +175,7 @@ struct wlr_xwayland_resize_event {
 };
 
 struct wlr_xwayland *wlr_xwayland_create(struct wl_display *wl_display,
-	struct wlr_compositor *compositor);
+	struct wlr_compositor *compositor, bool lazy);
 
 void wlr_xwayland_destroy(struct wlr_xwayland *wlr_xwayland);
 
@@ -170,20 +184,30 @@ void wlr_xwayland_set_cursor(struct wlr_xwayland *wlr_xwayland,
 	int32_t hotspot_x, int32_t hotspot_y);
 
 void wlr_xwayland_surface_activate(struct wlr_xwayland_surface *surface,
-		bool activated);
+	bool activated);
 
 void wlr_xwayland_surface_configure(struct wlr_xwayland_surface *surface,
-		int16_t x, int16_t y, uint16_t width, uint16_t height);
+	int16_t x, int16_t y, uint16_t width, uint16_t height);
 
 void wlr_xwayland_surface_close(struct wlr_xwayland_surface *surface);
 
 void wlr_xwayland_surface_set_maximized(struct wlr_xwayland_surface *surface,
-		bool maximized);
+	bool maximized);
 
 void wlr_xwayland_surface_set_fullscreen(struct wlr_xwayland_surface *surface,
-		bool fullscreen);
+	bool fullscreen);
 
 void wlr_xwayland_set_seat(struct wlr_xwayland *xwayland,
-		struct wlr_seat *seat);
+	struct wlr_seat *seat);
+
+bool wlr_xwayland_surface_is_unmanaged(
+	const struct wlr_xwayland_surface *surface);
+
+bool wlr_surface_is_xwayland_surface(struct wlr_surface *surface);
+
+struct wlr_xwayland_surface *wlr_xwayland_surface_from_wlr_surface(
+	struct wlr_surface *surface);
+
+void wlr_xwayland_surface_ping(struct wlr_xwayland_surface *surface);
 
 #endif

@@ -9,61 +9,75 @@
 #include <stdint.h>
 #include <string.h>
 #include <wlr/backend.h>
-#include <wlr/render.h>
 #include <wlr/render/egl.h>
+#include <wlr/render/gles2.h>
 #include <wlr/render/interface.h>
+#include <wlr/render/wlr_renderer.h>
+#include <wlr/render/wlr_texture.h>
 #include <wlr/util/log.h>
 
 extern PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES;
 
-struct pixel_format {
+struct wlr_gles2_pixel_format {
 	uint32_t wl_format;
 	GLint gl_format, gl_type;
 	int depth, bpp;
-	GLuint *shader;
+	bool has_alpha;
 };
 
 struct wlr_gles2_renderer {
 	struct wlr_renderer wlr_renderer;
 
 	struct wlr_egl *egl;
+	const char *exts_str;
+
+	struct {
+		GLuint quad;
+		GLuint ellipse;
+		GLuint tex_rgba;
+		GLuint tex_rgbx;
+		GLuint tex_ext;
+	} shaders;
+
+	uint32_t viewport_width, viewport_height;
+};
+
+enum wlr_gles2_texture_type {
+	WLR_GLES2_TEXTURE_GLTEX,
+	WLR_GLES2_TEXTURE_WL_DRM_GL,
+	WLR_GLES2_TEXTURE_WL_DRM_EXT,
+	WLR_GLES2_TEXTURE_DMABUF,
 };
 
 struct wlr_gles2_texture {
 	struct wlr_texture wlr_texture;
 
 	struct wlr_egl *egl;
-	GLuint tex_id;
-	const struct pixel_format *pixel_format;
+	enum wlr_gles2_texture_type type;
+	int width, height;
+	bool has_alpha;
+	bool inverted_y;
+
+	// Not set if WLR_GLES2_TEXTURE_GLTEX
 	EGLImageKHR image;
+	GLuint image_tex;
+
+	union {
+		GLuint gl_tex;
+		struct wl_resource *wl_drm;
+	};
 };
 
-struct shaders {
-	bool initialized;
-	GLuint rgba, rgbx;
-	GLuint quad;
-	GLuint ellipse;
-	GLuint external;
-};
+const struct wlr_gles2_pixel_format *get_gles2_format_from_wl(
+	enum wl_shm_format fmt);
+const enum wl_shm_format *get_gles2_formats(size_t *len);
 
-extern struct shaders shaders;
+struct wlr_gles2_texture *get_gles2_texture_in_context(
+	struct wlr_texture *wlr_texture);
 
-const struct pixel_format *gl_format_for_wl_format(enum wl_shm_format fmt);
-
-struct wlr_texture *gles2_texture_create();
-
-extern const GLchar quad_vertex_src[];
-extern const GLchar quad_fragment_src[];
-extern const GLchar ellipse_fragment_src[];
-extern const GLchar vertex_src[];
-extern const GLchar fragment_src_rgba[];
-extern const GLchar fragment_src_rgbx[];
-extern const GLchar fragment_src_external[];
-
-bool _gles2_flush_errors(const char *file, int line);
-#define gles2_flush_errors(...) \
-	_gles2_flush_errors(wlr_strip_path(__FILE__), __LINE__)
-
-#define GL_CALL(func) func; gles2_flush_errors()
+void push_gles2_marker(const char *file, const char *func);
+void pop_gles2_marker(void);
+#define PUSH_GLES2_DEBUG push_gles2_marker(wlr_strip_path(__FILE__), __func__)
+#define POP_GLES2_DEBUG pop_gles2_marker()
 
 #endif

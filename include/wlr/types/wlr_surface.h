@@ -56,7 +56,8 @@ struct wlr_subsurface {
 	struct wl_list parent_link;
 	struct wl_list parent_pending_link;
 
-	struct wl_listener parent_destroy_listener;
+	struct wl_listener surface_destroy;
+	struct wl_listener parent_destroy;
 
 	struct {
 		struct wl_signal destroy;
@@ -70,8 +71,8 @@ struct wlr_surface {
 	struct wlr_surface_state *current, *pending;
 	const char *role; // the lifetime-bound role or null
 
-	float buffer_to_surface_matrix[16];
-	float surface_to_buffer_matrix[16];
+	float buffer_to_surface_matrix[9];
+	float surface_to_buffer_matrix[9];
 
 	struct {
 		struct wl_signal commit;
@@ -79,39 +80,32 @@ struct wlr_surface {
 		struct wl_signal destroy;
 	} events;
 
-	// destroy listener used by compositor
-	struct wl_listener compositor_listener;
-	void *compositor_data;
-
 	// surface commit callback for the role that runs before all others
 	void (*role_committed)(struct wlr_surface *surface, void *role_data);
 	void *role_data;
 
-	// subsurface properties
-	struct wlr_subsurface *subsurface;
-	struct wl_list subsurface_list; // wlr_subsurface::parent_link
+	struct wl_list subsurfaces; // wlr_subsurface::parent_link
 
 	// wlr_subsurface::parent_pending_link
 	struct wl_list subsurface_pending_list;
+
+	struct wl_listener renderer_destroy;
+
 	void *data;
 };
 
-struct wlr_renderer;
-struct wlr_surface *wlr_surface_create(struct wl_resource *res,
-		struct wlr_renderer *renderer);
-/**
- * Gets a matrix you can pass into wlr_render_with_matrix to display this
- * surface. `matrix` is the output matrix, `projection` is the wlr_output
- * projection matrix, and `transform` is any additional transformations you want
- * to perform on the surface (or NULL/the identity matrix if you don't).
- * `transform` is used before the surface is scaled, so its geometry extends
- * from 0 to 1 in both dimensions.
- */
-void wlr_surface_get_matrix(struct wlr_surface *surface,
-		float (*matrix)[16],
-		const float (*projection)[16],
-		const float (*transform)[16]);
+typedef void (*wlr_surface_iterator_func_t)(struct wlr_surface *surface,
+	int sx, int sy, void *data);
 
+struct wlr_renderer;
+
+/**
+ * Create a new surface resource with the provided new ID. If `resource_list`
+ * is non-NULL, adds the surface's resource to the list.
+ */
+struct wlr_surface *wlr_surface_create(struct wl_client *client,
+		uint32_t version, uint32_t id, struct wlr_renderer *renderer,
+		struct wl_list *resource_list);
 
 /**
  * Set the lifetime role for this surface. Returns 0 on success or -1 if the
@@ -129,22 +123,31 @@ int wlr_surface_set_role(struct wlr_surface *surface, const char *role,
 bool wlr_surface_has_buffer(struct wlr_surface *surface);
 
 /**
- * Create the subsurface implementation for this surface.
+ * Create a new subsurface resource with the provided new ID. If `resource_list`
+ * is non-NULL, adds the subsurface's resource to the list.
  */
-void wlr_surface_make_subsurface(struct wlr_surface *surface,
-		struct wlr_surface *parent, uint32_t id);
+struct wlr_subsurface *wlr_subsurface_create(struct wlr_surface *surface,
+		struct wlr_surface *parent, uint32_t version, uint32_t id,
+		struct wl_list *resource_list);
 
 /**
- * Get the top of the subsurface tree for this surface.
+ * Get the root of the subsurface tree for this surface.
  */
-struct wlr_surface *wlr_surface_get_main_surface(struct wlr_surface *surface);
+struct wlr_surface *wlr_surface_get_root_surface(struct wlr_surface *surface);
 
 /**
- * Find a subsurface within this surface at the surface-local coordinates.
- * Returns the surface and coordinates in the topmost surface coordinate system
- * or NULL if no subsurface is found at that location.
+ * Check if the surface accepts input events at the given surface-local
+ * coordinates. Does not check the surface's subsurfaces.
  */
-struct wlr_subsurface *wlr_surface_subsurface_at(struct wlr_surface *surface,
+bool wlr_surface_point_accepts_input(struct wlr_surface *surface,
+		double sx, double sy);
+
+/**
+ * Find a surface in this surface's tree that accepts input events at the given
+ * surface-local coordinates. Returns the surface and coordinates in the leaf
+ * surface coordinate system or NULL if no surface is found at that location.
+ */
+struct wlr_surface *wlr_surface_surface_at(struct wlr_surface *surface,
 		double sx, double sy, double *sub_x, double *sub_y);
 
 void wlr_surface_send_enter(struct wlr_surface *surface,
@@ -165,5 +168,13 @@ void wlr_surface_set_role_committed(struct wlr_surface *surface,
 		void *role_data);
 
 struct wlr_surface *wlr_surface_from_resource(struct wl_resource *resource);
+
+/**
+ * Call `iterator` on each surface in the surface tree, with the surface's
+ * position relative to the root surface. The function is called from root to
+ * leaves (in rendering order).
+ */
+void wlr_surface_for_each_surface(struct wlr_surface *surface,
+	wlr_surface_iterator_func_t iterator, void *user_data);
 
 #endif

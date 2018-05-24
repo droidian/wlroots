@@ -17,6 +17,8 @@ struct wlr_output_layout {
 		struct wl_signal change;
 		struct wl_signal destroy;
 	} events;
+
+	void *data;
 };
 
 struct wlr_output_layout_output_state;
@@ -32,6 +34,11 @@ struct wlr_output_layout_output {
 	} events;
 };
 
+/**
+ * Creates a wlr_output_layout, which can be used to describing outputs in
+ * physical space relative to one another, and perform various useful operations
+ * on that state.
+ */
 struct wlr_output_layout *wlr_output_layout_create();
 
 void wlr_output_layout_destroy(struct wlr_output_layout *layout);
@@ -40,41 +47,42 @@ struct wlr_output_layout_output *wlr_output_layout_get(
 		struct wlr_output_layout *layout, struct wlr_output *reference);
 
 struct wlr_output *wlr_output_layout_output_at(struct wlr_output_layout *layout,
-		double x, double y);
+		double lx, double ly);
 
 void wlr_output_layout_add(struct wlr_output_layout *layout,
-		struct wlr_output *output, int x, int y);
+		struct wlr_output *output, int lx, int ly);
 
 void wlr_output_layout_move(struct wlr_output_layout *layout,
-		struct wlr_output *output, int x, int y);
+		struct wlr_output *output, int lx, int ly);
 
 void wlr_output_layout_remove(struct wlr_output_layout *layout,
 		struct wlr_output *output);
 
 /**
- * Given x and y as pointers to global coordinates, adjusts them to local output
+ * Given x and y in layout coordinates, adjusts them to local output
  * coordinates relative to the given reference output.
  */
 void wlr_output_layout_output_coords(struct wlr_output_layout *layout,
-		struct wlr_output *reference, double *x, double *y);
+		struct wlr_output *reference, double *lx, double *ly);
 
 bool wlr_output_layout_contains_point(struct wlr_output_layout *layout,
-		struct wlr_output *reference, int x, int y);
+		struct wlr_output *reference, int lx, int ly);
 
 bool wlr_output_layout_intersects(struct wlr_output_layout *layout,
-		struct wlr_output *reference, const struct wlr_box *target_box);
+		struct wlr_output *reference, const struct wlr_box *target_lbox);
 
 /**
  * Get the closest point on this layout from the given point from the reference
  * output. If reference is NULL, gets the closest point from the entire layout.
  */
 void wlr_output_layout_closest_point(struct wlr_output_layout *layout,
-		struct wlr_output *reference, double x, double y, double *dest_x,
-		double *dest_y);
+		struct wlr_output *reference, double lx, double ly, double *dest_lx,
+		double *dest_ly);
 
 /**
- * Get the box of the layout for the given reference output. If `reference`
- * is NULL, the box will be for the extents of the entire layout.
+ * Get the box of the layout for the given reference output in layout
+ * coordinates. If `reference` is NULL, the box will be for the extents of the
+ * entire layout.
  */
 struct wlr_box *wlr_output_layout_get_box(
 		struct wlr_output_layout *layout, struct wlr_output *reference);
@@ -97,10 +105,10 @@ struct wlr_output *wlr_output_layout_get_center_output(
 		struct wlr_output_layout *layout);
 
 enum wlr_direction {
-	WLR_DIRECTION_UP = 0,
-	WLR_DIRECTION_DOWN = 1,
-	WLR_DIRECTION_LEFT = 2,
-	WLR_DIRECTION_RIGHT = 4,
+	WLR_DIRECTION_UP = 1,
+	WLR_DIRECTION_DOWN = 2,
+	WLR_DIRECTION_LEFT = 4,
+	WLR_DIRECTION_RIGHT = 8,
 };
 
 /**
@@ -109,6 +117,6 @@ enum wlr_direction {
  */
 struct wlr_output *wlr_output_layout_adjacent_output(
 		struct wlr_output_layout *layout, enum wlr_direction direction,
-		struct wlr_output *reference, double ref_x, double ref_y);
+		struct wlr_output *reference, double ref_lx, double ref_ly);
 
 #endif

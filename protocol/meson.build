@@ -8,10 +8,17 @@ wayland_scanner_server = generator(
 	arguments: ['server-header', '@INPUT@', '@OUTPUT@'],
 )
 
+# should check wayland_scanner's version, but it is hard to get
+if wayland_server.version().version_compare('>=1.14.91')
+	code_type = 'private-code'
+else
+	code_type = 'code'
+endif
+
 wayland_scanner_code = generator(
 	wayland_scanner,
 	output: '@BASENAME@-protocol.c',
-	arguments: ['code', '@INPUT@', '@OUTPUT@'],
+	arguments: [code_type, '@INPUT@', '@OUTPUT@'],
 )
 
 wayland_scanner_client = generator(
@@ -21,19 +28,28 @@ wayland_scanner_client = generator(
 )
 
 protocols = [
-	[wl_protocol_dir, 'unstable/xdg-shell/xdg-shell-unstable-v6.xml'],
 	[wl_protocol_dir, 'stable/xdg-shell/xdg-shell.xml'],
+	[wl_protocol_dir, 'unstable/idle-inhibit/idle-inhibit-unstable-v1.xml'],
+	[wl_protocol_dir, 'unstable/linux-dmabuf/linux-dmabuf-unstable-v1.xml'],
+	[wl_protocol_dir, 'unstable/xdg-shell/xdg-shell-unstable-v6.xml'],
+	[wl_protocol_dir, 'unstable/xdg-output/xdg-output-unstable-v1.xml'],
 	'gamma-control.xml',
 	'gtk-primary-selection.xml',
 	'idle.xml',
 	'screenshooter.xml',
 	'server-decoration.xml',
+	'wlr-layer-shell-unstable-v1.xml',
+	'wlr-input-inhibitor-unstable-v1.xml',
 ]
 
 client_protocols = [
 	[wl_protocol_dir, 'unstable/xdg-shell/xdg-shell-unstable-v6.xml'],
+	[wl_protocol_dir, 'stable/xdg-shell/xdg-shell.xml'],
+	[wl_protocol_dir, 'unstable/idle-inhibit/idle-inhibit-unstable-v1.xml'],
 	'idle.xml',
 	'screenshooter.xml',
+	'wlr-layer-shell-unstable-v1.xml',
+	'wlr-input-inhibitor-unstable-v1.xml',
 ]
 
 wl_protos_src = []

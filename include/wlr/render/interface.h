@@ -5,71 +5,65 @@
 #include <EGL/eglext.h>
 #include <stdbool.h>
 #include <wayland-server-protocol.h>
-#include <wlr/render.h>
+#include <wlr/render/wlr_renderer.h>
+#include <wlr/render/wlr_texture.h>
 #include <wlr/types/wlr_box.h>
+#include <wlr/types/wlr_linux_dmabuf.h>
 #include <wlr/types/wlr_output.h>
 
-struct wlr_renderer_impl;
-
-struct wlr_renderer {
-	struct wlr_renderer_impl *impl;
-};
-
 struct wlr_renderer_impl {
-	void (*begin)(struct wlr_renderer *renderer, struct wlr_output *output);
+	void (*begin)(struct wlr_renderer *renderer, uint32_t width,
+		uint32_t height);
 	void (*end)(struct wlr_renderer *renderer);
-	void (*clear)(struct wlr_renderer *renderer, const float (*color)[4]);
+	void (*clear)(struct wlr_renderer *renderer, const float color[static 4]);
 	void (*scissor)(struct wlr_renderer *renderer, struct wlr_box *box);
-	struct wlr_texture *(*texture_create)(struct wlr_renderer *renderer);
-	bool (*render_with_matrix)(struct wlr_renderer *renderer,
-		struct wlr_texture *texture, const float (*matrix)[16]);
-	void (*render_quad)(struct wlr_renderer *renderer,
-		const float (*color)[4], const float (*matrix)[16]);
-	void (*render_ellipse)(struct wlr_renderer *renderer,
-		const float (*color)[4], const float (*matrix)[16]);
+	bool (*render_texture_with_matrix)(struct wlr_renderer *renderer,
+		struct wlr_texture *texture, const float matrix[static 9],
+		float alpha);
+	void (*render_quad_with_matrix)(struct wlr_renderer *renderer,
+		const float color[static 4], const float matrix[static 9]);
+	void (*render_ellipse_with_matrix)(struct wlr_renderer *renderer,
+		const float color[static 4], const float matrix[static 9]);
 	const enum wl_shm_format *(*formats)(
 		struct wlr_renderer *renderer, size_t *len);
-	bool (*buffer_is_drm)(struct wlr_renderer *renderer,
-		struct wl_resource *buffer);
+	bool (*resource_is_wl_drm_buffer)(struct wlr_renderer *renderer,
+		struct wl_resource *resource);
+	void (*wl_drm_buffer_get_size)(struct wlr_renderer *renderer,
+		struct wl_resource *buffer, int *width, int *height);
+	bool (*check_import_dmabuf)(struct wlr_renderer *renderer,
+		struct wlr_dmabuf_buffer *dmabuf);
+	int (*get_dmabuf_formats)(struct wlr_renderer *renderer, int **formats);
+	int (*get_dmabuf_modifiers)(struct wlr_renderer *renderer, int format,
+		uint64_t **modifiers);
 	bool (*read_pixels)(struct wlr_renderer *renderer, enum wl_shm_format fmt,
 		uint32_t stride, uint32_t width, uint32_t height,
 		uint32_t src_x, uint32_t src_y, uint32_t dst_x, uint32_t dst_y,
 		void *data);
 	bool (*format_supported)(struct wlr_renderer *renderer,
 		enum wl_shm_format fmt);
+	struct wlr_texture *(*texture_from_pixels)(struct wlr_renderer *renderer,
+		enum wl_shm_format fmt, uint32_t stride, uint32_t width,
+		uint32_t height, const void *data);
+	struct wlr_texture *(*texture_from_wl_drm)(struct wlr_renderer *renderer,
+		struct wl_resource *data);
+	struct wlr_texture *(*texture_from_dmabuf)(struct wlr_renderer *renderer,
+		struct wlr_dmabuf_buffer_attribs *attribs);
 	void (*destroy)(struct wlr_renderer *renderer);
 };
 
 void wlr_renderer_init(struct wlr_renderer *renderer,
-		struct wlr_renderer_impl *impl);
+	const struct wlr_renderer_impl *impl);
 
 struct wlr_texture_impl {
-	bool (*upload_pixels)(struct wlr_texture *texture,
-		enum wl_shm_format format, int stride, int width, int height,
-		const unsigned char *pixels);
-	bool (*update_pixels)(struct wlr_texture *texture,
-		enum wl_shm_format format, int stride, int x, int y,
-		int width, int height, const unsigned char *pixels);
-	bool (*upload_shm)(struct wlr_texture *texture, uint32_t format,
-		struct wl_shm_buffer *shm);
-	bool (*update_shm)(struct wlr_texture *texture, uint32_t format,
-		int x, int y, int width, int height, struct wl_shm_buffer *shm);
-	bool (*upload_drm)(struct wlr_texture *texture,
-		struct wl_resource *drm_buf);
-	bool (*upload_eglimage)(struct wlr_texture *texture, EGLImageKHR image,
-		uint32_t width, uint32_t height);
-	void (*get_matrix)(struct wlr_texture *state,
-		float (*matrix)[16], const float (*projection)[16], int x, int y);
-	void (*get_buffer_size)(struct wlr_texture *texture,
-		struct wl_resource *resource, int *width, int *height);
-	void (*bind)(struct wlr_texture *texture);
+	void (*get_size)(struct wlr_texture *texture, int *width, int *height);
+	bool (*write_pixels)(struct wlr_texture *texture,
+		enum wl_shm_format wl_fmt, uint32_t stride, uint32_t width,
+		uint32_t height, uint32_t src_x, uint32_t src_y, uint32_t dst_x,
+		uint32_t dst_y, const void *data);
 	void (*destroy)(struct wlr_texture *texture);
 };
 
 void wlr_texture_init(struct wlr_texture *texture,
-		struct wlr_texture_impl *impl);
-void wlr_texture_bind(struct wlr_texture *texture);
-void wlr_texture_get_buffer_size(struct wlr_texture *texture,
-		struct wl_resource *resource, int *width, int *height);
+	const struct wlr_texture_impl *impl);
 
 #endif

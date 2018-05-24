@@ -9,6 +9,10 @@
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_gamma_control.h>
 #include <wlr/types/wlr_idle.h>
+#include <wlr/types/wlr_idle_inhibit_v1.h>
+#include <wlr/types/wlr_input_inhibitor.h>
+#include <wlr/types/wlr_layer_shell.h>
+#include <wlr/types/wlr_linux_dmabuf.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_primary_selection.h>
 #include <wlr/types/wlr_server_decoration.h>
@@ -16,11 +20,27 @@
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_shell_v6.h>
 #include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/types/wlr_xdg_output.h>
 #include <wlr/util/log.h>
+#include "rootston/layers.h"
 #include "rootston/seat.h"
 #include "rootston/server.h"
 #include "rootston/view.h"
 #include "rootston/xcursor.h"
+#include "wlr-layer-shell-unstable-v1-protocol.h"
+
+struct roots_view *view_create(struct roots_desktop *desktop) {
+	struct roots_view *view = calloc(1, sizeof(struct roots_view));
+	if (!view) {
+		return NULL;
+	}
+	view->desktop = desktop;
+	view->alpha = 1.0f;
+	wl_signal_init(&view->events.unmap);
+	wl_signal_init(&view->events.destroy);
+	wl_list_init(&view->children);
+	return view;
+}
 
 void view_get_box(const struct roots_view *view, struct wlr_box *box) {
 	box->x = view->x;
@@ -41,7 +61,8 @@ void view_get_deco_box(const struct roots_view *view, struct wlr_box *box) {
 	box->height += (view->border_width * 2 + view->titlebar_height);
 }
 
-enum roots_deco_part view_get_deco_part(struct roots_view *view, double sx, double sy) {
+enum roots_deco_part view_get_deco_part(struct roots_view *view, double sx,
+		double sy) {
 	if (!view->decorated) {
 		return ROOTS_DECO_PART_NONE;
 	}
@@ -81,9 +102,15 @@ enum roots_deco_part view_get_deco_part(struct roots_view *view, double sx, doub
 static void view_update_output(const struct roots_view *view,
 		const struct wlr_box *before) {
 	struct roots_desktop *desktop = view->desktop;
-	struct roots_output *output;
+
+	if (view->wlr_surface == NULL) {
+		return;
+	}
+
 	struct wlr_box box;
 	view_get_box(view, &box);
+
+	struct roots_output *output;
 	wl_list_for_each(output, &desktop->outputs, link) {
 		bool intersected = before != NULL && wlr_output_layout_intersects(
 			desktop->layout, output->wlr_output, before);
@@ -165,6 +192,25 @@ static struct wlr_output *view_get_output(struct roots_view *view) {
 		output_y);
 }
 
+void view_arrange_maximized(struct roots_view *view) {
+	struct wlr_box view_box;
+	view_get_box(view, &view_box);
+
+	struct wlr_output *output = view_get_output(view);
+	struct roots_output *roots_output = output->data;
+	struct wlr_box *output_box =
+		wlr_output_layout_get_box(view->desktop->layout, output);
+	struct wlr_box usable_area;
+	memcpy(&usable_area, &roots_output->usable_area,
+			sizeof(struct wlr_box));
+	usable_area.x += output_box->x;
+	usable_area.y += output_box->y;
+
+	view_move_resize(view, usable_area.x, usable_area.y,
+			usable_area.width, usable_area.height);
+	view_rotate(view, 0);
+}
+
 void view_maximize(struct roots_view *view, bool maximized) {
 	if (view->maximized == maximized) {
 		return;
@@ -175,23 +221,14 @@ void view_maximize(struct roots_view *view, bool maximized) {
 	}
 
 	if (!view->maximized && maximized) {
-		struct wlr_box view_box;
-		view_get_box(view, &view_box);
-
 		view->maximized = true;
 		view->saved.x = view->x;
 		view->saved.y = view->y;
 		view->saved.rotation = view->rotation;
-		view->saved.width = view_box.width;
-		view->saved.height = view_box.height;
+		view->saved.width = view->width;
+		view->saved.height = view->height;
 
-		struct wlr_output *output = view_get_output(view);
-		struct wlr_box *output_box =
-			wlr_output_layout_get_box(view->desktop->layout, output);
-
-		view_move_resize(view, output_box->x, output_box->y, output_box->width,
-			output_box->height);
-		view_rotate(view, 0);
+		view_arrange_maximized(view);
 	}
 
 	if (view->maximized && !maximized) {
@@ -268,6 +305,15 @@ void view_rotate(struct roots_view *view, float rotation) {
 	view_damage_whole(view);
 }
 
+void view_cycle_alpha(struct roots_view *view) {
+	view->alpha -= 0.05;
+	/* Don't go completely transparent */
+	if (view->alpha < 0.1) {
+		view->alpha = 1.0;
+	}
+	view_damage_whole(view);
+}
+
 void view_close(struct roots_view *view) {
 	if (view->close) {
 		view->close(view);
@@ -280,13 +326,7 @@ bool view_center(struct roots_view *view) {
 
 	struct roots_desktop *desktop = view->desktop;
 	struct roots_input *input = desktop->server->input;
-	struct roots_seat *seat = NULL, *_seat;
-	wl_list_for_each(_seat, &input->seats, link) {
-		if (!seat || (seat->seat->last_event.tv_sec > _seat->seat->last_event.tv_sec &&
-				seat->seat->last_event.tv_nsec > _seat->seat->last_event.tv_nsec)) {
-			seat = _seat;
-		}
-	}
+	struct roots_seat *seat = input_last_active_seat(input);
 	if (!seat) {
 		return false;
 	}
@@ -382,20 +422,22 @@ struct roots_subsurface *subsurface_create(struct roots_view *view,
 	return subsurface;
 }
 
-void view_finish(struct roots_view *view) {
-	view_damage_whole(view);
+void view_destroy(struct roots_view *view) {
+	if (view == NULL) {
+		return;
+	}
+
 	wl_signal_emit(&view->events.destroy, view);
 
-	wl_list_remove(&view->new_subsurface.link);
-
-	struct roots_view_child *child, *tmp;
-	wl_list_for_each_safe(child, tmp, &view->children, link) {
-		child->destroy(child);
+	if (view->wlr_surface != NULL) {
+		view_unmap(view);
 	}
 
-	if (view->fullscreen_output) {
-		view->fullscreen_output->fullscreen_view = NULL;
+	if (view->destroy) {
+		view->destroy(view);
 	}
+
+	free(view);
 }
 
 static void view_handle_new_subsurface(struct wl_listener *listener,
@@ -405,15 +447,13 @@ static void view_handle_new_subsurface(struct wl_listener *listener,
 	subsurface_create(view, wlr_subsurface);
 }
 
-void view_init(struct roots_view *view, struct roots_desktop *desktop) {
-	assert(view->wlr_surface);
+void view_map(struct roots_view *view, struct wlr_surface *surface) {
+	assert(view->wlr_surface == NULL);
 
-	view->desktop = desktop;
-	wl_signal_init(&view->events.destroy);
-	wl_list_init(&view->children);
+	view->wlr_surface = surface;
 
 	struct wlr_subsurface *subsurface;
-	wl_list_for_each(subsurface, &view->wlr_surface->subsurface_list,
+	wl_list_for_each(subsurface, &view->wlr_surface->subsurfaces,
 			parent_link) {
 		subsurface_create(view, subsurface);
 	}
@@ -422,18 +462,51 @@ void view_init(struct roots_view *view, struct roots_desktop *desktop) {
 	wl_signal_add(&view->wlr_surface->events.new_subsurface,
 		&view->new_subsurface);
 
+	wl_list_insert(&view->desktop->views, &view->link);
 	view_damage_whole(view);
 }
 
-void view_setup(struct roots_view *view) {
+void view_unmap(struct roots_view *view) {
+	assert(view->wlr_surface != NULL);
+
+	wl_signal_emit(&view->events.unmap, view);
+
+	view_damage_whole(view);
+	wl_list_remove(&view->link);
+
+	wl_list_remove(&view->new_subsurface.link);
+
+	struct roots_view_child *child, *tmp;
+	wl_list_for_each_safe(child, tmp, &view->children, link) {
+		child->destroy(child);
+	}
+
+	if (view->fullscreen_output != NULL) {
+		output_damage_whole(view->fullscreen_output);
+		view->fullscreen_output->fullscreen_view = NULL;
+		view->fullscreen_output = NULL;
+	}
+
+	view->wlr_surface = NULL;
+	view->width = view->height = 0;
+}
+
+void view_initial_focus(struct roots_view *view) {
 	struct roots_input *input = view->desktop->server->input;
 	// TODO what seat gets focus? the one with the last input event?
 	struct roots_seat *seat;
 	wl_list_for_each(seat, &input->seats, link) {
 		roots_seat_set_focus(seat, view);
 	}
+}
 
-	view_center(view);
+void view_setup(struct roots_view *view) {
+	view_initial_focus(view);
+
+	if (view->fullscreen_output == NULL && !view->maximized) {
+		view_center(view);
+	}
+
 	view_update_output(view, NULL);
 }
 
@@ -493,48 +566,38 @@ static bool view_at(struct roots_view *view, double lx, double ly,
 		double ox = view_sx - (double)box.width/2,
 			oy = view_sy - (double)box.height/2;
 		// Rotated coordinates
-		double rx = cos(view->rotation)*ox - sin(view->rotation)*oy,
-			ry = cos(view->rotation)*oy + sin(view->rotation)*ox;
+		double rx = cos(view->rotation)*ox + sin(view->rotation)*oy,
+			ry = cos(view->rotation)*oy - sin(view->rotation)*ox;
 		view_sx = rx + (double)box.width/2;
 		view_sy = ry + (double)box.height/2;
 	}
 
-	if (view->type == ROOTS_XDG_SHELL_V6_VIEW) {
-		double popup_sx, popup_sy;
-		struct wlr_xdg_surface_v6 *popup =
-			wlr_xdg_surface_v6_popup_at(view->xdg_surface_v6,
-				view_sx, view_sy, &popup_sx, &popup_sy);
-
-		if (popup) {
-			*sx = view_sx - popup_sx;
-			*sy = view_sy - popup_sy;
-			*surface = popup->surface;
-			return true;
-		}
+	double _sx, _sy;
+	struct wlr_surface *_surface = NULL;
+	switch (view->type) {
+	case ROOTS_XDG_SHELL_V6_VIEW:
+		_surface = wlr_xdg_surface_v6_surface_at(view->xdg_surface_v6,
+			view_sx, view_sy, &_sx, &_sy);
+		break;
+	case ROOTS_XDG_SHELL_VIEW:
+		_surface = wlr_xdg_surface_surface_at(view->xdg_surface,
+			view_sx, view_sy, &_sx, &_sy);
+		break;
+	case ROOTS_WL_SHELL_VIEW:
+		_surface = wlr_wl_shell_surface_surface_at(view->wl_shell_surface,
+			view_sx, view_sy, &_sx, &_sy);
+		break;
+#ifdef WLR_HAS_XWAYLAND
+	case ROOTS_XWAYLAND_VIEW:
+		_surface = wlr_surface_surface_at(view->wlr_surface,
+			view_sx, view_sy, &_sx, &_sy);
+		break;
+#endif
 	}
-
-	if (view->type == ROOTS_WL_SHELL_VIEW) {
-		double popup_sx, popup_sy;
-		struct wlr_wl_shell_surface *popup =
-			wlr_wl_shell_surface_popup_at(view->wl_shell_surface,
-				view_sx, view_sy, &popup_sx, &popup_sy);
-
-		if (popup) {
-			*sx = view_sx - popup_sx;
-			*sy = view_sy - popup_sy;
-			*surface = popup->surface;
-			return true;
-		}
-	}
-
-	double sub_x, sub_y;
-	struct wlr_subsurface *subsurface =
-		wlr_surface_subsurface_at(view->wlr_surface,
-			view_sx, view_sy, &sub_x, &sub_y);
-	if (subsurface) {
-		*sx = view_sx - sub_x;
-		*sy = view_sy - sub_y;
-		*surface = subsurface->surface;
+	if (_surface != NULL) {
+		*sx = _sx;
+		*sy = _sy;
+		*surface = _surface;
 		return true;
 	}
 
@@ -545,20 +608,12 @@ static bool view_at(struct roots_view *view, double lx, double ly,
 		return true;
 	}
 
-	if (wlr_box_contains_point(&box, view_sx, view_sy) &&
-			pixman_region32_contains_point(&view->wlr_surface->current->input,
-				view_sx, view_sy, NULL)) {
-		*sx = view_sx;
-		*sy = view_sy;
-		*surface = view->wlr_surface;
-		return true;
-	}
-
 	return false;
 }
 
-struct roots_view *desktop_view_at(struct roots_desktop *desktop, double lx,
-		double ly, struct wlr_surface **surface, double *sx, double *sy) {
+static struct roots_view *desktop_view_at(struct roots_desktop *desktop,
+		double lx, double ly, struct wlr_surface **surface,
+		double *sx, double *sy) {
 	struct wlr_output *wlr_output =
 		wlr_output_layout_output_at(desktop->layout, lx, ly);
 	if (wlr_output != NULL) {
@@ -577,6 +632,75 @@ struct roots_view *desktop_view_at(struct roots_desktop *desktop, double lx,
 	wl_list_for_each(view, &desktop->views, link) {
 		if (view_at(view, lx, ly, surface, sx, sy)) {
 			return view;
+		}
+	}
+	return NULL;
+}
+
+static struct wlr_surface *layer_surface_at(struct roots_output *output,
+		struct wl_list *layer, double ox, double oy, double *sx, double *sy) {
+	struct roots_layer_surface *roots_surface;
+	wl_list_for_each_reverse(roots_surface, layer, link) {
+		double _sx = ox - roots_surface->geo.x;
+		double _sy = oy - roots_surface->geo.y;
+
+		struct wlr_surface *sub = wlr_layer_surface_surface_at(
+			roots_surface->layer_surface, _sx, _sy, sx, sy);
+
+		if (sub) {
+			return sub;
+		}
+	}
+
+	return NULL;
+}
+
+struct wlr_surface *desktop_surface_at(struct roots_desktop *desktop,
+		double lx, double ly, double *sx, double *sy,
+		struct roots_view **view) {
+	struct wlr_surface *surface = NULL;
+	struct wlr_output *wlr_output =
+		wlr_output_layout_output_at(desktop->layout, lx, ly);
+	struct roots_output *roots_output = NULL;
+	double ox = lx, oy = ly;
+	if (view) {
+		*view = NULL;
+	}
+
+	if (wlr_output) {
+		roots_output = wlr_output->data;
+		wlr_output_layout_output_coords(desktop->layout, wlr_output, &ox, &oy);
+
+		if ((surface = layer_surface_at(roots_output,
+					&roots_output->layers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY],
+					ox, oy, sx, sy))) {
+			return surface;
+		}
+		if ((surface = layer_surface_at(roots_output,
+					&roots_output->layers[ZWLR_LAYER_SHELL_V1_LAYER_TOP],
+					ox, oy, sx, sy))) {
+			return surface;
+		}
+	}
+
+	struct roots_view *_view;
+	if ((_view = desktop_view_at(desktop, lx, ly, &surface, sx, sy))) {
+		if (view) {
+			*view = _view;
+		}
+		return surface;
+	}
+
+	if (wlr_output) {
+		if ((surface = layer_surface_at(roots_output,
+					&roots_output->layers[ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM],
+					ox, oy, sx, sy))) {
+			return surface;
+		}
+		if ((surface = layer_surface_at(roots_output,
+					&roots_output->layers[ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND],
+					ox, oy, sx, sy))) {
+			return surface;
 		}
 	}
 	return NULL;
@@ -610,6 +734,25 @@ static void handle_layout_change(struct wl_listener *listener, void *data) {
 	}
 }
 
+static void input_inhibit_activate(struct wl_listener *listener, void *data) {
+	struct roots_desktop *desktop = wl_container_of(
+			listener, desktop, input_inhibit_activate);
+	struct roots_seat *seat;
+	wl_list_for_each(seat, &desktop->server->input->seats, link) {
+		roots_seat_set_exclusive_client(seat,
+				desktop->input_inhibit->active_client);
+	}
+}
+
+static void input_inhibit_deactivate(struct wl_listener *listener, void *data) {
+	struct roots_desktop *desktop = wl_container_of(
+			listener, desktop, input_inhibit_deactivate);
+	struct roots_seat *seat;
+	wl_list_for_each(seat, &desktop->server->input->seats, link) {
+		roots_seat_set_exclusive_client(seat, NULL);
+	}
+}
+
 struct roots_desktop *desktop_create(struct roots_server *server,
 		struct roots_config *config) {
 	wlr_log(L_DEBUG, "Initializing roots desktop");
@@ -629,6 +772,7 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 	desktop->config = config;
 
 	desktop->layout = wlr_output_layout_create();
+	wlr_xdg_output_manager_create(server->wl_display, desktop->layout);
 	desktop->layout_change.notify = handle_layout_change;
 	wl_signal_add(&desktop->layout->events.change, &desktop->layout_change);
 
@@ -649,6 +793,11 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 	wl_signal_add(&desktop->wl_shell->events.new_surface,
 		&desktop->wl_shell_surface);
 	desktop->wl_shell_surface.notify = handle_wl_shell_surface;
+
+	desktop->layer_shell = wlr_layer_shell_create(server->wl_display);
+	wl_signal_add(&desktop->layer_shell->events.new_surface,
+		&desktop->layer_shell_surface);
+	desktop->layer_shell_surface.notify = handle_layer_shell_surface;
 
 #ifdef WLR_HAS_XWAYLAND
 	const char *cursor_theme = NULL;
@@ -673,7 +822,7 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 
 	if (config->xwayland) {
 		desktop->xwayland = wlr_xwayland_create(server->wl_display,
-			desktop->compositor);
+			desktop->compositor, config->xwayland_lazy);
 		wl_signal_add(&desktop->xwayland->events.new_surface,
 			&desktop->xwayland_surface);
 		desktop->xwayland_surface.notify = handle_xwayland_surface;
@@ -686,7 +835,7 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 		if (xcursor != NULL) {
 			struct wlr_xcursor_image *image = xcursor->images[0];
 			wlr_xwayland_set_cursor(desktop->xwayland, image->buffer,
-				image->width, image->width, image->height, image->hotspot_x,
+				image->width * 4, image->width, image->height, image->hotspot_x,
 				image->hotspot_y);
 		}
 	}
@@ -703,7 +852,19 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 	desktop->primary_selection_device_manager =
 		wlr_primary_selection_device_manager_create(server->wl_display);
 	desktop->idle = wlr_idle_create(server->wl_display);
+	desktop->idle_inhibit = wlr_idle_inhibit_v1_create(server->wl_display);
 
+	desktop->input_inhibit =
+		wlr_input_inhibit_manager_create(server->wl_display);
+	desktop->input_inhibit_activate.notify = input_inhibit_activate;
+	wl_signal_add(&desktop->input_inhibit->events.activate,
+			&desktop->input_inhibit_activate);
+	desktop->input_inhibit_deactivate.notify = input_inhibit_deactivate;
+	wl_signal_add(&desktop->input_inhibit->events.deactivate,
+			&desktop->input_inhibit_deactivate);
+
+	desktop->linux_dmabuf = wlr_linux_dmabuf_create(server->wl_display,
+		server->renderer);
 	return desktop;
 }
 

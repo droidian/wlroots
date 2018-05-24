@@ -54,14 +54,9 @@ static void backend_destroy(struct wlr_backend *wlr_backend) {
 
 	wlr_signal_emit_safe(&wlr_backend->events.destroy, backend);
 
+	wlr_renderer_destroy(backend->renderer);
 	wlr_egl_finish(&backend->egl);
 	free(backend);
-}
-
-static struct wlr_egl *backend_get_egl(struct wlr_backend *wlr_backend) {
-	struct wlr_headless_backend *backend =
-		(struct wlr_headless_backend *)wlr_backend;
-	return &backend->egl;
 }
 
 static struct wlr_renderer *backend_get_renderer(
@@ -74,7 +69,6 @@ static struct wlr_renderer *backend_get_renderer(
 static const struct wlr_backend_impl backend_impl = {
 	.start = backend_start,
 	.destroy = backend_destroy,
-	.get_egl = backend_get_egl,
 	.get_renderer = backend_get_renderer,
 };
 
@@ -114,7 +108,7 @@ struct wlr_backend *wlr_headless_backend_create(struct wl_display *display) {
 		return NULL;
 	}
 
-	backend->renderer = wlr_gles2_renderer_create(&backend->backend);
+	backend->renderer = wlr_gles2_renderer_create(&backend->egl);
 	if (backend->renderer == NULL) {
 		wlr_log(L_ERROR, "Failed to create renderer");
 	}

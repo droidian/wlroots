@@ -1,8 +1,8 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GLES2/gl2.h>
 #include <stdlib.h>
 #include <wlr/interfaces/wlr_output.h>
+#include <wlr/render/wlr_renderer.h>
 #include <wlr/util/log.h>
 #include "backend/headless.h"
 #include "util/signal.h"
@@ -13,7 +13,7 @@ static EGLSurface egl_create_surface(struct wlr_egl *egl, unsigned int width,
 
 	EGLSurface surf = eglCreatePbufferSurface(egl->display, egl->config, attribs);
 	if (surf == EGL_NO_SURFACE) {
-		wlr_log(L_ERROR, "Failed to create EGL surface: %s", egl_error());
+		wlr_log(L_ERROR, "Failed to create EGL surface");
 		return EGL_NO_SURFACE;
 	}
 	return surf;
@@ -25,9 +25,11 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 		(struct wlr_headless_output *)wlr_output;
 	struct wlr_headless_backend *backend = output->backend;
 
-	if (output->egl_surface) {
-		eglDestroySurface(backend->egl.display, output->egl_surface);
+	if (refresh <= 0) {
+		refresh = HEADLESS_DEFAULT_REFRESH;
 	}
+
+	wlr_egl_destroy_surface(&backend->egl, output->egl_surface);
 
 	output->egl_surface = egl_create_surface(&backend->egl, width, height);
 	if (output->egl_surface == EGL_NO_SURFACE) {
@@ -67,7 +69,9 @@ static void output_destroy(struct wlr_output *wlr_output) {
 
 	wl_list_remove(&output->link);
 
-	eglDestroySurface(output->backend->egl.display, output->egl_surface);
+	wl_event_source_remove(output->frame_timer);
+
+	wlr_egl_destroy_surface(&output->backend->egl, output->egl_surface);
 	free(output);
 }
 
@@ -112,22 +116,20 @@ struct wlr_output *wlr_headless_add_output(struct wlr_backend *wlr_backend,
 		goto error;
 	}
 
-	output_set_custom_mode(wlr_output, width, height, 60*1000);
+	output_set_custom_mode(wlr_output, width, height, 0);
 	strncpy(wlr_output->make, "headless", sizeof(wlr_output->make));
 	strncpy(wlr_output->model, "headless", sizeof(wlr_output->model));
 	snprintf(wlr_output->name, sizeof(wlr_output->name), "HEADLESS-%d",
 		wl_list_length(&backend->outputs) + 1);
 
-	if (!eglMakeCurrent(output->backend->egl.display,
-			output->egl_surface, output->egl_surface,
-			output->backend->egl.context)) {
-		wlr_log(L_ERROR, "eglMakeCurrent failed: %s", egl_error());
+	if (!wlr_egl_make_current(&output->backend->egl, output->egl_surface,
+			NULL)) {
 		goto error;
 	}
 
-	glViewport(0, 0, wlr_output->width, wlr_output->height);
-	glClearColor(1.0, 1.0, 1.0, 1.0);
-	glClear(GL_COLOR_BUFFER_BIT);
+	wlr_renderer_begin(backend->renderer, wlr_output->width, wlr_output->height);
+	wlr_renderer_clear(backend->renderer, (float[]){ 1.0, 1.0, 1.0, 1.0 });
+	wlr_renderer_end(backend->renderer);
 
 	struct wl_event_loop *ev = wl_display_get_event_loop(backend->display);
 	output->frame_timer = wl_event_loop_add_timer(ev, signal_frame, output);

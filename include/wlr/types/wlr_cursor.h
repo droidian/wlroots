@@ -7,12 +7,37 @@
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_output.h>
 
+/**
+ * wlr_cursor implements the behavior of the "cursor", that is, the image on the
+ * screen typically moved about with a mouse or so. It provides tracking for
+ * this in global coordinates, and integrates with wlr_output,
+ * wlr_output_layout, and wlr_input_device. You can use it to abstract multiple
+ * input devices over a single cursor, constrain cursor movement to the usable
+ * area of a wlr_output_layout and communicate position updates to the hardware
+ * cursor, constrain specific input devices to specific outputs or regions of
+ * the screen, and so on.
+ */
+
 struct wlr_cursor_state;
 
 struct wlr_cursor {
 	struct wlr_cursor_state *state;
 	double x, y;
 
+	/**
+	 * The interpretation of these signals is the responsibility of the
+	 * compositor, but some helpers are provided for your benefit. If you
+	 * receive a relative motion event, for example, you may want to call
+	 * wlr_cursor_move. If you receive an absolute event, call
+	 * wlr_cursor_warp_absolute. If you pass an input device into these
+	 * functions, it will apply the region/output constraints associated with
+	 * that device to the resulting cursor motion. If an output layout is
+	 * attached, these functions will constrain the resulting cursor motion to
+	 * within the usable space of the output layout.
+	 *
+	 * Re-broadcasting these signals to, for example, a wlr_seat, is also your
+	 * responsibility.
+	 */
 	struct {
 		struct wl_signal motion;
 		struct wl_signal motion_absolute;
@@ -29,6 +54,8 @@ struct wlr_cursor {
 		struct wl_signal tablet_tool_tip;
 		struct wl_signal tablet_tool_button;
 	} events;
+
+	void *data;
 };
 
 struct wlr_cursor *wlr_cursor_create();
@@ -42,16 +69,34 @@ void wlr_cursor_destroy(struct wlr_cursor *cur);
  * `dev` may be passed to respect device mapping constraints. If `dev` is NULL,
  * device mapping constraints will be ignored.
  *
- * Returns true when the mouse warp was successful.
+ * Returns true when the cursor warp was successful.
  */
 bool wlr_cursor_warp(struct wlr_cursor *cur, struct wlr_input_device *dev,
-	double x, double y);
-
-void wlr_cursor_warp_absolute(struct wlr_cursor *cur,
-	struct wlr_input_device *dev, double x_mm, double y_mm);
+	double lx, double ly);
 
 /**
- * Move the cursor in the direction of the given x and y coordinates.
+ * Convert absolute 0..1 coordinates to layout coordinates.
+ *
+ * `dev` may be passed to respect device mapping constraints. If `dev` is NULL,
+ * device mapping constraints will be ignored.
+ */
+void wlr_cursor_absolute_to_layout_coords(struct wlr_cursor *cur,
+	struct wlr_input_device *dev, double x, double y, double *lx, double *ly);
+
+/**
+ * Warp the cursor to the given x and y in absolute 0..1 coordinates. If the
+ * given point is out of the layout boundaries or constraints, the closest point
+ * will be used. If one coordinate is NAN, it will be ignored.
+ *
+ * `dev` may be passed to respect device mapping constraints. If `dev` is NULL,
+ * device mapping constraints will be ignored.
+ */
+void wlr_cursor_warp_absolute(struct wlr_cursor *cur,
+	struct wlr_input_device *dev, double x, double y);
+
+/**
+ * Move the cursor in the direction of the given x and y layout coordinates. If
+ * one coordinate is NAN, it will be ignored.
  *
  * `dev` may be passed to respect device mapping constraints. If `dev` is NULL,
  * device mapping constraints will be ignored.
@@ -72,7 +117,7 @@ void wlr_cursor_set_image(struct wlr_cursor *cur, const uint8_t *pixels,
 
 /**
  * Set the cursor surface. The surface can be committed to update the cursor
- * image. The surface position is substracted from the hotspot. A NULL surface
+ * image. The surface position is subtracted from the hotspot. A NULL surface
  * commit hides the cursor.
  */
 void wlr_cursor_set_surface(struct wlr_cursor *cur, struct wlr_surface *surface,
@@ -125,12 +170,5 @@ void wlr_cursor_map_to_region(struct wlr_cursor *cur, struct wlr_box *box);
  */
 void wlr_cursor_map_input_to_region(struct wlr_cursor *cur,
 	struct wlr_input_device *dev, struct wlr_box *box);
-
-/**
- * Convert absolute coordinates to layout coordinates for the device.
- */
-bool wlr_cursor_absolute_to_layout_coords(struct wlr_cursor *cur,
-		struct wlr_input_device *device, double x_mm, double y_mm,
-		double width_mm, double height_mm, double *lx, double *ly);
 
 #endif

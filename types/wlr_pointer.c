@@ -5,7 +5,7 @@
 #include <wlr/types/wlr_pointer.h>
 
 void wlr_pointer_init(struct wlr_pointer *pointer,
-		struct wlr_pointer_impl *impl) {
+		const struct wlr_pointer_impl *impl) {
 	pointer->impl = impl;
 	wl_signal_init(&pointer->events.motion);
 	wl_signal_init(&pointer->events.motion_absolute);
@@ -14,7 +14,10 @@ void wlr_pointer_init(struct wlr_pointer *pointer,
 }
 
 void wlr_pointer_destroy(struct wlr_pointer *pointer) {
-	if (pointer && pointer->impl && pointer->impl->destroy) {
+	if (!pointer) {
+		return;
+	}
+	if (pointer->impl && pointer->impl->destroy) {
 		pointer->impl->destroy(pointer);
 	} else {
 		wl_list_remove(&pointer->events.motion.listener_list);

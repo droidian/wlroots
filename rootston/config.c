@@ -25,7 +25,9 @@ static void usage(const char *name, int ret) {
 		"                (default: rootston.ini).\n"
 		"                See `rootston.ini.example` for config\n"
 		"                file documentation.\n"
-		" -E <COMMAND>   Command that will be ran at startup.\n" , name);
+		" -E <COMMAND>   Command that will be ran at startup.\n"
+		" -D             Enable damage tracking debugging.\n",
+		name);
 
 	exit(ret);
 }
@@ -238,6 +240,9 @@ static int config_ini_handler(void *user, const char *section, const char *name,
 		if (strcmp(name, "xwayland") == 0) {
 			if (strcasecmp(value, "true") == 0) {
 				config->xwayland = true;
+			} else if (strcasecmp(value, "immediate") == 0) {
+				config->xwayland = true;
+				config->xwayland_lazy = false;
 			} else if (strcasecmp(value, "false") == 0) {
 				config->xwayland = false;
 			} else {
@@ -387,6 +392,7 @@ struct roots_config *roots_config_create_from_args(int argc, char *argv[]) {
 	}
 
 	config->xwayland = true;
+	config->xwayland_lazy = true;
 	wl_list_init(&config->outputs);
 	wl_list_init(&config->devices);
 	wl_list_init(&config->keyboards);
@@ -394,13 +400,16 @@ struct roots_config *roots_config_create_from_args(int argc, char *argv[]) {
 	wl_list_init(&config->bindings);
 
 	int c;
-	while ((c = getopt(argc, argv, "C:E:h")) != -1) {
+	while ((c = getopt(argc, argv, "C:E:hD")) != -1) {
 		switch (c) {
 		case 'C':
 			config->config_path = strdup(optarg);
 			break;
 		case 'E':
 			config->startup_cmd = strdup(optarg);
+			break;
+		case 'D':
+			config->debug_damage_tracking = true;
 			break;
 		case 'h':
 		case '?':
@@ -413,7 +422,10 @@ struct roots_config *roots_config_create_from_args(int argc, char *argv[]) {
 		char cwd[MAXPATHLEN];
 		if (getcwd(cwd, sizeof(cwd)) != NULL) {
 			char buf[MAXPATHLEN];
-			snprintf(buf, MAXPATHLEN, "%s/%s", cwd, "rootston.ini");
+			if (snprintf(buf, MAXPATHLEN, "%s/%s", cwd, "rootston.ini") >= MAXPATHLEN) {
+				wlr_log(L_ERROR, "config path too long");
+				exit(1);
+			}
 			config->config_path = strdup(buf);
 		} else {
 			wlr_log(L_ERROR, "could not get cwd");

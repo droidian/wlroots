@@ -24,7 +24,7 @@ union wlr_drm_connector_props {
 
 union wlr_drm_crtc_props {
 	struct {
-		// Neither of these are guranteed to exist
+		// Neither of these are guaranteed to exist
 		uint32_t rotation;
 		uint32_t scaling_mode;
 
@@ -41,7 +41,7 @@ union wlr_drm_crtc_props {
 union wlr_drm_plane_props {
 	struct {
 		uint32_t type;
-		uint32_t rotation; // Not guranteed to exist
+		uint32_t rotation; // Not guaranteed to exist
 
 		// atomic-modesetting only
 
@@ -59,11 +59,12 @@ union wlr_drm_plane_props {
 	uint32_t props[12];
 };
 
-bool wlr_drm_get_connector_props(int fd, uint32_t id, union wlr_drm_connector_props *out);
-bool wlr_drm_get_crtc_props(int fd, uint32_t id, union wlr_drm_crtc_props *out);
-bool wlr_drm_get_plane_props(int fd, uint32_t id, union wlr_drm_plane_props *out);
+bool get_drm_connector_props(int fd, uint32_t id,
+	union wlr_drm_connector_props *out);
+bool get_drm_crtc_props(int fd, uint32_t id, union wlr_drm_crtc_props *out);
+bool get_drm_plane_props(int fd, uint32_t id, union wlr_drm_plane_props *out);
 
-bool wlr_drm_get_prop(int fd, uint32_t obj, uint32_t prop, uint64_t *ret);
-void *wlr_drm_get_prop_blob(int fd, uint32_t obj, uint32_t prop, size_t *ret_len);
+bool get_drm_prop(int fd, uint32_t obj, uint32_t prop, uint64_t *ret);
+void *get_drm_prop_blob(int fd, uint32_t obj, uint32_t prop, size_t *ret_len);
 
 #endif

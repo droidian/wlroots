@@ -1,10 +1,10 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <wlr/backend/drm.h>
 #include <wlr/backend/interface.h>
 #include <wlr/backend/session.h>
 #include <wlr/util/log.h>
-#include "backend/drm/drm.h"
 #include "backend/multi.h"
 #include "util/signal.h"
 
@@ -52,18 +52,6 @@ static void multi_backend_destroy(struct wlr_backend *wlr_backend) {
 	free(backend);
 }
 
-static struct wlr_egl *multi_backend_get_egl(struct wlr_backend *wlr_backend) {
-	struct wlr_multi_backend *backend = (struct wlr_multi_backend *)wlr_backend;
-	struct subbackend_state *sub;
-	wl_list_for_each(sub, &backend->backends, link) {
-		struct wlr_egl *egl = wlr_backend_get_egl(sub->backend);
-		if (egl) {
-			return egl;
-		}
-	}
-	return NULL;
-}
-
 static struct wlr_renderer *multi_backend_get_renderer(
 		struct wlr_backend *backend) {
 	struct wlr_multi_backend *multi = (struct wlr_multi_backend *)backend;
@@ -80,7 +68,6 @@ static struct wlr_renderer *multi_backend_get_renderer(
 struct wlr_backend_impl backend_impl = {
 	.start = multi_backend_start,
 	.destroy = multi_backend_destroy,
-	.get_egl = multi_backend_get_egl,
 	.get_renderer = multi_backend_get_renderer,
 };
 
@@ -143,20 +130,29 @@ static struct subbackend_state *multi_backend_get_subbackend(struct wlr_multi_ba
 	return NULL;
 }
 
-void wlr_multi_backend_add(struct wlr_backend *_multi,
+bool wlr_multi_backend_add(struct wlr_backend *_multi,
 		struct wlr_backend *backend) {
 	assert(wlr_backend_is_multi(_multi));
 	struct wlr_multi_backend *multi = (struct wlr_multi_backend *)_multi;
 
 	if (multi_backend_get_subbackend(multi, backend)) {
 		// already added
-		return;
+		return true;
 	}
 
-	struct subbackend_state *sub;
-	if (!(sub = calloc(1, sizeof(struct subbackend_state)))) {
+	struct wlr_renderer *multi_renderer =
+		multi_backend_get_renderer(&multi->backend);
+	struct wlr_renderer *backend_renderer = wlr_backend_get_renderer(backend);
+	if (multi_renderer != NULL && backend_renderer != NULL) {
+		wlr_log(L_ERROR, "Could not add backend: multiple renderers at the "
+			"same time aren't supported");
+		return false;
+	}
+
+	struct subbackend_state *sub = calloc(1, sizeof(struct subbackend_state));
+	if (sub == NULL) {
 		wlr_log(L_ERROR, "Could not add backend: allocation failed");
-		return;
+		return false;
 	}
 	wl_list_insert(&multi->backends, &sub->link);
 
@@ -173,6 +169,7 @@ void wlr_multi_backend_add(struct wlr_backend *_multi,
 	sub->new_output.notify = new_output_reemit;
 
 	wlr_signal_emit_safe(&multi->events.backend_add, backend);
+	return true;
 }
 
 void wlr_multi_backend_remove(struct wlr_backend *_multi,

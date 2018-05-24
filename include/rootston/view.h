@@ -1,6 +1,5 @@
 #ifndef ROOTSTON_VIEW_H
 #define ROOTSTON_VIEW_H
-
 #include <stdbool.h>
 #include <wlr/config.h>
 #include <wlr/types/wlr_box.h>
@@ -27,6 +26,8 @@ struct roots_xdg_surface_v6 {
 
 	struct wl_listener destroy;
 	struct wl_listener new_popup;
+	struct wl_listener map;
+	struct wl_listener unmap;
 	struct wl_listener request_move;
 	struct wl_listener request_resize;
 	struct wl_listener request_maximize;
@@ -42,6 +43,8 @@ struct roots_xdg_surface {
 
 	struct wl_listener destroy;
 	struct wl_listener new_popup;
+	struct wl_listener map;
+	struct wl_listener unmap;
 	struct wl_listener request_move;
 	struct wl_listener request_resize;
 	struct wl_listener request_maximize;
@@ -61,8 +64,8 @@ struct roots_xwayland_surface {
 	struct wl_listener request_resize;
 	struct wl_listener request_maximize;
 	struct wl_listener request_fullscreen;
-	struct wl_listener map_notify;
-	struct wl_listener unmap_notify;
+	struct wl_listener map;
+	struct wl_listener unmap;
 
 	struct wl_listener surface_commit;
 };
@@ -83,6 +86,7 @@ struct roots_view {
 	double x, y;
 	uint32_t width, height;
 	float rotation;
+	float alpha;
 
 	bool decorated;
 	int border_width;
@@ -127,6 +131,7 @@ struct roots_view {
 	struct wl_listener new_subsurface;
 
 	struct {
+		struct wl_signal unmap;
 		struct wl_signal destroy;
 	} events;
 
@@ -139,6 +144,7 @@ struct roots_view {
 	void (*maximize)(struct roots_view *view, bool maximized);
 	void (*set_fullscreen)(struct roots_view *view, bool fullscreen);
 	void (*close)(struct roots_view *view);
+	void (*destroy)(struct roots_view *view);
 };
 
 struct roots_view_child {
@@ -170,6 +176,8 @@ struct roots_xdg_popup_v6 {
 	struct roots_view_child view_child;
 	struct wlr_xdg_popup_v6 *wlr_popup;
 	struct wl_listener destroy;
+	struct wl_listener map;
+	struct wl_listener unmap;
 	struct wl_listener new_popup;
 };
 
@@ -177,6 +185,8 @@ struct roots_xdg_popup {
 	struct roots_view_child view_child;
 	struct wlr_xdg_popup *wlr_popup;
 	struct wl_listener destroy;
+	struct wl_listener map;
+	struct wl_listener unmap;
 	struct wl_listener new_popup;
 };
 
@@ -190,6 +200,7 @@ void view_maximize(struct roots_view *view, bool maximized);
 void view_set_fullscreen(struct roots_view *view, bool fullscreen,
 	struct wlr_output *output);
 void view_rotate(struct roots_view *view, float rotation);
+void view_cycle_alpha(struct roots_view *view);
 void view_close(struct roots_view *view);
 bool view_center(struct roots_view *view);
 void view_setup(struct roots_view *view);

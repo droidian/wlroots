@@ -1,20 +1,24 @@
+#include <assert.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <gbm.h>
-#include <GLES2/gl2.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <wayland-util.h>
-#include <wlr/render.h>
 #include <wlr/render/egl.h>
 #include <wlr/render/gles2.h>
-#include <wlr/render/matrix.h>
+#include <wlr/render/wlr_renderer.h>
+#include <wlr/types/wlr_matrix.h>
 #include <wlr/util/log.h>
 #include "backend/drm/drm.h"
 #include "glapi.h"
 
-bool wlr_drm_renderer_init(struct wlr_drm_backend *drm,
+#ifndef DRM_FORMAT_MOD_LINEAR
+#define DRM_FORMAT_MOD_LINEAR 0
+#endif
+
+bool init_drm_renderer(struct wlr_drm_backend *drm,
 		struct wlr_drm_renderer *renderer) {
 	renderer->gbm = gbm_create_device(drm->fd);
 	if (!renderer->gbm) {
@@ -27,7 +31,7 @@ bool wlr_drm_renderer_init(struct wlr_drm_backend *drm,
 		goto error_gbm;
 	}
 
-	renderer->wlr_rend = wlr_gles2_renderer_create(&drm->backend);
+	renderer->wlr_rend = wlr_gles2_renderer_create(&renderer->egl);
 	if (!renderer->wlr_rend) {
 		wlr_log(L_ERROR, "Failed to create WLR renderer");
 		goto error_egl;
@@ -43,7 +47,7 @@ error_gbm:
 	return false;
 }
 
-void wlr_drm_renderer_finish(struct wlr_drm_renderer *renderer) {
+void finish_drm_renderer(struct wlr_drm_renderer *renderer) {
 	if (!renderer) {
 		return;
 	}
@@ -53,7 +57,7 @@ void wlr_drm_renderer_finish(struct wlr_drm_renderer *renderer) {
 	gbm_device_destroy(renderer->gbm);
 }
 
-bool wlr_drm_surface_init(struct wlr_drm_surface *surf,
+bool init_drm_surface(struct wlr_drm_surface *surf,
 		struct wlr_drm_renderer *renderer, uint32_t width, uint32_t height,
 		uint32_t format, uint32_t flags) {
 	if (surf->width == width && surf->height == height) {
@@ -75,9 +79,7 @@ bool wlr_drm_surface_init(struct wlr_drm_surface *surf,
 		}
 		gbm_surface_destroy(surf->gbm);
 	}
-	if (surf->egl) {
-		eglDestroySurface(surf->renderer->egl.display, surf->egl);
-	}
+	wlr_egl_destroy_surface(&surf->renderer->egl, surf->egl);
 
 	surf->gbm = gbm_surface_create(renderer->gbm, width, height,
 		format, GBM_BO_USE_RENDERING | flags);
@@ -101,13 +103,10 @@ error_zero:
 	return false;
 }
 
-void wlr_drm_surface_finish(struct wlr_drm_surface *surf) {
+void finish_drm_surface(struct wlr_drm_surface *surf) {
 	if (!surf || !surf->renderer) {
 		return;
 	}
-
-	eglMakeCurrent(surf->renderer->egl.display, EGL_NO_SURFACE, EGL_NO_SURFACE,
-		EGL_NO_CONTEXT);
 
 	if (surf->front) {
 		gbm_surface_release_buffer(surf->gbm, surf->front);
@@ -116,9 +115,7 @@ void wlr_drm_surface_finish(struct wlr_drm_surface *surf) {
 		gbm_surface_release_buffer(surf->gbm, surf->back);
 	}
 
-	if (surf->egl) {
-		eglDestroySurface(surf->renderer->egl.display, surf->egl);
-	}
+	wlr_egl_destroy_surface(&surf->renderer->egl, surf->egl);
 	if (surf->gbm) {
 		gbm_surface_destroy(surf->gbm);
 	}
@@ -126,12 +123,12 @@ void wlr_drm_surface_finish(struct wlr_drm_surface *surf) {
 	memset(surf, 0, sizeof(*surf));
 }
 
-bool wlr_drm_surface_make_current(struct wlr_drm_surface *surf,
+bool make_drm_surface_current(struct wlr_drm_surface *surf,
 		int *buffer_damage) {
 	return wlr_egl_make_current(&surf->renderer->egl, surf->egl, buffer_damage);
 }
 
-struct gbm_bo *wlr_drm_surface_swap_buffers(struct wlr_drm_surface *surf,
+struct gbm_bo *swap_drm_surface_buffers(struct wlr_drm_surface *surf,
 		pixman_region32_t *damage) {
 	if (surf->front) {
 		gbm_surface_release_buffer(surf->gbm, surf->front);
@@ -144,19 +141,20 @@ struct gbm_bo *wlr_drm_surface_swap_buffers(struct wlr_drm_surface *surf,
 	return surf->back;
 }
 
-struct gbm_bo *wlr_drm_surface_get_front(struct wlr_drm_surface *surf) {
+struct gbm_bo *get_drm_surface_front(struct wlr_drm_surface *surf) {
 	if (surf->front) {
 		return surf->front;
 	}
 
-	wlr_drm_surface_make_current(surf, NULL);
-	glViewport(0, 0, surf->width, surf->height);
-	glClearColor(0.0, 0.0, 0.0, 1.0);
-	glClear(GL_COLOR_BUFFER_BIT);
-	return wlr_drm_surface_swap_buffers(surf, NULL);
+	make_drm_surface_current(surf, NULL);
+	struct wlr_renderer *renderer = surf->renderer->wlr_rend;
+	wlr_renderer_begin(renderer, surf->width, surf->height);
+	wlr_renderer_clear(renderer, (float[]){ 0.0, 0.0, 0.0, 1.0 });
+	wlr_renderer_end(renderer);
+	return swap_drm_surface_buffers(surf, NULL);
 }
 
-void wlr_drm_surface_post(struct wlr_drm_surface *surf) {
+void post_drm_surface(struct wlr_drm_surface *surf) {
 	if (surf->front) {
 		gbm_surface_release_buffer(surf->gbm, surf->front);
 		surf->front = NULL;
@@ -177,88 +175,74 @@ static void free_eglimage(struct gbm_bo *bo, void *data) {
 	free(tex);
 }
 
-static struct wlr_texture *get_tex_for_bo(struct wlr_drm_renderer *renderer, struct gbm_bo *bo) {
+static struct wlr_texture *get_tex_for_bo(struct wlr_drm_renderer *renderer,
+		struct gbm_bo *bo) {
 	struct tex *tex = gbm_bo_get_user_data(bo);
-	if (tex) {
+	if (tex != NULL) {
 		return tex->tex;
 	}
 
-	tex = malloc(sizeof(*tex));
-	if (!tex) {
-		wlr_log_errno(L_ERROR, "Allocation failed");
+	tex = calloc(1, sizeof(struct tex));
+	if (tex == NULL) {
 		return NULL;
 	}
 
-	tex->egl = &renderer->egl;
-
-	int dmabuf_fd = gbm_bo_get_fd(bo);
-	uint32_t width = gbm_bo_get_width(bo);
-	uint32_t height = gbm_bo_get_height(bo);
-
-	EGLint attribs[] = {
-		EGL_WIDTH, width,
-		EGL_HEIGHT, height,
-		EGL_LINUX_DRM_FOURCC_EXT, gbm_bo_get_format(bo),
-		EGL_DMA_BUF_PLANE0_FD_EXT, dmabuf_fd,
-		EGL_DMA_BUF_PLANE0_OFFSET_EXT, gbm_bo_get_offset(bo, 0),
-		EGL_DMA_BUF_PLANE0_PITCH_EXT, gbm_bo_get_stride_for_plane(bo, 0),
-		EGL_IMAGE_PRESERVED_KHR, EGL_FALSE,
-		EGL_NONE,
+	struct wlr_dmabuf_buffer_attribs attribs = {
+		.n_planes = 1,
+		.width = gbm_bo_get_width(bo),
+		.height = gbm_bo_get_height(bo),
+		.format = gbm_bo_get_format(bo),
 	};
+	attribs.offset[0] = 0;
+	attribs.stride[0] = gbm_bo_get_stride_for_plane(bo, 0);
+	attribs.modifier[0] = DRM_FORMAT_MOD_LINEAR;
+	attribs.fd[0] = gbm_bo_get_fd(bo);
 
-	tex->img = eglCreateImageKHR(renderer->egl.display, EGL_NO_CONTEXT,
-		EGL_LINUX_DMA_BUF_EXT, NULL, attribs);
-	if (!tex->img) {
-		wlr_log(L_ERROR, "Failed to create EGL image: %s", egl_error());
-		abort();
+	tex->tex = wlr_texture_from_dmabuf(renderer->wlr_rend, &attribs);
+	if (tex->tex == NULL) {
+		free(tex);
+		return NULL;
 	}
 
-	tex->tex = wlr_render_texture_create(renderer->wlr_rend);
-	wlr_texture_upload_eglimage(tex->tex, tex->img, width, height);
-
 	gbm_bo_set_user_data(bo, tex, free_eglimage);
-
 	return tex->tex;
 }
 
-struct gbm_bo *wlr_drm_surface_mgpu_copy(struct wlr_drm_surface *dest,
+struct gbm_bo *copy_drm_surface_mgpu(struct wlr_drm_surface *dest,
 		struct gbm_bo *src) {
-	wlr_drm_surface_make_current(dest, NULL);
+	make_drm_surface_current(dest, NULL);
 
 	struct wlr_texture *tex = get_tex_for_bo(dest->renderer, src);
+	assert(tex);
 
-	static const float matrix[16] = {
-		[0] = 2.0f,
-		[3] = -1.0f,
-		[5] = 2.0f,
-		[7] = -1.0f,
-		[10] = 1.0f,
-		[15] = 1.0f,
-	};
+	float mat[9];
+	wlr_matrix_projection(mat, 1, 1, WL_OUTPUT_TRANSFORM_FLIPPED_180);
 
-	glViewport(0, 0, dest->width, dest->height);
-	glClearColor(0.0, 0.0, 0.0, 1.0);
-	glClear(GL_COLOR_BUFFER_BIT);
-	wlr_render_with_matrix(dest->renderer->wlr_rend, tex, &matrix);
+	struct wlr_renderer *renderer = dest->renderer->wlr_rend;
+	wlr_renderer_begin(renderer, dest->width, dest->height);
+	wlr_renderer_clear(renderer, (float[]){ 0.0, 0.0, 0.0, 1.0 });
+	wlr_render_texture_with_matrix(renderer, tex, mat, 1.0f);
+	wlr_renderer_end(renderer);
 
-	return wlr_drm_surface_swap_buffers(dest, NULL);
+	return swap_drm_surface_buffers(dest, NULL);
 }
 
-bool wlr_drm_plane_surfaces_init(struct wlr_drm_plane *plane, struct wlr_drm_backend *drm,
-		int32_t width, uint32_t height, uint32_t format) {
+bool init_drm_plane_surfaces(struct wlr_drm_plane *plane,
+		struct wlr_drm_backend *drm, int32_t width, uint32_t height,
+		uint32_t format) {
 	if (!drm->parent) {
-		return wlr_drm_surface_init(&plane->surf, &drm->renderer, width, height,
+		return init_drm_surface(&plane->surf, &drm->renderer, width, height,
 			format, GBM_BO_USE_SCANOUT);
 	}
 
-	if (!wlr_drm_surface_init(&plane->surf, &drm->parent->renderer,
+	if (!init_drm_surface(&plane->surf, &drm->parent->renderer,
 			width, height, format, GBM_BO_USE_LINEAR)) {
 		return false;
 	}
 
-	if (!wlr_drm_surface_init(&plane->mgpu_surf, &drm->renderer,
+	if (!init_drm_surface(&plane->mgpu_surf, &drm->renderer,
 			width, height, format, GBM_BO_USE_SCANOUT)) {
-		wlr_drm_surface_finish(&plane->surf);
+		finish_drm_surface(&plane->surf);
 		return false;
 	}
 

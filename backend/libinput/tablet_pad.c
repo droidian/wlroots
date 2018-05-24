@@ -8,7 +8,7 @@
 #include "backend/libinput.h"
 #include "util/signal.h"
 
-struct wlr_tablet_pad *wlr_libinput_tablet_pad_create(
+struct wlr_tablet_pad *create_libinput_tablet_pad(
 		struct libinput_device *libinput_dev) {
 	assert(libinput_dev);
 	struct wlr_tablet_pad *wlr_tablet_pad = calloc(1, sizeof(struct wlr_tablet_pad));
@@ -34,6 +34,7 @@ void handle_tablet_pad_button(struct libinput_event *event,
 	wlr_event.time_msec =
 		usec_to_msec(libinput_event_tablet_pad_get_time_usec(pevent));
 	wlr_event.button = libinput_event_tablet_pad_get_button_number(pevent);
+	wlr_event.mode = libinput_event_tablet_pad_get_mode(pevent);
 	switch (libinput_event_tablet_pad_get_button_state(pevent)) {
 	case LIBINPUT_BUTTON_STATE_PRESSED:
 		wlr_event.state = WLR_BUTTON_PRESSED;
@@ -60,6 +61,7 @@ void handle_tablet_pad_ring(struct libinput_event *event,
 		usec_to_msec(libinput_event_tablet_pad_get_time_usec(pevent));
 	wlr_event.ring = libinput_event_tablet_pad_get_ring_number(pevent);
 	wlr_event.position = libinput_event_tablet_pad_get_ring_position(pevent);
+	wlr_event.mode = libinput_event_tablet_pad_get_mode(pevent);
 	switch (libinput_event_tablet_pad_get_ring_source(pevent)) {
 	case LIBINPUT_TABLET_PAD_RING_SOURCE_UNKNOWN:
 		wlr_event.source = WLR_TABLET_PAD_RING_SOURCE_UNKNOWN;
@@ -86,6 +88,7 @@ void handle_tablet_pad_strip(struct libinput_event *event,
 		usec_to_msec(libinput_event_tablet_pad_get_time_usec(pevent));
 	wlr_event.strip = libinput_event_tablet_pad_get_strip_number(pevent);
 	wlr_event.position = libinput_event_tablet_pad_get_strip_position(pevent);
+	wlr_event.mode = libinput_event_tablet_pad_get_mode(pevent);
 	switch (libinput_event_tablet_pad_get_strip_source(pevent)) {
 	case LIBINPUT_TABLET_PAD_STRIP_SOURCE_UNKNOWN:
 		wlr_event.source = WLR_TABLET_PAD_STRIP_SOURCE_UNKNOWN;

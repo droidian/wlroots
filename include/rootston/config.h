@@ -60,14 +60,17 @@ struct roots_cursor_config {
 
 struct roots_config {
 	bool xwayland;
+	bool xwayland_lazy;
 
 	struct wl_list outputs;
 	struct wl_list devices;
 	struct wl_list bindings;
 	struct wl_list keyboards;
 	struct wl_list cursors;
+
 	char *config_path;
 	char *startup_cmd;
+	bool debug_damage_tracking;
 };
 
 /**

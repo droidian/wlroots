@@ -7,8 +7,8 @@
 #include <wayland-server.h>
 #include <wayland-util.h>
 #include <wlr/backend/wayland.h>
-#include <wlr/render.h>
 #include <wlr/render/egl.h>
+#include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_box.h>
 
 struct wlr_wl_backend {
@@ -32,32 +32,31 @@ struct wlr_wl_backend {
 	struct wl_shm *shm;
 	struct wl_seat *seat;
 	struct wl_pointer *pointer;
+	struct wlr_wl_pointer *current_pointer;
 	char *seat_name;
 };
 
-struct wlr_wl_backend_output {
+struct wlr_wl_output {
 	struct wlr_output wlr_output;
 
 	struct wlr_wl_backend *backend;
+	struct wl_list link;
+
 	struct wl_surface *surface;
+	struct wl_callback *frame_callback;
 	struct zxdg_surface_v6 *xdg_surface;
 	struct zxdg_toplevel_v6 *xdg_toplevel;
 	struct wl_egl_window *egl_window;
-	struct wl_callback *frame_callback;
-
-	struct {
-		struct wl_shm_pool *pool;
-		void *buffer; // actually a (client-side) struct wl_buffer*
-		uint32_t buf_size;
-		uint8_t *data;
-		struct wl_surface *surface;
-		int32_t hotspot_x, hotspot_y;
-	} cursor;
+	EGLSurface egl_surface;
 
 	uint32_t enter_serial;
 
-	void *egl_surface;
-	struct wl_list link;
+	struct {
+		struct wl_surface *surface;
+		struct wl_egl_window *egl_window;
+		int32_t hotspot_x, hotspot_y;
+		int32_t width, height;
+	} cursor;
 };
 
 struct wlr_wl_input_device {
@@ -69,16 +68,21 @@ struct wlr_wl_input_device {
 
 struct wlr_wl_pointer {
 	struct wlr_pointer wlr_pointer;
+
+	struct wlr_wl_input_device *input_device;
+	struct wl_pointer *wl_pointer;
 	enum wlr_axis_source axis_source;
-	struct wlr_wl_backend_output *current_output;
+	int32_t axis_discrete;
+	struct wlr_wl_output *output;
+
+	struct wl_listener output_destroy;
 };
 
-void wlr_wl_registry_poll(struct wlr_wl_backend *backend);
-void wlr_wl_output_update_cursor(struct wlr_wl_backend_output *output);
-struct wlr_wl_backend_output *wlr_wl_output_for_surface(
-		struct wlr_wl_backend *backend, struct wl_surface *surface);
-void wlr_wl_output_layout_get_box(struct wlr_wl_backend *backend,
-		struct wlr_box *box);
+void poll_wl_registry(struct wlr_wl_backend *backend);
+void update_wl_output_cursor(struct wlr_wl_output *output);
+struct wlr_wl_pointer *pointer_get_wl(struct wlr_pointer *wlr_pointer);
+void create_wl_pointer(struct wl_pointer *wl_pointer,
+	struct wlr_wl_output *output);
 
 extern const struct wl_seat_listener seat_listener;
 

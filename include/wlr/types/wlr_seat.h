@@ -42,7 +42,6 @@ struct wlr_touch_point {
 
 	struct wl_listener surface_destroy;
 	struct wl_listener focus_surface_destroy;
-	struct wl_listener resource_destroy;
 
 	struct {
 		struct wl_signal destroy;
@@ -61,7 +60,8 @@ struct wlr_pointer_grab_interface {
 	uint32_t (*button)(struct wlr_seat_pointer_grab *grab, uint32_t time,
 			uint32_t button, uint32_t state);
 	void (*axis)(struct wlr_seat_pointer_grab *grab, uint32_t time,
-			enum wlr_axis_orientation orientation, double value);
+			enum wlr_axis_orientation orientation, double value,
+			int32_t value_discrete, enum wlr_axis_source source);
 	void (*cancel)(struct wlr_seat_pointer_grab *grab);
 };
 
@@ -138,7 +138,6 @@ struct wlr_seat_pointer_state {
 	uint32_t grab_time;
 
 	struct wl_listener surface_destroy;
-	struct wl_listener resource_destroy;
 };
 
 // TODO: May be useful to be able to simulate keyboard input events
@@ -154,7 +153,6 @@ struct wlr_seat_keyboard_state {
 	struct wl_listener keyboard_repeat_info;
 
 	struct wl_listener surface_destroy;
-	struct wl_listener resource_destroy;
 
 	struct wlr_seat_keyboard_grab *grab;
 	struct wlr_seat_keyboard_grab *default_grab;
@@ -181,19 +179,25 @@ struct wlr_seat {
 	uint32_t capabilities;
 	struct timespec last_event;
 
-	struct wlr_data_source *selection_data_source;
+	struct wlr_data_source *selection_source;
 	uint32_t selection_serial;
 
 	struct wlr_primary_selection_source *primary_selection_source;
 	uint32_t primary_selection_serial;
+
+	// `drag` goes away before `drag_source`, when the implicit grab ends
+	struct wlr_drag *drag;
+	struct wlr_data_source *drag_source;
+	uint32_t drag_serial;
 
 	struct wlr_seat_pointer_state pointer_state;
 	struct wlr_seat_keyboard_state keyboard_state;
 	struct wlr_seat_touch_state touch_state;
 
 	struct wl_listener display_destroy;
-	struct wl_listener selection_data_source_destroy;
+	struct wl_listener selection_source_destroy;
 	struct wl_listener primary_selection_source_destroy;
+	struct wl_listener drag_source_destroy;
 
 	struct {
 		struct wl_signal pointer_grab_begin;
@@ -210,6 +214,7 @@ struct wlr_seat {
 		struct wl_signal selection;
 		struct wl_signal primary_selection;
 
+		struct wl_signal start_drag;
 		struct wl_signal new_drag_icon;
 
 		struct wl_signal destroy;
@@ -296,7 +301,8 @@ uint32_t wlr_seat_pointer_send_button(struct wlr_seat *wlr_seat, uint32_t time,
  * grabs.
  **/
 void wlr_seat_pointer_send_axis(struct wlr_seat *wlr_seat, uint32_t time,
-		enum wlr_axis_orientation orientation, double value);
+		enum wlr_axis_orientation orientation, double value,
+		int32_t value_discrete, enum wlr_axis_source source);
 
 /**
  * Start a grab of the pointer of this seat. The grabber is responsible for
@@ -337,7 +343,8 @@ uint32_t wlr_seat_pointer_notify_button(struct wlr_seat *wlr_seat,
  * Notify the seat of an axis event.
  */
 void wlr_seat_pointer_notify_axis(struct wlr_seat *wlr_seat, uint32_t time,
-		enum wlr_axis_orientation orientation, double value);
+		enum wlr_axis_orientation orientation, double value,
+		int32_t value_discrete, enum wlr_axis_source source);
 
 /**
  * Whether or not the pointer has a grab other than the default grab.
@@ -530,6 +537,7 @@ bool wlr_seat_touch_has_grab(struct wlr_seat *seat);
  */
 bool wlr_seat_validate_grab_serial(struct wlr_seat *seat, uint32_t serial);
 
-struct wlr_seat_client *wlr_seat_client_from_resource(struct wl_resource *resource);
+struct wlr_seat_client *wlr_seat_client_from_resource(
+		struct wl_resource *resource);
 
 #endif

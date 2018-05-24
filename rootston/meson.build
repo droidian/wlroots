@@ -5,6 +5,7 @@ sources = [
 	'ini.c',
 	'input.c',
 	'keyboard.c',
+	'layer_shell.c',
 	'main.c',
 	'output.c',
 	'seat.c',
@@ -12,7 +13,7 @@ sources = [
 	'xdg_shell_v6.c',
 	'xdg_shell.c',
 ]
-if get_option('enable_xwayland')
+if get_option('enable-xwayland')
 	sources += ['xwayland.c']
 endif
 executable(

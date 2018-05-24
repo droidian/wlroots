@@ -120,6 +120,10 @@ void wlr_keyboard_notify_key(struct wlr_keyboard *keyboard,
 	if (keyboard->xkb_state == NULL) {
 		return;
 	}
+
+	keyboard_key_update(keyboard, event);
+	wlr_signal_emit_safe(&keyboard->events.key, event);
+
 	if (event->update_state) {
 		uint32_t keycode = event->keycode + 8;
 		xkb_state_update_key(keyboard->xkb_state, keycode,
@@ -131,13 +135,10 @@ void wlr_keyboard_notify_key(struct wlr_keyboard *keyboard,
 	if (updated) {
 		wlr_signal_emit_safe(&keyboard->events.modifiers, keyboard);
 	}
-
-	keyboard_key_update(keyboard, event);
-	wlr_signal_emit_safe(&keyboard->events.key, event);
 }
 
 void wlr_keyboard_init(struct wlr_keyboard *kb,
-		struct wlr_keyboard_impl *impl) {
+		const struct wlr_keyboard_impl *impl) {
 	kb->impl = impl;
 	wl_signal_init(&kb->events.key);
 	wl_signal_init(&kb->events.modifiers);
@@ -153,15 +154,15 @@ void wlr_keyboard_destroy(struct wlr_keyboard *kb) {
 	if (kb == NULL) {
 		return;
 	}
+	xkb_state_unref(kb->xkb_state);
+	xkb_keymap_unref(kb->keymap);
+	close(kb->keymap_fd);
 	if (kb->impl && kb->impl->destroy) {
 		kb->impl->destroy(kb);
 	} else {
 		wl_list_remove(&kb->events.key.listener_list);
+		free(kb);
 	}
-	xkb_state_unref(kb->xkb_state);
-	xkb_keymap_unref(kb->keymap);
-	close(kb->keymap_fd);
-	free(kb);
 }
 
 void wlr_keyboard_led_update(struct wlr_keyboard *kb, uint32_t leds) {

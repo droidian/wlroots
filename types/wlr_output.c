@@ -6,19 +6,19 @@
 #include <time.h>
 #include <wayland-server.h>
 #include <wlr/interfaces/wlr_output.h>
-#include <wlr/render.h>
-#include <wlr/render/matrix.h>
+#include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_box.h>
+#include <wlr/types/wlr_matrix.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_surface.h>
 #include <wlr/util/log.h>
 #include <wlr/util/region.h>
 #include "util/signal.h"
 
-static void wl_output_send_to_resource(struct wl_resource *resource) {
-	assert(resource);
+#define OUTPUT_VERSION 3
+
+static void output_send_to_resource(struct wl_resource *resource) {
 	struct wlr_output *output = wlr_output_from_resource(resource);
-	assert(output);
 	const uint32_t version = wl_resource_get_version(resource);
 	if (version >= WL_OUTPUT_GEOMETRY_SINCE_VERSION) {
 		wl_output_send_geometry(resource, output->lx, output->ly,
@@ -50,11 +50,9 @@ static void wl_output_send_to_resource(struct wl_resource *resource) {
 	}
 }
 
-static void wlr_output_send_current_mode_to_resource(
+static void output_send_current_mode_to_resource(
 		struct wl_resource *resource) {
-	assert(resource);
 	struct wlr_output *output = wlr_output_from_resource(resource);
-	assert(output);
 	const uint32_t version = wl_resource_get_version(resource);
 	if (version < WL_OUTPUT_MODE_SINCE_VERSION) {
 		return;
@@ -74,43 +72,33 @@ static void wlr_output_send_current_mode_to_resource(
 	}
 }
 
-static void wl_output_destroy(struct wl_resource *resource) {
-	struct wlr_output *output = wlr_output_from_resource(resource);
-	struct wl_resource *_resource = NULL;
-	wl_resource_for_each(_resource, &output->wl_resources) {
-		if (_resource == resource) {
-			struct wl_list *link = wl_resource_get_link(_resource);
-			wl_list_remove(link);
-			break;
-		}
-	}
+static void output_handle_resource_destroy(struct wl_resource *resource) {
+	wl_list_remove(wl_resource_get_link(resource));
 }
 
-static void wl_output_release(struct wl_client *client,
+static void output_handle_release(struct wl_client *client,
 		struct wl_resource *resource) {
 	wl_resource_destroy(resource);
 }
 
-static struct wl_output_interface wl_output_impl = {
-	.release = wl_output_release,
+static const struct wl_output_interface output_impl = {
+	.release = output_handle_release,
 };
 
 static void wl_output_bind(struct wl_client *wl_client, void *data,
 		uint32_t version, uint32_t id) {
 	struct wlr_output *wlr_output = data;
-	assert(wl_client && wlr_output);
 
-	struct wl_resource *wl_resource = wl_resource_create(wl_client,
+	struct wl_resource *resource = wl_resource_create(wl_client,
 		&wl_output_interface, version, id);
-	if (wl_resource == NULL) {
+	if (resource == NULL) {
 		wl_client_post_no_memory(wl_client);
 		return;
 	}
-	wl_resource_set_implementation(wl_resource, &wl_output_impl, wlr_output,
-		wl_output_destroy);
-	wl_list_insert(&wlr_output->wl_resources,
-		wl_resource_get_link(wl_resource));
-	wl_output_send_to_resource(wl_resource);
+	wl_resource_set_implementation(resource, &output_impl, wlr_output,
+		output_handle_resource_destroy);
+	wl_list_insert(&wlr_output->wl_resources, wl_resource_get_link(resource));
+	output_send_to_resource(resource);
 }
 
 void wlr_output_create_global(struct wlr_output *output) {
@@ -118,7 +106,7 @@ void wlr_output_create_global(struct wlr_output *output) {
 		return;
 	}
 	struct wl_global *wl_global = wl_global_create(output->display,
-		&wl_output_interface, 3, output, wl_output_bind);
+		&wl_output_interface, OUTPUT_VERSION, output, wl_output_bind);
 	output->wl_global = wl_global;
 }
 
@@ -143,9 +131,9 @@ void wlr_output_update_enabled(struct wlr_output *output, bool enabled) {
 	wlr_signal_emit_safe(&output->events.enable, output);
 }
 
-static void wlr_output_update_matrix(struct wlr_output *output) {
-	wlr_matrix_texture(output->transform_matrix, output->width, output->height,
-		output->transform);
+static void output_update_matrix(struct wlr_output *output) {
+	wlr_matrix_projection(output->transform_matrix, output->width,
+		output->height, output->transform);
 }
 
 void wlr_output_enable(struct wlr_output *output, bool enable) {
@@ -183,15 +171,20 @@ void wlr_output_update_mode(struct wlr_output *output,
 
 void wlr_output_update_custom_mode(struct wlr_output *output, int32_t width,
 		int32_t height, int32_t refresh) {
+	if (output->width == width && output->height == height &&
+			output->refresh == refresh) {
+		return;
+	}
+
 	output->width = width;
 	output->height = height;
-	wlr_output_update_matrix(output);
+	output_update_matrix(output);
 
 	output->refresh = refresh;
 
 	struct wl_resource *resource;
 	wl_resource_for_each(resource, &output->wl_resources) {
-		wlr_output_send_current_mode_to_resource(resource);
+		output_send_current_mode_to_resource(resource);
 	}
 
 	wlr_signal_emit_safe(&output->events.mode, output);
@@ -200,12 +193,12 @@ void wlr_output_update_custom_mode(struct wlr_output *output, int32_t width,
 void wlr_output_set_transform(struct wlr_output *output,
 		enum wl_output_transform transform) {
 	output->impl->transform(output, transform);
-	wlr_output_update_matrix(output);
+	output_update_matrix(output);
 
 	// TODO: only send geometry and done
 	struct wl_resource *resource;
 	wl_resource_for_each(resource, &output->wl_resources) {
-		wl_output_send_to_resource(resource);
+		output_send_to_resource(resource);
 	}
 
 	wlr_signal_emit_safe(&output->events.transform, output);
@@ -223,7 +216,7 @@ void wlr_output_set_position(struct wlr_output *output, int32_t lx,
 	// TODO: only send geometry and done
 	struct wl_resource *resource;
 	wl_resource_for_each(resource, &output->wl_resources) {
-		wl_output_send_to_resource(resource);
+		output_send_to_resource(resource);
 	}
 }
 
@@ -237,7 +230,7 @@ void wlr_output_set_scale(struct wlr_output *output, float scale) {
 	// TODO: only send mode and done
 	struct wl_resource *resource;
 	wl_resource_for_each(resource, &output->wl_resources) {
-		wl_output_send_to_resource(resource);
+		output_send_to_resource(resource);
 	}
 
 	wlr_signal_emit_safe(&output->events.scale, output);
@@ -252,6 +245,9 @@ static void handle_display_destroy(struct wl_listener *listener, void *data) {
 void wlr_output_init(struct wlr_output *output, struct wlr_backend *backend,
 		const struct wlr_output_impl *impl, struct wl_display *display) {
 	assert(impl->make_current && impl->swap_buffers && impl->transform);
+	if (impl->set_cursor || impl->move_cursor) {
+		assert(impl->set_cursor && impl->move_cursor);
+	}
 	output->backend = backend;
 	output->impl = impl;
 	output->display = display;
@@ -344,9 +340,8 @@ static void output_scissor(struct wlr_output *output, pixman_box32_t *rect) {
 	wlr_output_transformed_resolution(output, &ow, &oh);
 
 	// Scissor is in renderer coordinates, ie. upside down
-	enum wl_output_transform transform = wlr_output_transform_compose(
-		wlr_output_transform_invert(output->transform),
-		WL_OUTPUT_TRANSFORM_FLIPPED_180);
+	enum wl_output_transform transform =
+		wlr_output_transform_invert(output->transform);
 	wlr_box_transform(&box, transform, ow, oh, &box);
 
 	wlr_renderer_scissor(renderer, &box);
@@ -373,25 +368,26 @@ static void output_fullscreen_surface_render(struct wlr_output *output,
 	assert(renderer);
 
 	if (!wlr_surface_has_buffer(surface)) {
-		wlr_renderer_clear(renderer, &(float[]){0, 0, 0, 0});
+		wlr_renderer_clear(renderer, (float[]){0, 0, 0, 1});
 		return;
 	}
 
 	struct wlr_box box;
 	output_fullscreen_surface_get_box(output, surface, &box);
 
-	float matrix[16];
+	float matrix[9];
 	enum wl_output_transform transform =
 		wlr_output_transform_invert(surface->current->transform);
-	wlr_matrix_project_box(&matrix, &box, transform, 0,
-		&output->transform_matrix);
+	wlr_matrix_project_box(matrix, &box, transform, 0,
+		output->transform_matrix);
 
 	int nrects;
 	pixman_box32_t *rects = pixman_region32_rectangles(damage, &nrects);
 	for (int i = 0; i < nrects; ++i) {
 		output_scissor(output, &rects[i]);
-		wlr_renderer_clear(renderer, &(float[]){0, 0, 0, 0});
-		wlr_render_with_matrix(surface->renderer, surface->texture, &matrix);
+		wlr_renderer_clear(renderer, (float[]){0, 0, 0, 1});
+		wlr_render_texture_with_matrix(surface->renderer, surface->texture,
+			matrix, 1.0f);
 	}
 	wlr_renderer_scissor(renderer, NULL);
 
@@ -440,15 +436,15 @@ static void output_cursor_render(struct wlr_output_cursor *cursor,
 		goto surface_damage_finish;
 	}
 
-	float matrix[16];
-	wlr_matrix_project_box(&matrix, &box, WL_OUTPUT_TRANSFORM_NORMAL, 0,
-		&cursor->output->transform_matrix);
+	float matrix[9];
+	wlr_matrix_project_box(matrix, &box, WL_OUTPUT_TRANSFORM_NORMAL, 0,
+		cursor->output->transform_matrix);
 
 	int nrects;
 	pixman_box32_t *rects = pixman_region32_rectangles(&surface_damage, &nrects);
 	for (int i = 0; i < nrects; ++i) {
 		output_scissor(cursor->output, &rects[i]);
-		wlr_render_with_matrix(renderer, texture, &matrix);
+		wlr_render_texture_with_matrix(renderer, texture, matrix, 1.0f);
 	}
 	wlr_renderer_scissor(renderer, NULL);
 
@@ -569,7 +565,7 @@ void wlr_output_update_needs_swap(struct wlr_output *output) {
 	wlr_signal_emit_safe(&output->events.needs_swap, output);
 }
 
-static void output_damage_whole(struct wlr_output *output) {
+void wlr_output_damage_whole(struct wlr_output *output) {
 	int width, height;
 	wlr_output_transformed_resolution(output, &width, &height);
 
@@ -583,7 +579,7 @@ static void output_fullscreen_surface_reset(struct wlr_output *output) {
 		wl_list_remove(&output->fullscreen_surface_commit.link);
 		wl_list_remove(&output->fullscreen_surface_destroy.link);
 		output->fullscreen_surface = NULL;
-		output_damage_whole(output);
+		wlr_output_damage_whole(output);
 	}
 }
 
@@ -597,7 +593,7 @@ static void output_fullscreen_surface_handle_commit(
 			output->fullscreen_height != surface->current->height) {
 		output->fullscreen_width = surface->current->width;
 		output->fullscreen_height = surface->current->height;
-		output_damage_whole(output);
+		wlr_output_damage_whole(output);
 		return;
 	}
 
@@ -633,7 +629,7 @@ void wlr_output_set_fullscreen_surface(struct wlr_output *output,
 	output_fullscreen_surface_reset(output);
 
 	output->fullscreen_surface = surface;
-	output_damage_whole(output);
+	wlr_output_damage_whole(output);
 
 	if (surface == NULL) {
 		return;
@@ -650,7 +646,7 @@ void wlr_output_set_fullscreen_surface(struct wlr_output *output,
 
 struct wlr_output *wlr_output_from_resource(struct wl_resource *resource) {
 	assert(wl_resource_instance_of(resource, &wl_output_interface,
-		&wl_output_impl));
+		&output_impl));
 	return wl_resource_get_user_data(resource);
 }
 
@@ -672,53 +668,6 @@ static void output_cursor_reset(struct wlr_output_cursor *cursor) {
 		wl_list_remove(&cursor->surface_destroy.link);
 		cursor->surface = NULL;
 	}
-}
-
-bool wlr_output_cursor_set_image(struct wlr_output_cursor *cursor,
-		const uint8_t *pixels, int32_t stride, uint32_t width, uint32_t height,
-		int32_t hotspot_x, int32_t hotspot_y) {
-	struct wlr_renderer *renderer =
-		wlr_backend_get_renderer(cursor->output->backend);
-	assert(renderer);
-
-	output_cursor_reset(cursor);
-
-	cursor->width = width;
-	cursor->height = height;
-	cursor->hotspot_x = hotspot_x;
-	cursor->hotspot_y = hotspot_y;
-
-	struct wlr_output_cursor *hwcur = cursor->output->hardware_cursor;
-	if (cursor->output->impl->set_cursor && (hwcur == NULL || hwcur == cursor)) {
-		if (cursor->output->impl->move_cursor && hwcur != cursor) {
-			cursor->output->impl->move_cursor(cursor->output,
-				(int)cursor->x, (int)cursor->y);
-		}
-		int ok = cursor->output->impl->set_cursor(cursor->output, pixels,
-			stride, width, height, hotspot_x, hotspot_y, true);
-		if (ok) {
-			cursor->output->hardware_cursor = cursor;
-			return true;
-		}
-	}
-
-	wlr_log(L_DEBUG, "Falling back to software cursor");
-	output_cursor_damage_whole(cursor);
-
-	cursor->enabled = pixels != NULL;
-	if (!cursor->enabled) {
-		return true;
-	}
-
-	if (cursor->texture == NULL) {
-		cursor->texture = wlr_render_texture_create(renderer);
-		if (cursor->texture == NULL) {
-			return false;
-		}
-	}
-
-	return wlr_texture_upload_pixels(cursor->texture, WL_SHM_FORMAT_ARGB8888,
-		stride, width, height, pixels);
 }
 
 static void output_cursor_update_visible(struct wlr_output_cursor *cursor) {
@@ -746,6 +695,69 @@ static void output_cursor_update_visible(struct wlr_output_cursor *cursor) {
 	cursor->visible = visible;
 }
 
+static bool output_cursor_attempt_hardware(struct wlr_output_cursor *cursor) {
+	int32_t scale = cursor->output->scale;
+	enum wl_output_transform transform = WL_OUTPUT_TRANSFORM_NORMAL;
+	struct wlr_texture *texture = cursor->texture;
+	if (cursor->surface != NULL) {
+		texture = cursor->surface->texture;
+		scale = cursor->surface->current->scale;
+		transform = cursor->surface->current->transform;
+	}
+
+	struct wlr_output_cursor *hwcur = cursor->output->hardware_cursor;
+	if (cursor->output->impl->set_cursor && (hwcur == NULL || hwcur == cursor)) {
+		// If the cursor was hidden or was a software cursor, the hardware
+		// cursor position is outdated
+		assert(cursor->output->impl->move_cursor);
+		cursor->output->impl->move_cursor(cursor->output,
+			(int)cursor->x, (int)cursor->y);
+		if (cursor->output->impl->set_cursor(cursor->output, texture,
+				scale, transform, cursor->hotspot_x, cursor->hotspot_y, true)) {
+			cursor->output->hardware_cursor = cursor;
+			return true;
+		}
+	}
+	return false;
+}
+
+bool wlr_output_cursor_set_image(struct wlr_output_cursor *cursor,
+		const uint8_t *pixels, int32_t stride, uint32_t width, uint32_t height,
+		int32_t hotspot_x, int32_t hotspot_y) {
+	struct wlr_renderer *renderer =
+		wlr_backend_get_renderer(cursor->output->backend);
+	assert(renderer);
+
+	output_cursor_reset(cursor);
+
+	cursor->width = width;
+	cursor->height = height;
+	cursor->hotspot_x = hotspot_x;
+	cursor->hotspot_y = hotspot_y;
+	output_cursor_update_visible(cursor);
+
+	wlr_texture_destroy(cursor->texture);
+	cursor->texture = NULL;
+
+	cursor->enabled = false;
+	if (pixels != NULL) {
+		cursor->texture = wlr_texture_from_pixels(renderer,
+			WL_SHM_FORMAT_ARGB8888, stride, width, height, pixels);
+		if (cursor->texture == NULL) {
+			return false;
+		}
+		cursor->enabled = true;
+	}
+
+	if (output_cursor_attempt_hardware(cursor)) {
+		return true;
+	}
+
+	wlr_log(L_DEBUG, "Falling back to software cursor");
+	output_cursor_damage_whole(cursor);
+	return true;
+}
+
 static void output_cursor_commit(struct wlr_output_cursor *cursor) {
 	if (cursor->output->hardware_cursor != cursor) {
 		output_cursor_damage_whole(cursor);
@@ -756,15 +768,15 @@ static void output_cursor_commit(struct wlr_output_cursor *cursor) {
 	cursor->width = cursor->surface->current->width * cursor->output->scale;
 	cursor->height = cursor->surface->current->height * cursor->output->scale;
 
-	if (cursor->output->hardware_cursor != cursor) {
-		output_cursor_damage_whole(cursor);
-	} else {
-		// TODO: upload pixels
-
+	if (output_cursor_attempt_hardware(cursor)) {
 		struct timespec now;
 		clock_gettime(CLOCK_MONOTONIC, &now);
 		wlr_surface_send_frame_done(cursor->surface, &now);
+		return;
 	}
+
+	// Fallback to software cursor
+	output_cursor_damage_whole(cursor);
 }
 
 static void output_cursor_handle_commit(struct wl_listener *listener,
@@ -800,26 +812,15 @@ void wlr_output_cursor_set_surface(struct wlr_output_cursor *cursor,
 		cursor->hotspot_y = hotspot_y;
 		if (cursor->output->hardware_cursor != cursor) {
 			output_cursor_damage_whole(cursor);
-		}
-
-		if (cursor->output->hardware_cursor == cursor &&
-				cursor->output->impl->set_cursor) {
-			cursor->output->impl->set_cursor(cursor->output, NULL, 0, 0, 0,
-				hotspot_x, hotspot_y, false);
+		} else {
+			assert(cursor->output->impl->set_cursor);
+			cursor->output->impl->set_cursor(cursor->output, NULL,
+				1, WL_OUTPUT_TRANSFORM_NORMAL, hotspot_x, hotspot_y, false);
 		}
 		return;
 	}
 
 	output_cursor_reset(cursor);
-
-	// Disable hardware cursor for surfaces
-	// TODO: support hardware cursors
-	if (cursor->output->hardware_cursor == cursor &&
-			cursor->output->impl->set_cursor) {
-		cursor->output->impl->set_cursor(cursor->output, NULL, 0, 0, 0, 0, 0,
-			true);
-		cursor->output->hardware_cursor = NULL;
-	}
 
 	cursor->surface = surface;
 	cursor->hotspot_x = hotspot_x;
@@ -837,7 +838,11 @@ void wlr_output_cursor_set_surface(struct wlr_output_cursor *cursor,
 		cursor->width = 0;
 		cursor->height = 0;
 
-		// TODO: if hardware cursor, disable cursor
+		if (cursor->output->hardware_cursor == cursor) {
+			assert(cursor->output->impl->set_cursor);
+			cursor->output->impl->set_cursor(cursor->output, NULL, 1,
+				WL_OUTPUT_TRANSFORM_NORMAL, 0, 0, true);
+		}
 	}
 }
 
@@ -851,20 +856,24 @@ bool wlr_output_cursor_move(struct wlr_output_cursor *cursor,
 		output_cursor_damage_whole(cursor);
 	}
 
+	bool was_visible = cursor->visible;
 	x *= cursor->output->scale;
 	y *= cursor->output->scale;
 	cursor->x = x;
 	cursor->y = y;
 	output_cursor_update_visible(cursor);
 
+	if (!was_visible && !cursor->visible) {
+		// Cursor is still hidden, do nothing
+		return true;
+	}
+
 	if (cursor->output->hardware_cursor != cursor) {
 		output_cursor_damage_whole(cursor);
 		return true;
 	}
 
-	if (!cursor->output->impl->move_cursor) {
-		return false;
-	}
+	assert(cursor->output->impl->move_cursor);
 	return cursor->output->impl->move_cursor(cursor->output, (int)x, (int)y);
 }
 
@@ -881,6 +890,7 @@ struct wlr_output_cursor *wlr_output_cursor_create(struct wlr_output *output) {
 	wl_list_init(&cursor->surface_destroy.link);
 	cursor->surface_destroy.notify = output_cursor_handle_destroy;
 	wl_list_insert(&output->cursors, &cursor->link);
+	cursor->visible = true; // default position is at (0, 0)
 	return cursor;
 }
 
@@ -893,14 +903,12 @@ void wlr_output_cursor_destroy(struct wlr_output_cursor *cursor) {
 	if (cursor->output->hardware_cursor == cursor) {
 		// If this cursor was the hardware cursor, disable it
 		if (cursor->output->impl->set_cursor) {
-			cursor->output->impl->set_cursor(cursor->output, NULL, 0, 0, 0, 0,
-				0, true);
+			cursor->output->impl->set_cursor(cursor->output, NULL, 1,
+				WL_OUTPUT_TRANSFORM_NORMAL, 0, 0, true);
 		}
 		cursor->output->hardware_cursor = NULL;
 	}
-	if (cursor->texture != NULL) {
-		wlr_texture_destroy(cursor->texture);
-	}
+	wlr_texture_destroy(cursor->texture);
 	wl_list_remove(&cursor->link);
 	free(cursor);
 }
@@ -919,8 +927,5 @@ enum wl_output_transform wlr_output_transform_compose(
 	uint32_t flipped = (tr_a ^ tr_b) & WL_OUTPUT_TRANSFORM_FLIPPED;
 	uint32_t rotated =
 		(tr_a + tr_b) & (WL_OUTPUT_TRANSFORM_90 | WL_OUTPUT_TRANSFORM_180);
-	if ((tr_a & WL_OUTPUT_TRANSFORM_FLIPPED) && (tr_b & WL_OUTPUT_TRANSFORM_FLIPPED)) {
-		rotated = wlr_output_transform_invert(rotated);
-	}
 	return flipped | rotated;
 }

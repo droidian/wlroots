@@ -1,9 +1,12 @@
+#define _POSIX_C_SOURCE 199309L
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <wayland-server.h>
 #include <wlr/config.h>
 #include <wlr/types/wlr_idle.h>
+#include <wlr/types/wlr_layer_shell.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/util/log.h>
 #include "rootston/cursor.h"
@@ -138,10 +141,18 @@ static void seat_set_device_output_mappings(struct roots_seat *seat,
 		struct wlr_input_device *device, struct wlr_output *output) {
 	struct wlr_cursor *cursor = seat->cursor->cursor;
 	struct roots_config *config = seat->input->config;
-	struct roots_device_config *dconfig;
-	dconfig = roots_config_get_device(config, device);
-	if (dconfig && dconfig->mapped_output &&
-			strcmp(dconfig->mapped_output, output->name) == 0) {
+	struct roots_device_config *dconfig =
+		roots_config_get_device(config, device);
+
+	const char *mapped_output = NULL;
+	if (dconfig != NULL) {
+		mapped_output = dconfig->mapped_output;
+	}
+	if (mapped_output == NULL) {
+		mapped_output = device->output_name;
+	}
+
+	if (mapped_output && strcmp(mapped_output, output->name) == 0) {
 		wlr_cursor_map_input_to_output(cursor, device, output);
 	}
 }
@@ -408,10 +419,10 @@ static void handle_keyboard_destroy(struct wl_listener *listener, void *data) {
 	struct roots_keyboard *keyboard =
 		wl_container_of(listener, keyboard, device_destroy);
 	struct roots_seat *seat = keyboard->seat;
-	roots_keyboard_destroy(keyboard);
 	wl_list_remove(&keyboard->device_destroy.link);
 	wl_list_remove(&keyboard->keyboard_key.link);
 	wl_list_remove(&keyboard->keyboard_modifiers.link);
+	roots_keyboard_destroy(keyboard);
 	seat_update_capabilities(seat);
 }
 
@@ -514,13 +525,13 @@ static void seat_add_tablet_pad(struct roots_seat *seat,
 
 static void handle_tablet_tool_destroy(struct wl_listener *listener,
 		void *data) {
-	struct roots_pointer *tablet_tool =
+	struct roots_tablet_tool *tablet_tool =
 		wl_container_of(listener, tablet_tool, device_destroy);
 	struct roots_seat *seat = tablet_tool->seat;
 
-	wl_list_remove(&tablet_tool->link);
 	wlr_cursor_detach_input_device(seat->cursor->cursor, tablet_tool->device);
 	wl_list_remove(&tablet_tool->device_destroy.link);
+	wl_list_remove(&tablet_tool->link);
 	free(tablet_tool);
 
 	seat_update_capabilities(seat);
@@ -645,6 +656,7 @@ static void seat_view_destroy(struct roots_seat_view *seat_view) {
 		seat->cursor->pointer_view = NULL;
 	}
 
+	wl_list_remove(&seat_view->view_unmap.link);
 	wl_list_remove(&seat_view->view_destroy.link);
 	wl_list_remove(&seat_view->link);
 	free(seat_view);
@@ -655,6 +667,12 @@ static void seat_view_destroy(struct roots_seat_view *seat_view) {
 			seat->views.next, first_seat_view, link);
 		roots_seat_set_focus(seat, first_seat_view->view);
 	}
+}
+
+static void seat_view_handle_unmap(struct wl_listener *listener, void *data) {
+	struct roots_seat_view *seat_view =
+		wl_container_of(listener, seat_view, view_unmap);
+	seat_view_destroy(seat_view);
 }
 
 static void seat_view_handle_destroy(struct wl_listener *listener, void *data) {
@@ -675,6 +693,8 @@ static struct roots_seat_view *seat_add_view(struct roots_seat *seat,
 
 	wl_list_insert(seat->views.prev, &seat_view->link);
 
+	seat_view->view_unmap.notify = seat_view_handle_unmap;
+	wl_signal_add(&view->events.unmap, &seat_view->view_unmap);
 	seat_view->view_destroy.notify = seat_view_handle_destroy;
 	wl_signal_add(&view->events.destroy, &seat_view->view_destroy);
 
@@ -706,12 +726,48 @@ struct roots_seat_view *roots_seat_view_from_view(
 	return seat_view;
 }
 
+bool roots_seat_allow_input(struct roots_seat *seat,
+		struct wl_resource *resource) {
+	return !seat->exclusive_client ||
+			wl_resource_get_client(resource) == seat->exclusive_client;
+}
+
 void roots_seat_set_focus(struct roots_seat *seat, struct roots_view *view) {
+	if (view && !roots_seat_allow_input(seat, view->wlr_surface->resource)) {
+		return;
+	}
+
 	// Make sure the view will be rendered on top of others, even if it's
 	// already focused in this seat
 	if (view != NULL) {
 		wl_list_remove(&view->link);
 		wl_list_insert(&seat->input->server->desktop->views, &view->link);
+	}
+
+	bool unfullscreen = true;
+
+#ifdef WLR_HAS_XWAYLAND
+	if (view && view->type == ROOTS_XWAYLAND_VIEW &&
+			view->xwayland_surface->override_redirect) {
+		unfullscreen = false;
+	}
+#endif
+
+	if (view && unfullscreen) {
+		struct roots_desktop *desktop = view->desktop;
+		struct roots_output *output;
+		struct wlr_box box;
+		view_get_box(view, &box);
+		wl_list_for_each(output, &desktop->outputs, link) {
+			if (output->fullscreen_view &&
+					output->fullscreen_view != view &&
+					wlr_output_layout_intersects(
+						desktop->layout,
+						output->wlr_output, &box)) {
+				view_set_fullscreen(output->fullscreen_view,
+						false, NULL);
+			}
+		}
 	}
 
 	struct roots_view *prev_focus = roots_seat_get_focus(seat);
@@ -721,7 +777,7 @@ void roots_seat_set_focus(struct roots_seat *seat, struct roots_view *view) {
 
 #ifdef WLR_HAS_XWAYLAND
 	if (view && view->type == ROOTS_XWAYLAND_VIEW &&
-			view->xwayland_surface->override_redirect) {
+			wlr_xwayland_surface_is_unmanaged(view->xwayland_surface)) {
 		return;
 	}
 #endif
@@ -745,13 +801,17 @@ void roots_seat_set_focus(struct roots_seat *seat, struct roots_view *view) {
 		return;
 	}
 
-	view_activate(view, true);
-
-	seat->has_focus = true;
 	wl_list_remove(&seat_view->link);
 	wl_list_insert(&seat->views, &seat_view->link);
 
 	view_damage_whole(view);
+
+	if (seat->focused_layer) {
+		return;
+	}
+
+	view_activate(view, true);
+	seat->has_focus = true;
 
 	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat->seat);
 	if (keyboard != NULL) {
@@ -762,6 +822,80 @@ void roots_seat_set_focus(struct roots_seat *seat, struct roots_view *view) {
 		wlr_seat_keyboard_notify_enter(seat->seat, view->wlr_surface,
 			NULL, 0, NULL);
 	}
+}
+
+/**
+ * Focus semantics of layer surfaces are somewhat detached from the normal focus
+ * flow. For layers above the shell layer, for example, you cannot unfocus them.
+ * You also cannot alt-tab between layer surfaces and shell surfaces.
+ */
+void roots_seat_set_focus_layer(struct roots_seat *seat,
+		struct wlr_layer_surface *layer) {
+	if (!layer) {
+		seat->focused_layer = NULL;
+		return;
+	}
+	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat->seat);
+	if (!roots_seat_allow_input(seat, layer->resource)) {
+		return;
+	}
+	if (seat->has_focus) {
+		struct roots_view *prev_focus = roots_seat_get_focus(seat);
+		wlr_seat_keyboard_clear_focus(seat->seat);
+		view_activate(prev_focus, false);
+	}
+	seat->has_focus = false;
+	if (layer->layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP) {
+		seat->focused_layer = layer;
+	}
+	if (keyboard != NULL) {
+		wlr_seat_keyboard_notify_enter(seat->seat, layer->surface,
+			keyboard->keycodes, keyboard->num_keycodes,
+			&keyboard->modifiers);
+	} else {
+		wlr_seat_keyboard_notify_enter(seat->seat, layer->surface,
+			NULL, 0, NULL);
+	}
+}
+
+void roots_seat_set_exclusive_client(struct roots_seat *seat,
+		struct wl_client *client) {
+	if (!client) {
+		seat->exclusive_client = client;
+		// Triggers a refocus of the topmost surface layer if necessary
+		// TODO: Make layer surface focus per-output based on cursor position
+		struct roots_output *output;
+		wl_list_for_each(output, &seat->input->server->desktop->outputs, link) {
+			arrange_layers(output);
+		}
+		return;
+	}
+	if (seat->focused_layer) {
+		if (wl_resource_get_client(seat->focused_layer->resource) != client) {
+			roots_seat_set_focus_layer(seat, NULL);
+		}
+	}
+	if (seat->has_focus) {
+		struct roots_view *focus = roots_seat_get_focus(seat);
+		if (wl_resource_get_client(focus->wlr_surface->resource) != client) {
+			roots_seat_set_focus(seat, NULL);
+		}
+	}
+	if (seat->seat->pointer_state.focused_client) {
+		if (seat->seat->pointer_state.focused_client->client != client) {
+			wlr_seat_pointer_clear_focus(seat->seat);
+		}
+	}
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	struct wlr_touch_point *point;
+	wl_list_for_each(point, &seat->seat->touch_state.touch_points, link) {
+		if (point->client->client != client) {
+			wlr_seat_touch_point_clear_focus(seat->seat,
+					now.tv_nsec / 1000, point->touch_id);
+		}
+	}
+	seat->exclusive_client = client;
 }
 
 void roots_seat_cycle_focus(struct roots_seat *seat) {
@@ -872,4 +1006,15 @@ void roots_seat_end_compositor_grab(struct roots_seat *seat) {
 	}
 
 	cursor->mode = ROOTS_CURSOR_PASSTHROUGH;
+}
+
+struct roots_seat *input_last_active_seat(struct roots_input *input) {
+	struct roots_seat *seat = NULL, *_seat;
+	wl_list_for_each(_seat, &input->seats, link) {
+		if (!seat || (seat->seat->last_event.tv_sec > _seat->seat->last_event.tv_sec &&
+				seat->seat->last_event.tv_nsec > _seat->seat->last_event.tv_nsec)) {
+			seat = _seat;
+		}
+	}
+	return seat;
 }
