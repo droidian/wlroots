@@ -1,3 +1,14 @@
+wlroots (0.0.0~git20180524-1) experimental; urgency=medium
+
+  * New upstream git snapshot
+  * [7976cdb] Drop empty usr/bin
+  * [6279466] Drop debian/rules template comments
+  * [177604f] Update copyright information
+  * [1f7ee13] gbp.conf: Use upstream/latest for upstream sources
+  * [1f9b1a3] gbp.conf: Use id-length
+
+ -- Guido Günther <agx@sigxcpu.org>  Thu, 24 May 2018 16:31:42 +0200
+
 wlroots (0.0.0~git20180223-1) experimental; urgency=medium
 
   * New upstream snapshot
