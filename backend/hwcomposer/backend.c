@@ -1,6 +1,5 @@
 #include "util/signal.h"
 #include <stdlib.h>
-#include <wlr/interfaces/wlr_input_device.h>
 #include <wlr/interfaces/wlr_output.h>
 #include <wlr/render/egl.h>
 #include <wlr/render/gles2.h>
@@ -21,13 +20,6 @@ static bool backend_start(struct wlr_backend *wlr_backend) {
 			&output->wlr_output);
 	}
 
-	struct wlr_hwcomposer_input_device *input_device;
-	wl_list_for_each(input_device, &backend->input_devices,
-			wlr_input_device.link) {
-		wlr_signal_emit_safe(&backend->backend.events.new_input,
-			&input_device->wlr_input_device);
-	}
-
 	backend->started = true;
 	return true;
 }
@@ -44,12 +36,6 @@ static void backend_destroy(struct wlr_backend *wlr_backend) {
 	struct wlr_hwcomposer_output *output, *output_tmp;
 	wl_list_for_each_safe(output, output_tmp, &backend->outputs, link) {
 		wlr_output_destroy(&output->wlr_output);
-	}
-
-	struct wlr_hwcomposer_input_device *input_device, *input_device_tmp;
-	wl_list_for_each_safe(input_device, input_device_tmp,
-			&backend->input_devices, wlr_input_device.link) {
-		wlr_input_device_destroy(&input_device->wlr_input_device);
 	}
 
 	wlr_signal_emit_safe(&wlr_backend->events.destroy, backend);
@@ -91,7 +77,6 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 	wlr_backend_init(&backend->backend, &backend_impl);
 	backend->display = display;
 	wl_list_init(&backend->outputs);
-	wl_list_init(&backend->input_devices);
 
 	hwcomposer_api_init(backend);
 

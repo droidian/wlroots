@@ -1,6 +1,7 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include <sync/sync.h>

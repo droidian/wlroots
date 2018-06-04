@@ -45,12 +45,6 @@ struct wlr_hwcomposer_output {
 	int frame_delay; // ms
 };
 
-struct wlr_hwcomposer_input_device {
-	struct wlr_input_device wlr_input_device;
-
-	struct wlr_hwcomposer_backend *backend;
-};
-
 bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc);
 
 #endif

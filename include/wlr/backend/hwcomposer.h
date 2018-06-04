@@ -2,7 +2,6 @@
 #define WLR_BACKEND_HWCOMPOSER_H
 
 #include <wlr/backend.h>
-#include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_output.h>
 
 /**
@@ -18,15 +17,8 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
  */
 struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *backend,
 	unsigned int width, unsigned int height);
-/**
- * Creates a new input device. The caller is responsible for manually raising
- * any event signals on the new input device if it wants to simulate input
- * events.
- */
-struct wlr_input_device *wlr_hwcomposer_add_input_device(
-	struct wlr_backend *backend, enum wlr_input_device_type type);
+
 bool wlr_backend_is_hwcomposer(struct wlr_backend *backend);
-bool wlr_input_device_is_hwcomposer(struct wlr_input_device *device);
 bool wlr_output_is_hwcomposer(struct wlr_output *output);
 
 #endif
