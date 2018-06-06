@@ -25,6 +25,34 @@ inline static uint32_t interpreted_version(hw_device_t *hwc_device)
 	return version;
 }
 
+static void init_hwcomposer_layer(hwc_layer_1_t *layer, const hwc_rect_t *rect, int layerCompositionType)
+{
+    memset(layer, 0, sizeof(hwc_layer_1_t));
+    layer->compositionType = layerCompositionType;
+    layer->hints = 0;
+    layer->flags = 0;
+    layer->handle = 0;
+    layer->transform = 0;
+    layer->blending = HWC_BLENDING_NONE;
+#ifdef HWC_DEVICE_API_VERSION_1_3
+    layer->sourceCropf.top = 0.0f;
+    layer->sourceCropf.left = 0.0f;
+    layer->sourceCropf.bottom = (float) rect->bottom;
+    layer->sourceCropf.right = (float) rect->right;
+#else
+    layer->sourceCrop = *rect;
+#endif
+    layer->displayFrame = *rect;
+    layer->visibleRegionScreen.numRects = 1;
+    layer->visibleRegionScreen.rects = &layer->displayFrame;
+    layer->acquireFenceFd = -1;
+    layer->releaseFenceFd = -1;
+    layer->planeAlpha = 0xFF;
+#ifdef HWC_DEVICE_API_VERSION_1_5
+    layer->surfaceDamage.numRects = 0;
+#endif
+}
+
 bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 {
 	int err;
@@ -84,7 +112,6 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 	size_t size = sizeof(hwc_display_contents_1_t) + 2 * sizeof(hwc_layer_1_t);
 	hwc_display_contents_1_t *list = (hwc_display_contents_1_t *) malloc(size);
 	hwc->hwcContents = (hwc_display_contents_1_t **) malloc(HWC_NUM_DISPLAY_TYPES * sizeof(hwc_display_contents_1_t *));
-	const hwc_rect_t r = { 0, 0, attr_values[0], attr_values[1] };
 
 	int counter = 0;
 	for (; counter < HWC_NUM_DISPLAY_TYPES; counter++)
@@ -92,68 +119,11 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 	// Assign the layer list only to the first display,
 	// otherwise HWC might freeze if others are disconnected
 	hwc->hwcContents[0] = list;
+	hwc->fblayer = &list->hwLayers[1];
 
-	hwc_layer_1_t *layer = &list->hwLayers[0];
-	memset(layer, 0, sizeof(hwc_layer_1_t));
-	layer->compositionType = HWC_FRAMEBUFFER;
-	layer->hints = 0;
-	layer->flags = 0;
-	layer->handle = 0;
-	layer->transform = 0;
-	layer->blending = HWC_BLENDING_NONE;
-#ifdef HWC_DEVICE_API_VERSION_1_3
-	layer->sourceCropf.top = 0.0f;
-	layer->sourceCropf.left = 0.0f;
-	layer->sourceCropf.bottom = (float) attr_values[1];
-	layer->sourceCropf.right = (float) attr_values[0];
-#else
-	layer->sourceCrop = r;
-#endif
-	layer->displayFrame = r;
-	layer->visibleRegionScreen.numRects = 1;
-	layer->visibleRegionScreen.rects = &layer->displayFrame;
-	layer->acquireFenceFd = -1;
-	layer->releaseFenceFd = -1;
-#if (ANDROID_VERSION_MAJOR >= 4) && (ANDROID_VERSION_MINOR >= 3) || (ANDROID_VERSION_MAJOR >= 5)
-	// We've observed that qualcomm chipsets enters into compositionType == 6
-	// (HWC_BLIT), an undocumented composition type which gives us rendering
-	// glitches and warnings in logcat. By setting the planarAlpha to non-
-	// opaque, we attempt to force the HWC into using HWC_FRAMEBUFFER for this
-	// layer so the HWC_FRAMEBUFFER_TARGET layer actually gets used.
-	int tryToForceGLES = getenv("QPA_HWC_FORCE_GLES") != NULL;
-	layer->planeAlpha = tryToForceGLES ? 1 : 255;
-#endif
-#ifdef HWC_DEVICE_API_VERSION_1_5
-	layer->surfaceDamage.numRects = 0;
-#endif
-
-	hwc->fblayer = layer = &list->hwLayers[1];
-	memset(layer, 0, sizeof(hwc_layer_1_t));
-	layer->compositionType = HWC_FRAMEBUFFER_TARGET;
-	layer->hints = 0;
-	layer->flags = 0;
-	layer->handle = 0;
-	layer->transform = 0;
-	layer->blending = HWC_BLENDING_NONE;
-#ifdef HWC_DEVICE_API_VERSION_1_3
-	layer->sourceCropf.top = 0.0f;
-	layer->sourceCropf.left = 0.0f;
-	layer->sourceCropf.bottom = (float) attr_values[1];
-	layer->sourceCropf.right = (float) attr_values[0];
-#else
-	layer->sourceCrop = r;
-#endif
-	layer->displayFrame = r;
-	layer->visibleRegionScreen.numRects = 1;
-	layer->visibleRegionScreen.rects = &layer->displayFrame;
-	layer->acquireFenceFd = -1;
-	layer->releaseFenceFd = -1;
-#if (ANDROID_VERSION_MAJOR >= 4) && (ANDROID_VERSION_MINOR >= 3) || (ANDROID_VERSION_MAJOR >= 5)
-	layer->planeAlpha = 0xff;
-#endif
-#ifdef HWC_DEVICE_API_VERSION_1_5
-	layer->surfaceDamage.numRects = 0;
-#endif
+	const hwc_rect_t rect = { 0, 0, attr_values[0], attr_values[1] };
+	init_hwcomposer_layer(&list->hwLayers[0], &rect, HWC_FRAMEBUFFER);
+    init_hwcomposer_layer(&list->hwLayers[1], &rect, HWC_FRAMEBUFFER_TARGET);
 
 	list->retireFenceFd = -1;
 	list->flags = HWC_GEOMETRY_CHANGED;
