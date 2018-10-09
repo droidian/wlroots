@@ -33,6 +33,23 @@ Multi-Arch: same
 Depends:
  ${misc:Depends},
  libwlroots0 (= ${binary:Version}),
+ libcap-dev,
+ libdrm-dev,
+ libegl1-mesa-dev,
+ libgbm-dev (>= 17.1.0),
+ libgles2-mesa-dev,
+ libinput-dev (>= 1.7.0),
+ libpixman-1-dev,
+ libsystemd-dev,
+ libwayland-dev (>= 1.15),
+ libxcb1-dev,
+ libxcb-composite0-dev,
+ libxcb-icccm4-dev,
+ libxcb-image0-dev,
+ libxcb-render0-dev,
+ libxcb-xfixes0-dev,
+ libxkbcommon-dev,
+ wayland-protocols (>= 1.15),
 Description: Modular wayland compositor library - development headers
  wlroots is a set of pluggable, composable modules to build a Wayland
  composior.
