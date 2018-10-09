@@ -2,11 +2,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <wayland-server.h>
-#include <wlr/backend/multi.h>
 #include <wlr/backend/session.h>
 #include <wlr/types/wlr_input_device.h>
+#include <wlr/types/wlr_pointer_constraints_v1.h>
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/util/log.h>
 #include <xkbcommon/xkbcommon.h>
@@ -84,6 +85,39 @@ static void pressed_keysyms_update(xkb_keysym_t *pressed_keysyms,
 	}
 }
 
+static void double_fork_shell_cmd(const char *shell_cmd) {
+	pid_t pid = fork();
+	if (pid < 0) {
+		wlr_log(WLR_ERROR, "cannot execute binding command: fork() failed");
+		return;
+	}
+
+	if (pid == 0) {
+		pid = fork();
+		if (pid == 0) {
+			execl("/bin/sh", "/bin/sh", "-c", shell_cmd, NULL);
+			_exit(EXIT_FAILURE);
+		} else {
+			_exit(pid == -1);
+		}
+	}
+
+	int status;
+	while (waitpid(pid, &status, 0) < 0) {
+		if (errno == EINTR) {
+			continue;
+		}
+		wlr_log_errno(WLR_ERROR, "waitpid() on first child failed");
+		return;
+	}
+
+	if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+		return;
+	}
+
+	wlr_log(WLR_ERROR, "first child failed to fork command");
+}
+
 static const char *exec_prefix = "exec ";
 
 static bool outputs_enabled = true;
@@ -113,28 +147,44 @@ static void keyboard_binding_execute(struct roots_keyboard *keyboard,
 		}
 	} else if (strncmp(exec_prefix, command, strlen(exec_prefix)) == 0) {
 		const char *shell_cmd = command + strlen(exec_prefix);
-		pid_t pid = fork();
-		if (pid < 0) {
-			wlr_log(L_ERROR, "cannot execute binding command: fork() failed");
-			return;
-		} else if (pid == 0) {
-			execl("/bin/sh", "/bin/sh", "-c", shell_cmd, (void *)NULL);
-		}
+		double_fork_shell_cmd(shell_cmd);
 	} else if (strcmp(command, "maximize") == 0) {
 		struct roots_view *focus = roots_seat_get_focus(seat);
 		if (focus != NULL) {
 			view_maximize(focus, !focus->maximized);
 		}
 	} else if (strcmp(command, "nop") == 0) {
-		wlr_log(L_DEBUG, "nop command");
+		wlr_log(WLR_DEBUG, "nop command");
 	} else if (strcmp(command, "toggle_outputs") == 0) {
 		outputs_enabled = !outputs_enabled;
 		struct roots_output *output;
 		wl_list_for_each(output, &keyboard->input->server->desktop->outputs, link) {
 			wlr_output_enable(output->wlr_output, outputs_enabled);
 		}
+	} else if (strcmp(command, "toggle_decoration_mode") == 0) {
+		struct roots_view *focus = roots_seat_get_focus(seat);
+		if (focus != NULL && focus->type == ROOTS_XDG_SHELL_VIEW) {
+			struct roots_xdg_toplevel_decoration *decoration =
+				focus->roots_xdg_surface->xdg_toplevel_decoration;
+			if (decoration != NULL) {
+				enum wlr_xdg_toplevel_decoration_v1_mode mode =
+					decoration->wlr_decoration->current_mode;
+				mode = mode == WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE
+					? WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE
+					: WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
+				wlr_xdg_toplevel_decoration_v1_set_mode(
+					decoration->wlr_decoration, mode);
+			}
+		}
+	} else if (strcmp(command, "break_pointer_constraint") == 0) {
+		struct wl_list *list =
+			&keyboard->input->seats;
+		struct roots_seat *seat;
+		wl_list_for_each(seat, list, link) {
+			roots_cursor_constrain(seat->cursor, NULL, NAN, NAN);
+		}
 	} else {
-		wlr_log(L_ERROR, "unknown binding command: %s", command);
+		wlr_log(WLR_ERROR, "unknown binding command: %s", command);
 	}
 }
 
@@ -150,14 +200,13 @@ static bool keyboard_execute_compositor_binding(struct roots_keyboard *keyboard,
 	if (keysym >= XKB_KEY_XF86Switch_VT_1 &&
 			keysym <= XKB_KEY_XF86Switch_VT_12) {
 		struct roots_server *server = keyboard->input->server;
-		if (wlr_backend_is_multi(server->backend)) {
-			struct wlr_session *session =
-				wlr_multi_get_session(server->backend);
-			if (session) {
-				unsigned vt = keysym - XKB_KEY_XF86Switch_VT_1 + 1;
-				wlr_session_change_vt(session, vt);
-			}
+
+		struct wlr_session *session = wlr_backend_get_session(server->backend);
+		if (session) {
+			unsigned vt = keysym - XKB_KEY_XF86Switch_VT_1 + 1;
+			wlr_session_change_vt(session, vt);
 		}
+
 		return true;
 	}
 
@@ -369,7 +418,7 @@ struct roots_keyboard *roots_keyboard_create(struct wlr_input_device *device,
 	rules.options = config->options;
 	struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	if (context == NULL) {
-		wlr_log(L_ERROR, "Cannot create XKB context");
+		wlr_log(WLR_ERROR, "Cannot create XKB context");
 		return NULL;
 	}
 
@@ -377,7 +426,7 @@ struct roots_keyboard *roots_keyboard_create(struct wlr_input_device *device,
 		XKB_KEYMAP_COMPILE_NO_FLAGS);
 	if (keymap == NULL) {
 		xkb_context_unref(context);
-		wlr_log(L_ERROR, "Cannot create XKB keymap");
+		wlr_log(WLR_ERROR, "Cannot create XKB keymap");
 		return NULL;
 	}
 

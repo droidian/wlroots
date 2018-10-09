@@ -32,21 +32,30 @@ static const char *get_manufacturer(uint16_t id) {
 	case ID('A', 'A', 'A'): return "Avolites Ltd";
 	case ID('A', 'C', 'I'): return "Ancor Communications Inc";
 	case ID('A', 'C', 'R'): return "Acer Technologies";
+	case ID('A', 'D', 'A'): return "Addi-Data GmbH";
 	case ID('A', 'P', 'P'): return "Apple Computer Inc";
+	case ID('A', 'S', 'K'): return "Ask A/S";
+	case ID('A', 'V', 'T'): return "Avtek (Electronics) Pty Ltd";
 	case ID('B', 'N', 'O'): return "Bang & Olufsen";
 	case ID('C', 'M', 'N'): return "Chimei Innolux Corporation";
 	case ID('C', 'M', 'O'): return "Chi Mei Optoelectronics corp.";
 	case ID('C', 'R', 'O'): return "Extraordinary Technologies PTY Limited";
 	case ID('D', 'E', 'L'): return "Dell Inc.";
+	case ID('D', 'G', 'C'): return "Data General Corporation";
 	case ID('D', 'O', 'N'): return "DENON, Ltd.";
 	case ID('E', 'N', 'C'): return "Eizo Nanao Corporation";
 	case ID('E', 'P', 'H'): return "Epiphan Systems Inc.";
+	case ID('E', 'X', 'P'): return "Data Export Corporation";
+	case ID('F', 'N', 'I'): return "Funai Electric Co., Ltd.";
 	case ID('F', 'U', 'S'): return "Fujitsu Siemens Computers GmbH";
 	case ID('G', 'S', 'M'): return "Goldstar Company Ltd";
 	case ID('H', 'I', 'Q'): return "Kaohsiung Opto Electronics Americas, Inc.";
 	case ID('H', 'S', 'D'): return "HannStar Display Corp";
+	case ID('H', 'T', 'C'): return "Hitachi Ltd";
 	case ID('H', 'W', 'P'): return "Hewlett Packard";
 	case ID('I', 'N', 'T'): return "Interphase Corporation";
+	case ID('I', 'N', 'X'): return "Communications Supply Corporation (A division of WESCO)";
+	case ID('I', 'T', 'E'): return "Integrated Tech Express Inc";
 	case ID('I', 'V', 'M'): return "Iiyama North America";
 	case ID('L', 'E', 'N'): return "Lenovo Group Limited";
 	case ID('M', 'A', 'X'): return "Rogen Tech Distribution Inc";
@@ -55,6 +64,7 @@ static const char *get_manufacturer(uint16_t id) {
 	case ID('M', 'T', 'C'): return "Mars-Tech Corporation";
 	case ID('M', 'T', 'X'): return "Matrox";
 	case ID('N', 'E', 'C'): return "NEC Corporation";
+	case ID('N', 'E', 'X'): return "Nexgen Mediatech Inc.";
 	case ID('O', 'N', 'K'): return "ONKYO Corporation";
 	case ID('O', 'R', 'N'): return "ORION ELECTRIC CO., LTD.";
 	case ID('O', 'T', 'M'): return "Optoma Corporation";
@@ -63,15 +73,24 @@ static const char *get_manufacturer(uint16_t id) {
 	case ID('P', 'I', 'O'): return "Pioneer Electronic Corporation";
 	case ID('P', 'N', 'R'): return "Planar Systems, Inc.";
 	case ID('Q', 'D', 'S'): return "Quanta Display Inc.";
+	case ID('R', 'A', 'T'): return "Rent-A-Tech";
+	case ID('R', 'E', 'N'): return "Renesas Technology Corp.";
 	case ID('S', 'A', 'M'): return "Samsung Electric Company";
+	case ID('S', 'A', 'N'): return "Sanyo Electric Co., Ltd.";
 	case ID('S', 'E', 'C'): return "Seiko Epson Corporation";
 	case ID('S', 'H', 'P'): return "Sharp Corporation";
 	case ID('S', 'I', 'I'): return "Silicon Image, Inc.";
 	case ID('S', 'N', 'Y'): return "Sony";
+	case ID('S', 'T', 'D'): return "STD Computer Inc";
+	case ID('S', 'V', 'S'): return "SVSI";
+	case ID('S', 'Y', 'N'): return "Synaptics Inc";
+	case ID('T', 'C', 'L'): return "Technical Concepts Ltd";
 	case ID('T', 'O', 'P'): return "Orion Communications Co., Ltd.";
 	case ID('T', 'S', 'B'): return "Toshiba America Info Systems Inc";
 	case ID('T', 'S', 'T'): return "Transtream Inc";
 	case ID('U', 'N', 'K'): return "Unknown";
+	case ID('V', 'E', 'S'): return "Vestel Elektronik Sanayi ve Ticaret A. S.";
+	case ID('V', 'I', 'T'): return "Visitech AS";
 	case ID('V', 'I', 'Z'): return "VIZIO, Inc";
 	case ID('V', 'S', 'C'): return "ViewSonic Corporation";
 	case ID('Y', 'M', 'H'): return "Yamaha Corporation";
@@ -144,6 +163,9 @@ const char *conn_get_name(uint32_t type_id) {
 	case DRM_MODE_CONNECTOR_eDP:         return "eDP";
 	case DRM_MODE_CONNECTOR_VIRTUAL:     return "Virtual";
 	case DRM_MODE_CONNECTOR_DSI:         return "DSI";
+#ifdef DRM_MODE_CONNECTOR_DPI
+	case DRM_MODE_CONNECTOR_DPI:         return "DPI";
+#endif
 	default:                             return "Unknown";
 	}
 }
@@ -174,7 +196,7 @@ uint32_t get_fb_for_bo(struct gbm_bo *bo) {
 	uint32_t format = gbm_bo_get_format(bo);
 
 	if (drmModeAddFB2(fd, width, height, format, handles, pitches, offsets, &id, 0)) {
-		wlr_log_errno(L_ERROR, "Unable to add DRM framebuffer");
+		wlr_log_errno(WLR_ERROR, "Unable to add DRM framebuffer");
 	}
 
 	gbm_bo_set_user_data(bo, (void *)(uintptr_t)id, free_fb);
@@ -220,14 +242,12 @@ struct match_state {
 static bool match_obj_(struct match_state *st, size_t skips, size_t score, size_t replaced, size_t i) {
 	// Finished
 	if (i >= st->num_res) {
-		if (score > st->score || (score == st->score && replaced < st->replaced)) {
+		if (score > st->score ||
+				(score == st->score && replaced < st->replaced)) {
 			st->score = score;
 			st->replaced = replaced;
 			memcpy(st->best, st->res, sizeof(st->best[0]) * st->num_res);
 
-			if (st->score == st->num_objs && st->replaced == 0) {
-				st->exit_early = true;
-			}
 			st->exit_early = (st->score == st->num_res - skips
 					|| st->score == st->num_objs)
 					&& st->replaced == 0;
@@ -243,41 +263,53 @@ static bool match_obj_(struct match_state *st, size_t skips, size_t score, size_
 		return match_obj_(st, skips + 1, score, replaced, i + 1);
 	}
 
+	bool has_best = false;
+
 	/*
 	 * Attempt to use the current solution first, to try and avoid
 	 * recalculating everything
 	 */
-
 	if (st->orig[i] != UNMATCHED && !is_taken(i, st->res, st->orig[i])) {
 		st->res[i] = st->orig[i];
-		if (match_obj_(st, skips, score + 1, replaced, i + 1)) {
-			return true;
+		size_t obj_score = st->objs[st->res[i]] != 0 ? 1 : 0;
+		if (match_obj_(st, skips, score + obj_score, replaced, i + 1)) {
+			has_best = true;
 		}
+	}
+	if (st->orig[i] == UNMATCHED) {
+		st->res[i] = UNMATCHED;
+		if (match_obj_(st, skips, score, replaced, i + 1)) {
+			has_best = true;
+		}
+	}
+	if (st->exit_early) {
+		return true;
 	}
 
 	if (st->orig[i] != UNMATCHED) {
 		++replaced;
 	}
 
-	bool is_best = false;
-	for (st->res[i] = 0; st->res[i] < st->num_objs; ++st->res[i]) {
+	for (size_t candidate = 0; candidate < st->num_objs; ++candidate) {
 		// We tried this earlier
-		if (st->res[i] == st->orig[i]) {
+		if (candidate == st->orig[i]) {
 			continue;
 		}
 
 		// Not compatible
-		if (!(st->objs[st->res[i]] & (1 << i))) {
+		if (!(st->objs[candidate] & (1 << i))) {
 			continue;
 		}
 
 		// Already taken
-		if (is_taken(i, st->res, st->res[i])) {
+		if (is_taken(i, st->res, candidate)) {
 			continue;
 		}
 
-		if (match_obj_(st, skips, score + 1, replaced, i + 1)) {
-			is_best = true;
+		st->res[i] = candidate;
+		size_t obj_score = st->objs[candidate] != 0 ? 1 : 0;
+		if (match_obj_(st, skips, score + obj_score, replaced, i + 1)) {
+			has_best = true;
 		}
 
 		if (st->exit_early) {
@@ -285,7 +317,7 @@ static bool match_obj_(struct match_state *st, size_t skips, size_t score, size_
 		}
 	}
 
-	if (is_best) {
+	if (has_best) {
 		return true;
 	}
 
@@ -298,6 +330,9 @@ size_t match_obj(size_t num_objs, const uint32_t objs[static restrict num_objs],
 		size_t num_res, const uint32_t res[static restrict num_res],
 		uint32_t out[static restrict num_res]) {
 	uint32_t solution[num_res];
+	for (size_t i = 0; i < num_res; ++i) {
+		solution[i] = UNMATCHED;
+	}
 
 	struct match_state st = {
 		.num_objs = num_objs,

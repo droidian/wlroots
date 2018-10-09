@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 #include <wayland-server.h>
 #include <wayland-util.h>
 #include <wlr/backend/drm.h>
@@ -57,6 +58,9 @@ struct wlr_drm_crtc {
 	union wlr_drm_crtc_props props;
 
 	struct wl_list connectors;
+
+	uint16_t *gamma_table;
+	size_t gamma_table_size;
 };
 
 struct wlr_drm_backend {
@@ -64,6 +68,7 @@ struct wlr_drm_backend {
 
 	struct wlr_drm_backend *parent;
 	const struct wlr_drm_interface *iface;
+	clockid_t clock;
 
 	int fd;
 
@@ -104,10 +109,14 @@ struct wlr_drm_backend {
 };
 
 enum wlr_drm_connector_state {
+	// Connector is available but no output is plugged in
 	WLR_DRM_CONN_DISCONNECTED,
+	// An output just has been plugged in and is waiting for a modeset
 	WLR_DRM_CONN_NEEDS_MODESET,
 	WLR_DRM_CONN_CLEANUP,
 	WLR_DRM_CONN_CONNECTED,
+	// Connector disappeared, waiting for being destroyed on next page-flip
+	WLR_DRM_CONN_DISAPPEARED,
 };
 
 struct wlr_drm_mode {
@@ -119,6 +128,8 @@ struct wlr_drm_connector {
 	struct wlr_output output;
 
 	enum wlr_drm_connector_state state;
+	struct wlr_output_mode *desired_mode;
+	bool desired_enabled;
 	uint32_t id;
 
 	struct wlr_drm_crtc *crtc;
@@ -136,12 +147,16 @@ struct wlr_drm_connector {
 	struct wl_list link;
 };
 
+struct wlr_drm_backend *get_drm_backend_from_backend(
+	struct wlr_backend *wlr_backend);
 bool check_drm_features(struct wlr_drm_backend *drm);
 bool init_drm_resources(struct wlr_drm_backend *drm);
 void finish_drm_resources(struct wlr_drm_backend *drm);
 void restore_drm_outputs(struct wlr_drm_backend *drm);
 void scan_drm_connectors(struct wlr_drm_backend *state);
 int handle_drm_event(int fd, uint32_t mask, void *data);
-void enable_drm_connector(struct wlr_output *output, bool enable);
+bool enable_drm_connector(struct wlr_output *output, bool enable);
+bool set_drm_connector_gamma(struct wlr_output *output, size_t size,
+	const uint16_t *r, const uint16_t *g, const uint16_t *b);
 
 #endif

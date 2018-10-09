@@ -1,3 +1,11 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_TYPES_WLR_DATA_DEVICE_H
 #define WLR_TYPES_WLR_DATA_DEVICE_H
 
@@ -15,7 +23,7 @@ wlr_touch_grab_interface wlr_data_device_touch_drag_interface;
 
 struct wlr_data_device_manager {
 	struct wl_global *global;
-	struct wl_list wl_resources;
+	struct wl_list resources;
 	struct wl_list data_sources;
 
 	struct wl_listener display_destroy;
@@ -85,15 +93,16 @@ struct wlr_drag_icon {
 	bool is_pointer;
 	int32_t touch_id;
 
-	int32_t sx, sy;
-
 	struct {
-		struct wl_signal map; // emitted when mapped or unmapped
+		struct wl_signal map;
+		struct wl_signal unmap;
 		struct wl_signal destroy;
 	} events;
 
 	struct wl_listener surface_destroy;
 	struct wl_listener seat_client_destroy;
+
+	void *data;
 };
 
 struct wlr_drag {

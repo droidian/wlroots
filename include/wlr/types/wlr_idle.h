@@ -1,3 +1,11 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_TYPES_WLR_IDLE_H
 #define WLR_TYPES_WLR_IDLE_H
 
@@ -14,13 +22,15 @@
 
 
 struct wlr_idle {
-	struct wl_global *wl_global;
+	struct wl_global *global;
 	struct wl_list idle_timers; // wlr_idle_timeout::link
 	struct wl_event_loop *event_loop;
+	bool enabled;
 
 	struct wl_listener display_destroy;
 	struct {
 		struct wl_signal activity_notify;
+		struct wl_signal destroy;
 	} events;
 
 	void *data;
@@ -33,6 +43,7 @@ struct wlr_idle_timeout {
 
 	struct wl_event_source *idle_source;
 	bool idle_state;
+	bool enabled;
 	uint32_t timeout; // milliseconds
 
 	struct wl_listener input_listener;
@@ -50,4 +61,11 @@ void wlr_idle_destroy(struct wlr_idle *idle);
  * compositor when there is an user activity event on that seat.
  */
 void wlr_idle_notify_activity(struct wlr_idle *idle, struct wlr_seat *seat);
+
+/**
+ * Enable or disable timers for a given idle resource by seat.
+ * Passing a NULL seat means update timers for all seats.
+ */
+void wlr_idle_set_enabled(struct wlr_idle *idle, struct wlr_seat *seat,
+	bool enabled);
 #endif

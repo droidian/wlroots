@@ -1,5 +1,4 @@
 #define _POSIX_C_SOURCE 200112L
-#define _XOPEN_SOURCE 500
 #include <assert.h>
 #include <GLES2/gl2.h>
 #include <math.h>
@@ -73,7 +72,7 @@ struct sample_keyboard {
 void configure_cursor(struct wlr_cursor *cursor, struct wlr_input_device *device,
 		 struct sample_state *sample) {
 	struct sample_output *output;
-	wlr_log(L_ERROR, "Configuring cursor %p for device %p", cursor, device);
+	wlr_log(WLR_ERROR, "Configuring cursor %p for device %p", cursor, device);
 
 	// reset mappings
 	wlr_cursor_map_to_output(cursor, NULL);
@@ -237,18 +236,24 @@ void new_input_notify(struct wl_listener *listener, void *data) {
 		rules.options = getenv("XKB_DEFAULT_OPTIONS");
 		struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 		if (!context) {
-			wlr_log(L_ERROR, "Failed to create XKB context");
+			wlr_log(WLR_ERROR, "Failed to create XKB context");
 			exit(1);
 		}
-		wlr_keyboard_set_keymap(device->keyboard, xkb_map_new_from_names(context,
-					&rules, XKB_KEYMAP_COMPILE_NO_FLAGS));
+		struct xkb_keymap *keymap = xkb_map_new_from_names(context, &rules,
+			XKB_KEYMAP_COMPILE_NO_FLAGS);
+		if (!keymap) {
+			wlr_log(WLR_ERROR, "Failed to create XKB keymap");
+			exit(1);
+		}
+		wlr_keyboard_set_keymap(device->keyboard, keymap);
+		xkb_keymap_unref(keymap);
 		xkb_context_unref(context);
 		break;
 	case WLR_INPUT_DEVICE_POINTER:;
-	   	struct sample_cursor *cursor = calloc(1, sizeof(struct sample_cursor));
+		struct sample_cursor *cursor = calloc(1, sizeof(struct sample_cursor));
 		struct sample_pointer *pointer = calloc(1, sizeof(struct sample_pointer));
 		pointer->device = device;
-	   	cursor->sample = sample;
+		cursor->sample = sample;
 		cursor->device = device;
 
 		cursor->cursor = wlr_cursor_create();
@@ -277,14 +282,14 @@ void new_input_notify(struct wl_listener *listener, void *data) {
 }
 
 int main(int argc, char *argv[]) {
-	wlr_log_init(L_DEBUG, NULL);
+	wlr_log_init(WLR_DEBUG, NULL);
 	struct wl_display *display = wl_display_create();
 	struct sample_state state = {
 		.default_color = { 0.25f, 0.25f, 0.25f, 1 },
 		.clear_color = { 0.25f, 0.25f, 0.25f, 1 },
 		.display = display,
 	};
-	struct wlr_backend *wlr = wlr_backend_autocreate(display);
+	struct wlr_backend *wlr = wlr_backend_autocreate(display, NULL);
 	if (!wlr) {
 		exit(1);
 	}
@@ -303,17 +308,17 @@ int main(int argc, char *argv[]) {
 
 	struct wlr_xcursor_theme *theme = wlr_xcursor_theme_load("default", 16);
 	if (!theme) {
-		wlr_log(L_ERROR, "Failed to load cursor theme");
+		wlr_log(WLR_ERROR, "Failed to load cursor theme");
 		return 1;
 	}
 	state.xcursor = wlr_xcursor_theme_get_cursor(theme, "left_ptr");
 	if (!state.xcursor) {
-		wlr_log(L_ERROR, "Failed to load left_ptr cursor");
+		wlr_log(WLR_ERROR, "Failed to load left_ptr cursor");
 		return 1;
 	}
 
 	if (!wlr_backend_start(wlr)) {
-		wlr_log(L_ERROR, "Failed to start backend");
+		wlr_log(WLR_ERROR, "Failed to start backend");
 		wlr_backend_destroy(wlr);
 		exit(1);
 	}
@@ -323,6 +328,11 @@ int main(int argc, char *argv[]) {
 	struct sample_cursor *cursor, *tmp_cursor;
 	wl_list_for_each_safe(cursor, tmp_cursor, &state.cursors, link) {
 		cursor_destroy(cursor);
+	}
+
+	struct sample_pointer *pointer, *tmp_pointer;
+	wl_list_for_each_safe(pointer, tmp_pointer, &state.pointers, link) {
+		free(pointer);
 	}
 
 	wlr_xcursor_theme_destroy(theme);

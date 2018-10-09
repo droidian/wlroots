@@ -1,3 +1,11 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_TYPES_WLR_OUTPUT_LAYOUT_H
 #define WLR_TYPES_WLR_OUTPUT_LAYOUT_H
 
@@ -116,6 +124,9 @@ enum wlr_direction {
  * point in the given direction.
  */
 struct wlr_output *wlr_output_layout_adjacent_output(
+		struct wlr_output_layout *layout, enum wlr_direction direction,
+		struct wlr_output *reference, double ref_lx, double ref_ly);
+struct wlr_output *wlr_output_layout_farthest_output(
 		struct wlr_output_layout *layout, enum wlr_direction direction,
 		struct wlr_output *reference, double ref_lx, double ref_ly);
 

@@ -16,7 +16,7 @@
 
 static const struct wlr_texture_impl texture_impl;
 
-static struct wlr_gles2_texture *gles2_get_texture(
+struct wlr_gles2_texture *gles2_get_texture(
 		struct wlr_texture *wlr_texture) {
 	assert(wlr_texture->impl == &texture_impl);
 	return (struct wlr_gles2_texture *)wlr_texture;
@@ -25,7 +25,9 @@ static struct wlr_gles2_texture *gles2_get_texture(
 struct wlr_gles2_texture *get_gles2_texture_in_context(
 		struct wlr_texture *wlr_texture) {
 	struct wlr_gles2_texture *texture = gles2_get_texture(wlr_texture);
-	assert(wlr_egl_is_current(texture->egl));
+	if (!wlr_egl_is_current(texture->egl)) {
+		wlr_egl_make_current(texture->egl, EGL_NO_SURFACE, NULL);
+	}
 	return texture;
 }
 
@@ -36,6 +38,11 @@ static void gles2_texture_get_size(struct wlr_texture *wlr_texture, int *width,
 	*height = texture->height;
 }
 
+static bool gles2_texture_is_opaque(struct wlr_texture *wlr_texture) {
+	struct wlr_gles2_texture *texture = gles2_get_texture(wlr_texture);
+	return !texture->has_alpha;
+}
+
 static bool gles2_texture_write_pixels(struct wlr_texture *wlr_texture,
 		enum wl_shm_format wl_fmt, uint32_t stride, uint32_t width,
 		uint32_t height, uint32_t src_x, uint32_t src_y, uint32_t dst_x,
@@ -44,13 +51,13 @@ static bool gles2_texture_write_pixels(struct wlr_texture *wlr_texture,
 		get_gles2_texture_in_context(wlr_texture);
 
 	if (texture->type != WLR_GLES2_TEXTURE_GLTEX) {
-		wlr_log(L_ERROR, "Cannot write pixels to immutable texture");
+		wlr_log(WLR_ERROR, "Cannot write pixels to immutable texture");
 		return false;
 	}
 
 	const struct wlr_gles2_pixel_format *fmt = get_gles2_format_from_wl(wl_fmt);
 	if (fmt == NULL) {
-		wlr_log(L_ERROR, "Unsupported pixel format %"PRIu32, wl_fmt);
+		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIu32, wl_fmt);
 		return false;
 	}
 
@@ -72,6 +79,34 @@ static bool gles2_texture_write_pixels(struct wlr_texture *wlr_texture,
 
 	POP_GLES2_DEBUG;
 	return true;
+}
+
+static bool gles2_texture_to_dmabuf(struct wlr_texture *wlr_texture,
+		struct wlr_dmabuf_attributes *attribs) {
+	struct wlr_gles2_texture *texture = gles2_get_texture(wlr_texture);
+
+	if (!texture->image) {
+		assert(texture->type == WLR_GLES2_TEXTURE_GLTEX);
+
+		if (!eglCreateImageKHR) {
+			return false;
+		}
+
+		texture->image = eglCreateImageKHR(texture->egl->display,
+			texture->egl->context, EGL_GL_TEXTURE_2D_KHR,
+			(EGLClientBuffer)(uintptr_t)texture->gl_tex, NULL);
+		if (texture->image == EGL_NO_IMAGE_KHR) {
+			return false;
+		}
+	}
+
+	uint32_t flags = 0;
+	if (texture->inverted_y) {
+		flags |= WLR_DMABUF_ATTRIBUTES_FLAGS_Y_INVERT;
+	}
+
+	return wlr_egl_export_image_to_dmabuf(texture->egl, texture->image,
+		texture->width, texture->height, flags, attribs);
 }
 
 static void gles2_texture_destroy(struct wlr_texture *wlr_texture) {
@@ -101,25 +136,29 @@ static void gles2_texture_destroy(struct wlr_texture *wlr_texture) {
 
 static const struct wlr_texture_impl texture_impl = {
 	.get_size = gles2_texture_get_size,
+	.is_opaque = gles2_texture_is_opaque,
 	.write_pixels = gles2_texture_write_pixels,
+	.to_dmabuf = gles2_texture_to_dmabuf,
 	.destroy = gles2_texture_destroy,
 };
 
 struct wlr_texture *wlr_gles2_texture_from_pixels(struct wlr_egl *egl,
 		enum wl_shm_format wl_fmt, uint32_t stride, uint32_t width,
 		uint32_t height, const void *data) {
-	assert(wlr_egl_is_current(egl));
+	if (!wlr_egl_is_current(egl)) {
+		wlr_egl_make_current(egl, EGL_NO_SURFACE, NULL);
+	}
 
 	const struct wlr_gles2_pixel_format *fmt = get_gles2_format_from_wl(wl_fmt);
 	if (fmt == NULL) {
-		wlr_log(L_ERROR, "Unsupported pixel format %"PRIu32, wl_fmt);
+		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIu32, wl_fmt);
 		return NULL;
 	}
 
 	struct wlr_gles2_texture *texture =
 		calloc(1, sizeof(struct wlr_gles2_texture));
 	if (texture == NULL) {
-		wlr_log(L_ERROR, "Allocation failed");
+		wlr_log(WLR_ERROR, "Allocation failed");
 		return NULL;
 	}
 	wlr_texture_init(&texture->wlr_texture, &texture_impl);
@@ -145,7 +184,9 @@ struct wlr_texture *wlr_gles2_texture_from_pixels(struct wlr_egl *egl,
 
 struct wlr_texture *wlr_gles2_texture_from_wl_drm(struct wlr_egl *egl,
 		struct wl_resource *data) {
-	assert(wlr_egl_is_current(egl));
+	if (!wlr_egl_is_current(egl)) {
+		wlr_egl_make_current(egl, EGL_NO_SURFACE, NULL);
+	}
 
 	if (!glEGLImageTargetTexture2DOES) {
 		return NULL;
@@ -154,7 +195,7 @@ struct wlr_texture *wlr_gles2_texture_from_wl_drm(struct wlr_egl *egl,
 	struct wlr_gles2_texture *texture =
 		calloc(1, sizeof(struct wlr_gles2_texture));
 	if (texture == NULL) {
-		wlr_log(L_ERROR, "Allocation failed");
+		wlr_log(WLR_ERROR, "Allocation failed");
 		return NULL;
 	}
 	wlr_texture_init(&texture->wlr_texture, &texture_impl);
@@ -183,7 +224,7 @@ struct wlr_texture *wlr_gles2_texture_from_wl_drm(struct wlr_egl *egl,
 		texture->has_alpha = true;
 		break;
 	default:
-		wlr_log(L_ERROR, "Invalid or unsupported EGL buffer format");
+		wlr_log(WLR_ERROR, "Invalid or unsupported EGL buffer format");
 		free(texture);
 		return NULL;
 	}
@@ -198,24 +239,42 @@ struct wlr_texture *wlr_gles2_texture_from_wl_drm(struct wlr_egl *egl,
 	return &texture->wlr_texture;
 }
 
+#ifndef DRM_FORMAT_BIG_ENDIAN
+#define DRM_FORMAT_BIG_ENDIAN 0x80000000
+#endif
+
 struct wlr_texture *wlr_gles2_texture_from_dmabuf(struct wlr_egl *egl,
-		struct wlr_dmabuf_buffer_attribs *attribs) {
-	assert(wlr_egl_is_current(egl));
+		struct wlr_dmabuf_attributes *attribs) {
+	if (!wlr_egl_is_current(egl)) {
+		wlr_egl_make_current(egl, EGL_NO_SURFACE, NULL);
+	}
 
 	if (!glEGLImageTargetTexture2DOES) {
 		return NULL;
 	}
 
-	if (!egl->egl_exts.dmabuf_import) {
-		wlr_log(L_ERROR, "Cannot create DMA-BUF texture: EGL extension "
+	if (!egl->exts.image_dmabuf_import_ext) {
+		wlr_log(WLR_ERROR, "Cannot create DMA-BUF texture: EGL extension "
 			"unavailable");
 		return NULL;
+	}
+
+	switch (attribs->format & ~DRM_FORMAT_BIG_ENDIAN) {
+	case WL_SHM_FORMAT_YUYV:
+	case WL_SHM_FORMAT_YVYU:
+	case WL_SHM_FORMAT_UYVY:
+	case WL_SHM_FORMAT_VYUY:
+	case WL_SHM_FORMAT_AYUV:
+		// TODO: YUV based formats not yet supported, require multiple images
+		return false;
+	default:
+		break;
 	}
 
 	struct wlr_gles2_texture *texture =
 		calloc(1, sizeof(struct wlr_gles2_texture));
 	if (texture == NULL) {
-		wlr_log(L_ERROR, "Allocation failed");
+		wlr_log(WLR_ERROR, "Allocation failed");
 		return NULL;
 	}
 	wlr_texture_init(&texture->wlr_texture, &texture_impl);
@@ -225,7 +284,7 @@ struct wlr_texture *wlr_gles2_texture_from_dmabuf(struct wlr_egl *egl,
 	texture->type = WLR_GLES2_TEXTURE_DMABUF;
 	texture->has_alpha = true;
 	texture->inverted_y =
-		(attribs->flags & WLR_DMABUF_BUFFER_ATTRIBS_FLAGS_Y_INVERT) != 0;
+		(attribs->flags & WLR_DMABUF_ATTRIBUTES_FLAGS_Y_INVERT) != 0;
 
 	texture->image = wlr_egl_create_image_from_dmabuf(egl, attribs);
 	if (texture->image == NULL) {

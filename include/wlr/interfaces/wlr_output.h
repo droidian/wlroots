@@ -1,3 +1,11 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_INTERFACES_WLR_OUTPUT_H
 #define WLR_INTERFACES_WLR_OUTPUT_H
 
@@ -7,7 +15,7 @@
 #include <wlr/types/wlr_output.h>
 
 struct wlr_output_impl {
-	void (*enable)(struct wlr_output *output, bool enable);
+	bool (*enable)(struct wlr_output *output, bool enable);
 	bool (*set_mode)(struct wlr_output *output, struct wlr_output_mode *mode);
 	bool (*set_custom_mode)(struct wlr_output *output, int32_t width,
 		int32_t height, int32_t refresh);
@@ -20,9 +28,12 @@ struct wlr_output_impl {
 	void (*destroy)(struct wlr_output *output);
 	bool (*make_current)(struct wlr_output *output, int *buffer_age);
 	bool (*swap_buffers)(struct wlr_output *output, pixman_region32_t *damage);
-	void (*set_gamma)(struct wlr_output *output,
-		uint32_t size, uint16_t *r, uint16_t *g, uint16_t *b);
-	uint32_t (*get_gamma_size)(struct wlr_output *output);
+	bool (*set_gamma)(struct wlr_output *output, size_t size,
+		const uint16_t *r, const uint16_t *g, const uint16_t *b);
+	size_t (*get_gamma_size)(struct wlr_output *output);
+	bool (*export_dmabuf)(struct wlr_output *output,
+		struct wlr_dmabuf_attributes *attribs);
+	void (*schedule_frame)(struct wlr_output *output);
 };
 
 void wlr_output_init(struct wlr_output *output, struct wlr_backend *backend,
@@ -35,5 +46,7 @@ void wlr_output_update_enabled(struct wlr_output *output, bool enabled);
 void wlr_output_update_needs_swap(struct wlr_output *output);
 void wlr_output_damage_whole(struct wlr_output *output);
 void wlr_output_send_frame(struct wlr_output *output);
+void wlr_output_send_present(struct wlr_output *output,
+	struct wlr_output_event_present *event);
 
 #endif

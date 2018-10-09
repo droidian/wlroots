@@ -1,6 +1,23 @@
+/*
+ * This is a stable interface of wlroots. Future changes will be limited to:
+ *
+ * - New functions
+ * - New struct members
+ * - New enum members
+ *
+ * Note that wlroots does not make an ABI compatibility promise - in the future,
+ * the layout and size of structs used by wlroots may change, requiring code
+ * depending on this header to be recompiled (but not edited).
+ *
+ * Breaking changes are announced by email and follow a 1-year deprecation
+ * schedule. Send an email to ~sircmpwn/wlroots-announce+subscribe@lists.sr.ht
+ * to receive these announcements.
+ */
+
 #ifndef WLR_UTIL_REGION_H
 #define WLR_UTIL_REGION_H
 
+#include <stdbool.h>
 #include <pixman.h>
 #include <wayland-server.h>
 
@@ -32,5 +49,8 @@ void wlr_region_expand(pixman_region32_t *dst, pixman_region32_t *src,
  */
 void wlr_region_rotated_bounds(pixman_region32_t *dst, pixman_region32_t *src,
 	float rotation, int ox, int oy);
+
+bool wlr_region_confine(pixman_region32_t *region, double x1, double y1, double x2,
+	double y2, double *x2_out, double *y2_out);
 
 #endif

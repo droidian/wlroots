@@ -13,6 +13,7 @@ static void xdg_pointer_grab_end(struct wlr_seat_pointer_grab *grab) {
 	}
 
 	wlr_seat_pointer_end_grab(grab->seat);
+	wlr_seat_keyboard_end_grab(grab->seat);
 }
 
 static void xdg_pointer_grab_enter(struct wlr_seat_pointer_grab *grab,
@@ -78,7 +79,7 @@ static void xdg_keyboard_grab_modifiers(struct wlr_seat_keyboard_grab *grab,
 }
 
 static void xdg_keyboard_grab_cancel(struct wlr_seat_keyboard_grab *grab) {
-	wlr_seat_keyboard_end_grab(grab->seat);
+	wlr_seat_pointer_end_grab(grab->seat);
 }
 
 static const struct wlr_keyboard_grab_interface xdg_keyboard_grab_impl = {
@@ -151,6 +152,9 @@ static void xdg_popup_handle_grab(struct wl_client *client,
 		wlr_xdg_surface_from_popup_resource(resource);
 	struct wlr_seat_client *seat_client =
 		wlr_seat_client_from_resource(seat_resource);
+	if (!surface) {
+		return;
+	}
 
 	if (surface->popup->committed) {
 		wl_resource_post_error(surface->popup->resource,
@@ -185,7 +189,7 @@ static void xdg_popup_handle_destroy(struct wl_client *client,
 	struct wlr_xdg_surface *surface =
 		wlr_xdg_surface_from_popup_resource(resource);
 
-	if (!wl_list_empty(&surface->popups)) {
+	if (surface && !wl_list_empty(&surface->popups)) {
 		wl_resource_post_error(surface->client->resource,
 			XDG_WM_BASE_ERROR_NOT_THE_TOPMOST_POPUP,
 			"xdg_popup was destroyed while it was not the topmost popup");
@@ -208,6 +212,12 @@ static void xdg_popup_handle_resource_destroy(struct wl_resource *resource) {
 	}
 }
 
+const struct wlr_surface_role xdg_popup_surface_role = {
+	.name = "xdg_popup",
+	.commit = handle_xdg_surface_commit,
+	.precommit = handle_xdg_surface_precommit,
+};
+
 void create_xdg_popup(struct wlr_xdg_surface *xdg_surface,
 		struct wlr_xdg_surface *parent,
 		struct wlr_xdg_positioner_resource *positioner, int32_t id) {
@@ -219,8 +229,8 @@ void create_xdg_popup(struct wlr_xdg_surface *xdg_surface,
 		return;
 	}
 
-	if (wlr_surface_set_role(xdg_surface->surface, XDG_POPUP_ROLE,
-			xdg_surface->resource, XDG_WM_BASE_ERROR_ROLE)) {
+	if (!wlr_surface_set_role(xdg_surface->surface, &xdg_popup_surface_role,
+			xdg_surface, xdg_surface->resource, XDG_WM_BASE_ERROR_ROLE)) {
 		return;
 	}
 
@@ -416,7 +426,7 @@ static bool xdg_popup_unconstrain_slide(struct wlr_xdg_popup *popup,
 		(popup->positioner.constraint_adjustment &
 		 XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X);
 
-	bool slide_y = offset_x &&
+	bool slide_y = offset_y &&
 		(popup->positioner.constraint_adjustment &
 		 XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y);
 
@@ -459,7 +469,7 @@ static bool xdg_popup_unconstrain_resize(struct wlr_xdg_popup *popup,
 		(popup->positioner.constraint_adjustment &
 		 XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_RESIZE_X);
 
-	bool resize_y = offset_x &&
+	bool resize_y = offset_y &&
 		(popup->positioner.constraint_adjustment &
 		 XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_RESIZE_Y);
 
@@ -471,7 +481,7 @@ static bool xdg_popup_unconstrain_resize(struct wlr_xdg_popup *popup,
 	}
 
 	xdg_popup_box_constraints(popup, toplevel_sx_box,
-		&offset_y, &offset_y);
+		&offset_x, &offset_y);
 
 	return !offset_x && !offset_y;
 }

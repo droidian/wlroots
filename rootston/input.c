@@ -1,5 +1,7 @@
+#define _POSIX_C_SOURCE 200112L
 #include <assert.h>
 #include <stdlib.h>
+#include <time.h>
 #include <wayland-server.h>
 #include <wlr/backend/libinput.h>
 #include <wlr/config.h>
@@ -56,11 +58,11 @@ static void handle_new_input(struct wl_listener *listener, void *data) {
 
 	struct roots_seat *seat = input_get_seat(input, seat_name);
 	if (!seat) {
-		wlr_log(L_ERROR, "could not create roots seat");
+		wlr_log(WLR_ERROR, "could not create roots seat");
 		return;
 	}
 
-	wlr_log(L_DEBUG, "New input device: %s (%d:%d) %s seat:%s", device->name,
+	wlr_log(WLR_DEBUG, "New input device: %s (%d:%d) %s seat:%s", device->name,
 			device->vendor, device->product, device_type(device->type), seat_name);
 
 	roots_seat_add_device(seat, device);
@@ -69,7 +71,7 @@ static void handle_new_input(struct wl_listener *listener, void *data) {
 		struct libinput_device *libinput_dev =
 			wlr_libinput_get_device_handle(device);
 
-		wlr_log(L_DEBUG, "input has config, tap_enabled: %d\n", dc->tap_enabled);
+		wlr_log(WLR_DEBUG, "input has config, tap_enabled: %d\n", dc->tap_enabled);
 		if (dc->tap_enabled) {
 			libinput_device_config_tap_set_enabled(libinput_dev,
 					LIBINPUT_CONFIG_TAP_ENABLED);
@@ -79,7 +81,7 @@ static void handle_new_input(struct wl_listener *listener, void *data) {
 
 struct roots_input *input_create(struct roots_server *server,
 		struct roots_config *config) {
-	wlr_log(L_DEBUG, "Initializing roots input");
+	wlr_log(WLR_DEBUG, "Initializing roots input");
 	assert(server->desktop);
 
 	struct roots_input *input = calloc(1, sizeof(struct roots_input));
@@ -125,4 +127,17 @@ bool input_view_has_focus(struct roots_input *input, struct roots_view *view) {
 	}
 
 	return false;
+}
+
+static inline int64_t timespec_to_msec(const struct timespec *a) {
+	return (int64_t)a->tv_sec * 1000 + a->tv_nsec / 1000000;
+}
+
+void input_update_cursor_focus(struct roots_input *input) {
+	struct roots_seat *seat;
+	struct timespec now;
+	wl_list_for_each(seat, &input->seats, link) {
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		roots_cursor_update_position(seat->cursor, timespec_to_msec(&now));
+	}
 }

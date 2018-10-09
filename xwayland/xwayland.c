@@ -47,7 +47,7 @@ static void safe_close(int fd) {
 
 static int unset_cloexec(int fd) {
 	if (fcntl(fd, F_SETFD, 0) != 0) {
-		wlr_log_errno(L_ERROR, "fcntl() failed on fd %d", fd);
+		wlr_log_errno(WLR_ERROR, "fcntl() failed on fd %d", fd);
 		return -1;
 	}
 	return 0;
@@ -74,6 +74,7 @@ static int fill_arg(char ***argv, const char *fmt, ...) {
 	return len;
 }
 
+_Noreturn
 static void exec_xwayland(struct wlr_xwayland *wlr_xwayland) {
 	if (unset_cloexec(wlr_xwayland->x_fd[0]) ||
 			unset_cloexec(wlr_xwayland->x_fd[1]) ||
@@ -98,19 +99,19 @@ static void exec_xwayland(struct wlr_xwayland *wlr_xwayland) {
 			fill_arg(&cur_arg, "%d", wlr_xwayland->x_fd[0]) < 0 ||
 			fill_arg(&cur_arg, "%d", wlr_xwayland->x_fd[1]) < 0 ||
 			fill_arg(&cur_arg, "%d", wlr_xwayland->wm_fd[1]) < 0) {
-		wlr_log_errno(L_ERROR, "alloc/print failure");
+		wlr_log_errno(WLR_ERROR, "alloc/print failure");
 		_exit(EXIT_FAILURE);
 	}
 
 	const char *xdg_runtime = getenv("XDG_RUNTIME_DIR");
 	const char *path_var = getenv("PATH");
 	if (!xdg_runtime) {
-		wlr_log(L_ERROR, "XDG_RUNTIME_DIR is not set");
+		wlr_log(WLR_ERROR, "XDG_RUNTIME_DIR is not set");
 		_exit(EXIT_FAILURE);
 	}
 
 	if (clearenv()) {
-		wlr_log_errno(L_ERROR, "clearenv failed");
+		wlr_log_errno(WLR_ERROR, "clearenv failed");
 		_exit(EXIT_FAILURE);
 	}
 	setenv("XDG_RUNTIME_DIR", xdg_runtime, true);
@@ -119,13 +120,30 @@ static void exec_xwayland(struct wlr_xwayland *wlr_xwayland) {
 	snprintf(wayland_socket_str, sizeof(wayland_socket_str), "%d", wlr_xwayland->wl_fd[1]);
 	setenv("WAYLAND_SOCKET", wayland_socket_str, true);
 
-	wlr_log(L_INFO, "WAYLAND_SOCKET=%d Xwayland :%d -rootless -terminate -listen %d -listen %d -wm %d",
+	wlr_log(WLR_INFO, "WAYLAND_SOCKET=%d Xwayland :%d -rootless -terminate -listen %d -listen %d -wm %d",
 		wlr_xwayland->wl_fd[1], wlr_xwayland->display, wlr_xwayland->x_fd[0],
 		wlr_xwayland->x_fd[1], wlr_xwayland->wm_fd[1]);
 
-	// TODO: close stdout/err depending on log level
+	// Closes stdout/stderr depending on log verbosity
+	enum wlr_log_importance verbosity = wlr_log_get_verbosity();
+	int devnull = open("/dev/null", O_WRONLY | O_CREAT, 0666);
+	if (devnull < 0) {
+		wlr_log_errno(WLR_ERROR, "XWayland: failed to open /dev/null");
+		_exit(EXIT_FAILURE);
+	}
+	if (verbosity < WLR_INFO) {
+		dup2(devnull, STDOUT_FILENO);
+	}
+	if (verbosity < WLR_ERROR) {
+		dup2(devnull, STDERR_FILENO);
+	}
 
+	// This returns if and only if the call fails
 	execvp("Xwayland", argv);
+
+	wlr_log_errno(WLR_ERROR, "failed to exec Xwayland");
+	close(devnull);
+	_exit(EXIT_FAILURE);
 }
 
 static void xwayland_finish_server(struct wlr_xwayland *wlr_xwayland) {
@@ -207,10 +225,10 @@ static void handle_client_destroy(struct wl_listener *listener, void *data) {
 
 	if (time(NULL) - wlr_xwayland->server_start > 5) {
 		if (wlr_xwayland->lazy) {
-			wlr_log(L_INFO, "Restarting Xwayland (lazy)");
+			wlr_log(WLR_INFO, "Restarting Xwayland (lazy)");
 			xwayland_start_server_lazy(wlr_xwayland);
 		} else  {
-			wlr_log(L_INFO, "Restarting Xwayland");
+			wlr_log(WLR_INFO, "Restarting Xwayland");
 			xwayland_start_server(wlr_xwayland);
 		}
 	}
@@ -237,14 +255,14 @@ static int xserver_handle_ready(int signal_number, void *data) {
 		if (errno == EINTR) {
 			continue;
 		}
-		wlr_log_errno(L_ERROR, "waitpid for Xwayland fork failed");
+		wlr_log_errno(WLR_ERROR, "waitpid for Xwayland fork failed");
 		return 1;
 	}
 	if (stat_val) {
-		wlr_log(L_ERROR, "Xwayland startup failed, not setting up xwm");
+		wlr_log(WLR_ERROR, "Xwayland startup failed, not setting up xwm");
 		return 1;
 	}
-	wlr_log(L_DEBUG, "Xserver is ready");
+	wlr_log(WLR_DEBUG, "Xserver is ready");
 
 	wlr_xwayland->xwm = xwm_create(wlr_xwayland);
 	if (!wlr_xwayland->xwm) {
@@ -311,14 +329,14 @@ static bool xwayland_start_server(struct wlr_xwayland *wlr_xwayland) {
 
 	if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, wlr_xwayland->wl_fd) != 0 ||
 			socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, wlr_xwayland->wm_fd) != 0) {
-		wlr_log_errno(L_ERROR, "failed to create socketpair");
+		wlr_log_errno(WLR_ERROR, "failed to create socketpair");
 		xwayland_finish_server(wlr_xwayland);
 		return false;
 	}
 	wlr_xwayland->server_start = time(NULL);
 
 	if (!(wlr_xwayland->client = wl_client_create(wlr_xwayland->wl_display, wlr_xwayland->wl_fd[0]))) {
-		wlr_log_errno(L_ERROR, "wl_client_create failed");
+		wlr_log_errno(WLR_ERROR, "wl_client_create failed");
 		xwayland_finish_server(wlr_xwayland);
 		return false;
 	}
@@ -346,16 +364,14 @@ static bool xwayland_start_server(struct wlr_xwayland *wlr_xwayland) {
 		sigprocmask(SIG_BLOCK, &sigset, NULL);
 		if ((pid = fork()) == 0) {
 			exec_xwayland(wlr_xwayland);
-			wlr_log_errno(L_ERROR, "failed to exec Xwayland");
-			_exit(EXIT_FAILURE);
 		}
 		if (pid < 0) {
-			wlr_log_errno(L_ERROR, "second fork failed");
+			wlr_log_errno(WLR_ERROR, "second fork failed");
 			_exit(EXIT_FAILURE);
 		}
 		sigwait(&sigset, &sig);
 		kill(ppid, SIGUSR1);
-		wlr_log(L_DEBUG, "sent SIGUSR1 to process %d", ppid);
+		wlr_log(WLR_DEBUG, "sent SIGUSR1 to process %d", ppid);
 		if (sig == SIGCHLD) {
 			waitpid(pid, NULL, 0);
 			_exit(EXIT_FAILURE);
@@ -363,7 +379,7 @@ static bool xwayland_start_server(struct wlr_xwayland *wlr_xwayland) {
 		_exit(EXIT_SUCCESS);
 	}
 	if (wlr_xwayland->pid < 0) {
-		wlr_log_errno(L_ERROR, "fork failed");
+		wlr_log_errno(WLR_ERROR, "fork failed");
 		xwayland_finish_server(wlr_xwayland);
 		return false;
 	}
@@ -390,6 +406,10 @@ static bool xwayland_start_server_lazy(struct wlr_xwayland *wlr_xwayland) {
 }
 
 void wlr_xwayland_destroy(struct wlr_xwayland *wlr_xwayland) {
+	if (!wlr_xwayland) {
+		return;
+	}
+
 	wlr_xwayland_set_seat(wlr_xwayland, NULL);
 	xwayland_finish_server(wlr_xwayland);
 	xwayland_finish_display(wlr_xwayland);

@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200112L
+#include <assert.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -22,8 +23,8 @@
 #include "backend/x11.h"
 #include "util/signal.h"
 
-struct wlr_x11_output *get_x11_output_from_window_id(struct wlr_x11_backend *x11,
-		xcb_window_t window) {
+struct wlr_x11_output *get_x11_output_from_window_id(
+		struct wlr_x11_backend *x11, xcb_window_t window) {
 	struct wlr_x11_output *output;
 	wl_list_for_each(output, &x11->outputs, link) {
 		if (output->win == window) {
@@ -88,8 +89,14 @@ static int x11_event(int fd, uint32_t mask, void *data) {
 	return 0;
 }
 
+struct wlr_x11_backend *get_x11_backend_from_backend(
+		struct wlr_backend *wlr_backend) {
+	assert(wlr_backend_is_x11(wlr_backend));
+	return (struct wlr_x11_backend *)wlr_backend;
+}
+
 static bool backend_start(struct wlr_backend *backend) {
-	struct wlr_x11_backend *x11 = (struct wlr_x11_backend *)backend;
+	struct wlr_x11_backend *x11 = get_x11_backend_from_backend(backend);
 	x11->started = true;
 
 	struct {
@@ -163,6 +170,8 @@ static bool backend_start(struct wlr_backend *backend) {
 					0,
 					0,
 					0);
+
+				free(reply);
 			}
 		}
 #endif
@@ -181,7 +190,7 @@ static void backend_destroy(struct wlr_backend *backend) {
 		return;
 	}
 
-	struct wlr_x11_backend *x11 = (struct wlr_x11_backend *)backend;
+	struct wlr_x11_backend *x11 = get_x11_backend_from_backend(backend);
 
 	struct wlr_x11_output *output, *tmp;
 	wl_list_for_each_safe(output, tmp, &x11->outputs, link) {
@@ -211,7 +220,7 @@ static void backend_destroy(struct wlr_backend *backend) {
 
 static struct wlr_renderer *backend_get_renderer(
 		struct wlr_backend *backend) {
-	struct wlr_x11_backend *x11 = (struct wlr_x11_backend *)backend;
+	struct wlr_x11_backend *x11 = get_x11_backend_from_backend(backend);
 	return x11->renderer;
 }
 
@@ -232,7 +241,8 @@ static void handle_display_destroy(struct wl_listener *listener, void *data) {
 }
 
 struct wlr_backend *wlr_x11_backend_create(struct wl_display *display,
-		const char *x11_display) {
+		const char *x11_display,
+		wlr_renderer_create_func_t create_renderer_func) {
 	struct wlr_x11_backend *x11 = calloc(1, sizeof(*x11));
 	if (!x11) {
 		return NULL;
@@ -244,38 +254,40 @@ struct wlr_backend *wlr_x11_backend_create(struct wl_display *display,
 
 	x11->xlib_conn = XOpenDisplay(x11_display);
 	if (!x11->xlib_conn) {
-		wlr_log(L_ERROR, "Failed to open X connection");
-		return NULL;
+		wlr_log(WLR_ERROR, "Failed to open X connection");
+		goto error_x11;
 	}
 
 	x11->xcb_conn = XGetXCBConnection(x11->xlib_conn);
 	if (!x11->xcb_conn || xcb_connection_has_error(x11->xcb_conn)) {
-		wlr_log(L_ERROR, "Failed to open xcb connection");
-		goto error_x11;
+		wlr_log(WLR_ERROR, "Failed to open xcb connection");
+		goto error_display;
 	}
 
 	XSetEventQueueOwner(x11->xlib_conn, XCBOwnsEventQueue);
 
 	int fd = xcb_get_file_descriptor(x11->xcb_conn);
 	struct wl_event_loop *ev = wl_display_get_event_loop(display);
-	int events = WL_EVENT_READABLE | WL_EVENT_ERROR | WL_EVENT_HANGUP;
+	uint32_t events = WL_EVENT_READABLE | WL_EVENT_ERROR | WL_EVENT_HANGUP;
 	x11->event_source = wl_event_loop_add_fd(ev, fd, events, x11_event, x11);
 	if (!x11->event_source) {
-		wlr_log(L_ERROR, "Could not create event source");
-		goto error_x11;
+		wlr_log(WLR_ERROR, "Could not create event source");
+		goto error_display;
 	}
+	wl_event_source_check(x11->event_source);
 
 	x11->screen = xcb_setup_roots_iterator(xcb_get_setup(x11->xcb_conn)).data;
 
-	if (!wlr_egl_init(&x11->egl, EGL_PLATFORM_X11_KHR, x11->xlib_conn, NULL,
-			x11->screen->root_visual)) {
-		goto error_event;
+	if (!create_renderer_func) {
+		create_renderer_func = wlr_renderer_autocreate;
 	}
 
-	x11->renderer = wlr_gles2_renderer_create(&x11->egl);
+	x11->renderer = create_renderer_func(&x11->egl, EGL_PLATFORM_X11_KHR,
+		x11->xlib_conn, NULL, x11->screen->root_visual);
+
 	if (x11->renderer == NULL) {
-		wlr_log(L_ERROR, "Failed to create renderer");
-		goto error_egl;
+		wlr_log(WLR_ERROR, "Failed to create renderer");
+		goto error_event;
 	}
 
 	wlr_input_device_init(&x11->keyboard_dev, WLR_INPUT_DEVICE_KEYBOARD,
@@ -288,12 +300,11 @@ struct wlr_backend *wlr_x11_backend_create(struct wl_display *display,
 
 	return &x11->backend;
 
-error_egl:
-	wlr_egl_finish(&x11->egl);
 error_event:
 	wl_event_source_remove(x11->event_source);
-error_x11:
+error_display:
 	XCloseDisplay(x11->xlib_conn);
+error_x11:
 	free(x11);
 	return NULL;
 }

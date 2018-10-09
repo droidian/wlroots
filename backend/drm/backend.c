@@ -15,8 +15,14 @@
 #include "backend/drm/drm.h"
 #include "util/signal.h"
 
+struct wlr_drm_backend *get_drm_backend_from_backend(
+		struct wlr_backend *wlr_backend) {
+	assert(wlr_backend_is_drm(wlr_backend));
+	return (struct wlr_drm_backend *)wlr_backend;
+}
+
 static bool backend_start(struct wlr_backend *backend) {
-	struct wlr_drm_backend *drm = (struct wlr_drm_backend *)backend;
+	struct wlr_drm_backend *drm = get_drm_backend_from_backend(backend);
 	scan_drm_connectors(drm);
 	return true;
 }
@@ -26,7 +32,7 @@ static void backend_destroy(struct wlr_backend *backend) {
 		return;
 	}
 
-	struct wlr_drm_backend *drm = (struct wlr_drm_backend *)backend;
+	struct wlr_drm_backend *drm = get_drm_backend_from_backend(backend);
 
 	restore_drm_outputs(drm);
 
@@ -50,14 +56,25 @@ static void backend_destroy(struct wlr_backend *backend) {
 
 static struct wlr_renderer *backend_get_renderer(
 		struct wlr_backend *backend) {
-	struct wlr_drm_backend *drm = (struct wlr_drm_backend *)backend;
-	return drm->renderer.wlr_rend;
+	struct wlr_drm_backend *drm = get_drm_backend_from_backend(backend);
+
+	if (drm->parent) {
+		return drm->parent->renderer.wlr_rend;
+	} else {
+		return drm->renderer.wlr_rend;
+	}
+}
+
+static clockid_t backend_get_presentation_clock(struct wlr_backend *backend) {
+	struct wlr_drm_backend *drm = get_drm_backend_from_backend(backend);
+	return drm->clock;
 }
 
 static struct wlr_backend_impl backend_impl = {
 	.start = backend_start,
 	.destroy = backend_destroy,
 	.get_renderer = backend_get_renderer,
+	.get_presentation_clock = backend_get_presentation_clock,
 };
 
 bool wlr_backend_is_drm(struct wlr_backend *b) {
@@ -70,7 +87,7 @@ static void session_signal(struct wl_listener *listener, void *data) {
 	struct wlr_session *session = data;
 
 	if (session->active) {
-		wlr_log(L_INFO, "DRM fd resumed");
+		wlr_log(WLR_INFO, "DRM fd resumed");
 		scan_drm_connectors(drm);
 
 		struct wlr_drm_connector *conn;
@@ -90,9 +107,19 @@ static void session_signal(struct wl_listener *listener, void *data) {
 				(plane && plane->cursor_enabled) ? plane->cursor_bo : NULL);
 			drm->iface->crtc_move_cursor(drm, conn->crtc, conn->cursor_x,
 				conn->cursor_y);
+
+			if (conn->crtc->gamma_table != NULL) {
+				size_t size = conn->crtc->gamma_table_size;
+				uint16_t *r = conn->crtc->gamma_table;
+				uint16_t *g = conn->crtc->gamma_table + size;
+				uint16_t *b = conn->crtc->gamma_table + 2 * size;
+				drm->iface->crtc_set_gamma(drm, conn->crtc, size, r, g, b);
+			} else {
+				set_drm_connector_gamma(&conn->output, 0, NULL, NULL, NULL);
+			}
 		}
 	} else {
-		wlr_log(L_INFO, "DRM fd paused");
+		wlr_log(WLR_INFO, "DRM fd paused");
 	}
 }
 
@@ -101,7 +128,7 @@ static void drm_invalidated(struct wl_listener *listener, void *data) {
 		wl_container_of(listener, drm, drm_invalidated);
 
 	char *name = drmGetDeviceNameFromFd2(drm->fd);
-	wlr_log(L_DEBUG, "%s invalidated", name);
+	wlr_log(WLR_DEBUG, "%s invalidated", name);
 	free(name);
 
 	scan_drm_connectors(drm);
@@ -114,19 +141,20 @@ static void handle_display_destroy(struct wl_listener *listener, void *data) {
 }
 
 struct wlr_backend *wlr_drm_backend_create(struct wl_display *display,
-		struct wlr_session *session, int gpu_fd, struct wlr_backend *parent) {
+		struct wlr_session *session, int gpu_fd, struct wlr_backend *parent,
+		wlr_renderer_create_func_t create_renderer_func) {
 	assert(display && session && gpu_fd >= 0);
 	assert(!parent || wlr_backend_is_drm(parent));
 
 	char *name = drmGetDeviceNameFromFd2(gpu_fd);
 	drmVersion *version = drmGetVersion(gpu_fd);
-	wlr_log(L_INFO, "Initializing DRM backend for %s (%s)", name, version->name);
+	wlr_log(WLR_INFO, "Initializing DRM backend for %s (%s)", name, version->name);
 	free(name);
 	drmFreeVersion(version);
 
 	struct wlr_drm_backend *drm = calloc(1, sizeof(struct wlr_drm_backend));
 	if (!drm) {
-		wlr_log_errno(L_ERROR, "Allocation failed");
+		wlr_log_errno(WLR_ERROR, "Allocation failed");
 		return NULL;
 	}
 	wlr_backend_init(&drm->backend, &backend_impl);
@@ -135,7 +163,9 @@ struct wlr_backend *wlr_drm_backend_create(struct wl_display *display,
 	wl_list_init(&drm->outputs);
 
 	drm->fd = gpu_fd;
-	drm->parent = (struct wlr_drm_backend *)parent;
+	if (parent != NULL) {
+		drm->parent = get_drm_backend_from_backend(parent);
+	}
 
 	drm->drm_invalidated.notify = drm_invalidated;
 	wlr_session_signal_add(session, gpu_fd, &drm->drm_invalidated);
@@ -146,7 +176,7 @@ struct wlr_backend *wlr_drm_backend_create(struct wl_display *display,
 	drm->drm_event = wl_event_loop_add_fd(event_loop, drm->fd,
 		WL_EVENT_READABLE, handle_drm_event, NULL);
 	if (!drm->drm_event) {
-		wlr_log(L_ERROR, "Failed to create DRM event source");
+		wlr_log(WLR_ERROR, "Failed to create DRM event source");
 		goto error_fd;
 	}
 
@@ -161,13 +191,9 @@ struct wlr_backend *wlr_drm_backend_create(struct wl_display *display,
 		goto error_event;
 	}
 
-	if (!init_drm_renderer(drm, &drm->renderer)) {
-		wlr_log(L_ERROR, "Failed to initialize renderer");
+	if (!init_drm_renderer(drm, &drm->renderer, create_renderer_func)) {
+		wlr_log(WLR_ERROR, "Failed to initialize renderer");
 		goto error_event;
-	}
-
-	if (!wlr_egl_bind_display(&drm->renderer.egl, display)) {
-		wlr_log(L_INFO, "Failed to bind egl/wl display");
 	}
 
 	drm->display_destroy.notify = handle_display_destroy;
@@ -182,9 +208,4 @@ error_fd:
 	wlr_session_close_file(drm->session, drm->fd);
 	free(drm);
 	return NULL;
-}
-
-struct wlr_session *wlr_drm_backend_get_session(struct wlr_backend *backend) {
-	struct wlr_drm_backend *drm = (struct wlr_drm_backend *)backend;
-	return drm->session;
 }

@@ -24,9 +24,13 @@ struct roots_output {
 	struct wl_listener destroy;
 	struct wl_listener mode;
 	struct wl_listener transform;
+	struct wl_listener present;
 	struct wl_listener damage_frame;
 	struct wl_listener damage_destroy;
 };
+
+void rotate_child_position(double *sx, double *sy, double sw, double sh,
+	double pw, double ph, float rotation);
 
 void handle_new_output(struct wl_listener *listener, void *data);
 

@@ -1,5 +1,4 @@
 #define _POSIX_C_SOURCE 200112L
-#define _XOPEN_SOURCE 500
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -208,7 +207,7 @@ static void handle_touch_motion(struct wl_listener *listener, void *data) {
 }
 
 static void handle_touch_cancel(struct wl_listener *listener, void *data) {
-	wlr_log(L_DEBUG, "TODO: touch cancel");
+	wlr_log(WLR_DEBUG, "TODO: touch cancel");
 }
 
 static void handle_tablet_tool_axis(struct wl_listener *listener, void *data) {
@@ -302,11 +301,17 @@ void new_input_notify(struct wl_listener *listener, void *data) {
 		rules.options = getenv("XKB_DEFAULT_OPTIONS");
 		struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 		if (!context) {
-			wlr_log(L_ERROR, "Failed to create XKB context");
+			wlr_log(WLR_ERROR, "Failed to create XKB context");
 			exit(1);
 		}
-		wlr_keyboard_set_keymap(device->keyboard, xkb_map_new_from_names(context,
-					&rules, XKB_KEYMAP_COMPILE_NO_FLAGS));
+		struct xkb_keymap *keymap = xkb_map_new_from_names(context, &rules,
+			XKB_KEYMAP_COMPILE_NO_FLAGS);
+		if (!keymap) {
+			wlr_log(WLR_ERROR, "Failed to create XKB keymap");
+			exit(1);
+		}
+		wlr_keyboard_set_keymap(device->keyboard, keymap);
+		xkb_keymap_unref(keymap);
 		xkb_context_unref(context);
 		break;
 	default:
@@ -316,7 +321,7 @@ void new_input_notify(struct wl_listener *listener, void *data) {
 
 
 int main(int argc, char *argv[]) {
-	wlr_log_init(L_DEBUG, NULL);
+	wlr_log_init(WLR_DEBUG, NULL);
 	struct wl_display *display = wl_display_create();
 	struct sample_state state = {
 		.default_color = { 0.25f, 0.25f, 0.25f, 1 },
@@ -324,7 +329,7 @@ int main(int argc, char *argv[]) {
 		.display = display
 	};
 
-	struct wlr_backend *wlr = wlr_backend_autocreate(display);
+	struct wlr_backend *wlr = wlr_backend_autocreate(display, NULL);
 	if (!wlr) {
 		exit(1);
 	}
@@ -375,7 +380,7 @@ int main(int argc, char *argv[]) {
 
 	state.xcursor_manager = wlr_xcursor_manager_create("default", 24);
 	if (!state.xcursor_manager) {
-		wlr_log(L_ERROR, "Failed to load left_ptr cursor");
+		wlr_log(WLR_ERROR, "Failed to load left_ptr cursor");
 		return 1;
 	}
 
@@ -385,7 +390,7 @@ int main(int argc, char *argv[]) {
 	clock_gettime(CLOCK_MONOTONIC, &state.last_frame);
 
 	if (!wlr_backend_start(wlr)) {
-		wlr_log(L_ERROR, "Failed to start backend");
+		wlr_log(WLR_ERROR, "Failed to start backend");
 		wlr_backend_destroy(wlr);
 		exit(1);
 	}

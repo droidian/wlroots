@@ -25,8 +25,12 @@ struct wlr_session {
 	struct wl_signal session_signal;
 	bool active;
 
+	/*
+	 * 0 if virtual terminals are not supported
+	 * i.e. seat != "seat0"
+	 */
 	unsigned vtnr;
-	char seat[8];
+	char seat[256];
 
 	struct udev *udev;
 	struct udev_monitor *mon;
@@ -35,6 +39,10 @@ struct wlr_session {
 	struct wl_list devices;
 
 	struct wl_listener display_destroy;
+
+	struct {
+		struct wl_signal destroy;
+	} events;
 };
 
 /*

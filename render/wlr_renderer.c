@@ -1,8 +1,10 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <wlr/render/gles2.h>
 #include <wlr/render/interface.h>
 #include <wlr/render/wlr_renderer.h>
+#include <wlr/types/wlr_linux_dmabuf_v1.h>
 #include <wlr/types/wlr_matrix.h>
 #include <wlr/util/log.h>
 #include "util/signal.h"
@@ -24,9 +26,12 @@ void wlr_renderer_init(struct wlr_renderer *renderer,
 }
 
 void wlr_renderer_destroy(struct wlr_renderer *r) {
+	if (!r) {
+		return;
+	}
 	wlr_signal_emit_safe(&r->events.destroy, r);
 
-	if (r && r->impl && r->impl->destroy) {
+	if (r->impl && r->impl->destroy) {
 		r->impl->destroy(r);
 	} else {
 		free(r);
@@ -134,23 +139,15 @@ int wlr_renderer_get_dmabuf_modifiers(struct wlr_renderer *r, int format,
 	return r->impl->get_dmabuf_modifiers(r, format, modifiers);
 }
 
-bool wlr_renderer_check_import_dmabuf(struct wlr_renderer *r,
-		struct wlr_dmabuf_buffer *dmabuf) {
-	if (!r->impl->check_import_dmabuf) {
-		return false;
-	}
-	return r->impl->check_import_dmabuf(r, dmabuf);
-}
-
 bool wlr_renderer_read_pixels(struct wlr_renderer *r, enum wl_shm_format fmt,
-		uint32_t stride, uint32_t width, uint32_t height,
+		uint32_t *flags, uint32_t stride, uint32_t width, uint32_t height,
 		uint32_t src_x, uint32_t src_y, uint32_t dst_x, uint32_t dst_y,
 		void *data) {
 	if (!r->impl->read_pixels) {
 		return false;
 	}
-	return r->impl->read_pixels(r, fmt, stride, width, height, src_x, src_y,
-		dst_x, dst_y, data);
+	return r->impl->read_pixels(r, fmt, flags, stride, width, height,
+		src_x, src_y, dst_x, dst_y, data);
 }
 
 bool wlr_renderer_format_supported(struct wlr_renderer *r,
@@ -158,24 +155,49 @@ bool wlr_renderer_format_supported(struct wlr_renderer *r,
 	return r->impl->format_supported(r, fmt);
 }
 
-void wlr_renderer_init_wl_shm(struct wlr_renderer *r,
-		struct wl_display *display) {
-	if (wl_display_init_shm(display)) {
-		wlr_log(L_ERROR, "Failed to initialize shm");
+void wlr_renderer_init_wl_display(struct wlr_renderer *r,
+		struct wl_display *wl_display) {
+	if (wl_display_init_shm(wl_display)) {
+		wlr_log(WLR_ERROR, "Failed to initialize shm");
 		return;
 	}
 
 	size_t len;
 	const enum wl_shm_format *formats = wlr_renderer_get_formats(r, &len);
 	if (formats == NULL) {
-		wlr_log(L_ERROR, "Failed to initialize shm: cannot get formats");
+		wlr_log(WLR_ERROR, "Failed to initialize shm: cannot get formats");
 		return;
 	}
 
 	for (size_t i = 0; i < len; ++i) {
+		// These formats are already added by default
 		if (formats[i] != WL_SHM_FORMAT_ARGB8888 &&
 				formats[i] != WL_SHM_FORMAT_XRGB8888) {
-			wl_display_add_shm_format(display, formats[i]);
+			wl_display_add_shm_format(wl_display, formats[i]);
 		}
 	}
+
+	if (r->impl->texture_from_dmabuf) {
+		wlr_linux_dmabuf_v1_create(wl_display, r);
+	}
+
+	if (r->impl->init_wl_display) {
+		r->impl->init_wl_display(r, wl_display);
+	}
+}
+
+struct wlr_renderer *wlr_renderer_autocreate(struct wlr_egl *egl,
+		EGLenum platform, void *remote_display, EGLint *config_attribs,
+		EGLint visual_id) {
+	if (!wlr_egl_init(egl, platform, remote_display, config_attribs, visual_id)) {
+		wlr_log(WLR_ERROR, "Could not initialize EGL");
+		return NULL;
+	}
+
+	struct wlr_renderer *renderer = wlr_gles2_renderer_create(egl);
+	if (!renderer) {
+		wlr_egl_finish(egl);
+	}
+
+	return renderer;
 }

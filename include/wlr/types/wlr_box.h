@@ -1,6 +1,15 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_TYPES_WLR_BOX_H
 #define WLR_TYPES_WLR_BOX_H
 
+#include <pixman.h>
 #include <stdbool.h>
 #include <wayland-server.h>
 
@@ -31,5 +40,7 @@ void wlr_box_transform(const struct wlr_box *box,
  */
 void wlr_box_rotated_bounds(const struct wlr_box *box, float rotation,
 	struct wlr_box *dest);
+
+void wlr_box_from_pixman_box32(const pixman_box32_t box, struct wlr_box *dest);
 
 #endif

@@ -4,6 +4,7 @@
 #include <libinput.h>
 #include <wayland-server-core.h>
 #include <wlr/backend/interface.h>
+#include <wlr/backend/libinput.h>
 #include <wlr/interfaces/wlr_input_device.h>
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_list.h>
@@ -65,7 +66,7 @@ void handle_touch_motion(struct libinput_event *event,
 void handle_touch_cancel(struct libinput_event *event,
 		struct libinput_device *device);
 
-struct wlr_tablet_tool *create_libinput_tablet_tool(
+struct wlr_tablet *create_libinput_tablet(
 		struct libinput_device *device);
 void handle_tablet_tool_axis(struct libinput_event *event,
 		struct libinput_device *device);

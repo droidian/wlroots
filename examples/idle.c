@@ -109,7 +109,7 @@ void *main_loop(void *data) {
 }
 
 int main(int argc, char *argv[]) {
-	wlr_log_init(L_DEBUG, NULL);
+	wlr_log_init(WLR_DEBUG, NULL);
 
 	if (parse_args(argc, argv) != 0) {
 		return -1;
@@ -129,6 +129,7 @@ int main(int argc, char *argv[]) {
 	wl_registry_add_listener(registry, &registry_listener, NULL);
 	wl_display_dispatch(display);
 	wl_display_roundtrip(display);
+	free(registry);
 
 	if (idle_manager == NULL) {
 		fprintf(stderr, "display doesn't support idle protocol\n");
@@ -152,14 +153,20 @@ int main(int argc, char *argv[]) {
 		.display = display,
 	};
 
-	if (simulate_activity_timeout != 0 && simulate_activity_timeout < close_timeout) {
+	bool create_t1 = (simulate_activity_timeout != 0) &&
+	                (simulate_activity_timeout < close_timeout);
+
+	if (create_t1) {
 		if (pthread_create(&t1, NULL, &simulate_activity, (void *)&arg) != 0) {
 			return -1;
 		}
 	}
-	if (close_timeout != 0) {
+
+	bool create_t2 = (close_timeout != 0);
+
+	if (create_t2) {
 		if (pthread_create(&t2, NULL, &close_program, (void *)&arg) != 0) {
-			if (simulate_activity_timeout != 0) {
+			if (create_t1) {
 				pthread_cancel(t1);
 			}
 			return -1;
@@ -170,18 +177,19 @@ int main(int argc, char *argv[]) {
 	fprintf(stdout, "waiting\n");
 
 	if (pthread_create(&t3, NULL, &main_loop, (void *)display) != 0) {
-		if (simulate_activity_timeout != 0) {
+		if (create_t1) {
 			pthread_cancel(t1);
 		}
-		if (close_timeout != 0 ) {
+		if (create_t2) {
 			pthread_cancel(t2);
 		}
+		return -1;
 	}
 
-	if (simulate_activity_timeout != 0) {
+	if (create_t1) {
 		pthread_join(t1, NULL);
 	}
-	if (close_timeout != 0) {
+	if (create_t2) {
 		pthread_join(t2, NULL);
 	}
 	pthread_cancel(t3);

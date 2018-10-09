@@ -16,7 +16,7 @@ struct roots_input {
 
 	struct wl_listener new_input;
 
-	struct wl_list seats;
+	struct wl_list seats; // roots_seat::link
 };
 
 struct roots_input *input_create(struct roots_server *server,
@@ -31,5 +31,7 @@ bool input_view_has_focus(struct roots_input *input, struct roots_view *view);
 struct roots_seat *input_get_seat(struct roots_input *input, char *name);
 
 struct roots_seat *input_last_active_seat(struct roots_input *input);
+
+void input_update_cursor_focus(struct roots_input *input);
 
 #endif

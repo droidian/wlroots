@@ -1,3 +1,11 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_XWAYLAND_H
 #define WLR_XWAYLAND_H
 
@@ -108,6 +116,7 @@ struct wlr_xwayland_surface {
 	char *title;
 	char *class;
 	char *instance;
+	char *role;
 	pid_t pid;
 	bool has_utf8_title;
 
@@ -130,6 +139,7 @@ struct wlr_xwayland_surface {
 	struct wl_event_source *ping_timer;
 
 	// _NET_WM_STATE
+	bool modal;
 	bool fullscreen;
 	bool maximized_vert, maximized_horz;
 
@@ -142,14 +152,19 @@ struct wlr_xwayland_surface {
 		struct wl_signal request_resize;
 		struct wl_signal request_maximize;
 		struct wl_signal request_fullscreen;
+		struct wl_signal request_activate;
 
 		struct wl_signal map;
 		struct wl_signal unmap;
 		struct wl_signal set_title;
 		struct wl_signal set_class;
+		struct wl_signal set_role;
 		struct wl_signal set_parent;
 		struct wl_signal set_pid;
 		struct wl_signal set_window_type;
+		struct wl_signal set_hints;
+		struct wl_signal set_decorations;
+		struct wl_signal set_override_redirect;
 		struct wl_signal ping_timeout;
 	} events;
 
@@ -174,6 +189,14 @@ struct wlr_xwayland_resize_event {
 	uint32_t edges;
 };
 
+/** Create an Xwayland server.
+ *
+ * The server supports a lazy mode in which Xwayland is only started when a
+ * client tries to connect.
+ *
+ * Note: wlr_xwayland will setup a global SIGUSR1 handler on the compositor
+ * process.
+ */
 struct wlr_xwayland *wlr_xwayland_create(struct wl_display *wl_display,
 	struct wlr_compositor *compositor, bool lazy);
 
@@ -200,14 +223,36 @@ void wlr_xwayland_surface_set_fullscreen(struct wlr_xwayland_surface *surface,
 void wlr_xwayland_set_seat(struct wlr_xwayland *xwayland,
 	struct wlr_seat *seat);
 
-bool wlr_xwayland_surface_is_unmanaged(
-	const struct wlr_xwayland_surface *surface);
-
 bool wlr_surface_is_xwayland_surface(struct wlr_surface *surface);
 
 struct wlr_xwayland_surface *wlr_xwayland_surface_from_wlr_surface(
 	struct wlr_surface *surface);
 
 void wlr_xwayland_surface_ping(struct wlr_xwayland_surface *surface);
+
+/** Metric to guess if an OR window should "receive" focus
+ *
+ * In the pure X setups, window managers usually straight up ignore override
+ * redirect windows, and never touch them. (we have to handle them for mapping)
+ *
+ * When such a window wants to receive keyboard input (e.g. rofi/dzen) it will
+ * use mechanics we don't support (sniffing/grabbing input).
+ * [Sadly this is unrelated to xwayland-keyboard-grab]
+ *
+ * To still support these windows, while keeping general OR semantics as is, we
+ * need to hand a subset of windows focus.
+ * The dirty truth is, we need to hand focus to any Xwayland window, though
+ * pretending this window has focus makes it easier to handle unmap.
+ *
+ * This function provides a handy metric based on the window type to guess if
+ * the OR window wants focus.
+ * It's probably not perfect, nor exactly intended but works in practice.
+ *
+ * Returns: true if the window should receive focus
+ *          false if it should be ignored
+ */
+bool wlr_xwayland_or_surface_wants_focus(
+	const struct wlr_xwayland_surface *surface);
+
 
 #endif

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wlr/util/log.h>
+#include <wlr/util/edges.h>
 #include "types/wlr_xdg_shell.h"
 #include "util/signal.h"
 
@@ -20,6 +21,8 @@ void handle_xdg_toplevel_ack_configure(
 		configure->toplevel_state->resizing;
 	surface->toplevel->current.activated =
 		configure->toplevel_state->activated;
+	surface->toplevel->current.tiled =
+		configure->toplevel_state->tiled;
 }
 
 bool compare_xdg_surface_toplevel_state(struct wlr_xdg_toplevel *state) {
@@ -36,8 +39,8 @@ bool compare_xdg_surface_toplevel_state(struct wlr_xdg_toplevel *state) {
 	if (wl_list_empty(&state->base->configure_list)) {
 		// last configure is actually the current state, just use it
 		configured.state = state->current;
-		configured.width = state->base->surface->current->width;
-		configured.height = state->base->surface->current->width;
+		configured.width = state->base->surface->current.width;
+		configured.height = state->base->surface->current.height;
 	} else {
 		struct wlr_xdg_surface_configure *configure =
 			wl_container_of(state->base->configure_list.prev, configure, link);
@@ -56,6 +59,9 @@ bool compare_xdg_surface_toplevel_state(struct wlr_xdg_toplevel *state) {
 		return false;
 	}
 	if (state->server_pending.resizing != configured.state.resizing) {
+		return false;
+	}
+	if (state->server_pending.tiled != configured.state.tiled) {
 		return false;
 	}
 
@@ -77,46 +83,84 @@ void send_xdg_toplevel_configure(struct wlr_xdg_surface *surface,
 
 	configure->toplevel_state = malloc(sizeof(*configure->toplevel_state));
 	if (configure->toplevel_state == NULL) {
-		wlr_log(L_ERROR, "Allocation failed");
+		wlr_log(WLR_ERROR, "Allocation failed");
 		wl_resource_post_no_memory(surface->toplevel->resource);
 		return;
 	}
 	*configure->toplevel_state = surface->toplevel->server_pending;
 
-	uint32_t *s;
 	struct wl_array states;
 	wl_array_init(&states);
 	if (surface->toplevel->server_pending.maximized) {
-		s = wl_array_add(&states, sizeof(uint32_t));
+		uint32_t *s = wl_array_add(&states, sizeof(uint32_t));
 		if (!s) {
-			wlr_log(L_ERROR, "Could not allocate state for maximized xdg_toplevel");
+			wlr_log(WLR_ERROR, "Could not allocate state for maximized xdg_toplevel");
 			goto error_out;
 		}
 		*s = XDG_TOPLEVEL_STATE_MAXIMIZED;
 	}
 	if (surface->toplevel->server_pending.fullscreen) {
-		s = wl_array_add(&states, sizeof(uint32_t));
+		uint32_t *s = wl_array_add(&states, sizeof(uint32_t));
 		if (!s) {
-			wlr_log(L_ERROR, "Could not allocate state for fullscreen xdg_toplevel");
+			wlr_log(WLR_ERROR, "Could not allocate state for fullscreen xdg_toplevel");
 			goto error_out;
 		}
 		*s = XDG_TOPLEVEL_STATE_FULLSCREEN;
 	}
 	if (surface->toplevel->server_pending.resizing) {
-		s = wl_array_add(&states, sizeof(uint32_t));
+		uint32_t *s = wl_array_add(&states, sizeof(uint32_t));
 		if (!s) {
-			wlr_log(L_ERROR, "Could not allocate state for resizing xdg_toplevel");
+			wlr_log(WLR_ERROR, "Could not allocate state for resizing xdg_toplevel");
 			goto error_out;
 		}
 		*s = XDG_TOPLEVEL_STATE_RESIZING;
 	}
 	if (surface->toplevel->server_pending.activated) {
-		s = wl_array_add(&states, sizeof(uint32_t));
+		uint32_t *s = wl_array_add(&states, sizeof(uint32_t));
 		if (!s) {
-			wlr_log(L_ERROR, "Could not allocate state for activated xdg_toplevel");
+			wlr_log(WLR_ERROR, "Could not allocate state for activated xdg_toplevel");
 			goto error_out;
 		}
 		*s = XDG_TOPLEVEL_STATE_ACTIVATED;
+	}
+	if (surface->toplevel->server_pending.tiled) {
+		if (wl_resource_get_version(surface->resource) >=
+				XDG_TOPLEVEL_STATE_TILED_LEFT_SINCE_VERSION) {
+			const struct {
+				enum wlr_edges edge;
+				enum xdg_toplevel_state state;
+			} tiled[] = {
+				{ WLR_EDGE_LEFT, XDG_TOPLEVEL_STATE_TILED_LEFT },
+				{ WLR_EDGE_RIGHT, XDG_TOPLEVEL_STATE_TILED_RIGHT },
+				{ WLR_EDGE_TOP, XDG_TOPLEVEL_STATE_TILED_TOP },
+				{ WLR_EDGE_BOTTOM, XDG_TOPLEVEL_STATE_TILED_BOTTOM },
+			};
+
+			for (size_t i = 0; i < sizeof(tiled)/sizeof(tiled[0]); ++i) {
+				if ((surface->toplevel->server_pending.tiled &
+						tiled[i].edge) == 0) {
+					continue;
+				}
+
+				uint32_t *s = wl_array_add(&states, sizeof(uint32_t));
+				if (!s) {
+					wlr_log(WLR_ERROR,
+						"Could not allocate state for tiled xdg_toplevel");
+					goto error_out;
+				}
+				*s = tiled[i].state;
+			}
+		} else if (!surface->toplevel->server_pending.maximized) {
+			// This version doesn't support tiling, best we can do is make the
+			// toplevel maximized
+			uint32_t *s = wl_array_add(&states, sizeof(uint32_t));
+			if (!s) {
+				wlr_log(WLR_ERROR,
+					"Could not allocate state for maximized xdg_toplevel");
+				goto error_out;
+			}
+			*s = XDG_TOPLEVEL_STATE_MAXIMIZED;
+		}
 	}
 
 	uint32_t width = surface->toplevel->server_pending.width;
@@ -156,7 +200,7 @@ void handle_xdg_surface_toplevel_committed(struct wlr_xdg_surface *surface) {
 
 static const struct xdg_toplevel_interface xdg_toplevel_implementation;
 
-static struct wlr_xdg_surface *xdg_surface_from_xdg_toplevel_resource(
+struct wlr_xdg_surface *wlr_xdg_surface_from_toplevel_resource(
 		struct wl_resource *resource) {
 	assert(wl_resource_instance_of(resource, &xdg_toplevel_interface,
 		&xdg_toplevel_implementation));
@@ -166,20 +210,21 @@ static struct wlr_xdg_surface *xdg_surface_from_xdg_toplevel_resource(
 static void xdg_toplevel_handle_set_parent(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *parent_resource) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 	struct wlr_xdg_surface *parent = NULL;
 
 	if (parent_resource != NULL) {
-		parent = xdg_surface_from_xdg_toplevel_resource(parent_resource);
+		parent = wlr_xdg_surface_from_toplevel_resource(parent_resource);
 	}
 
 	surface->toplevel->parent = parent;
+	wlr_signal_emit_safe(&surface->toplevel->events.set_parent, surface);
 }
 
 static void xdg_toplevel_handle_set_title(struct wl_client *client,
 		struct wl_resource *resource, const char *title) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 	char *tmp;
 
 	tmp = strdup(title);
@@ -189,12 +234,13 @@ static void xdg_toplevel_handle_set_title(struct wl_client *client,
 
 	free(surface->toplevel->title);
 	surface->toplevel->title = tmp;
+	wlr_signal_emit_safe(&surface->toplevel->events.set_title, surface);
 }
 
 static void xdg_toplevel_handle_set_app_id(struct wl_client *client,
 		struct wl_resource *resource, const char *app_id) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 	char *tmp;
 
 	tmp = strdup(app_id);
@@ -204,13 +250,14 @@ static void xdg_toplevel_handle_set_app_id(struct wl_client *client,
 
 	free(surface->toplevel->app_id);
 	surface->toplevel->app_id = tmp;
+	wlr_signal_emit_safe(&surface->toplevel->events.set_app_id, surface);
 }
 
 static void xdg_toplevel_handle_show_window_menu(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *seat_resource,
 		uint32_t serial, int32_t x, int32_t y) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 	struct wlr_seat_client *seat =
 		wlr_seat_client_from_resource(seat_resource);
 
@@ -222,7 +269,7 @@ static void xdg_toplevel_handle_show_window_menu(struct wl_client *client,
 	}
 
 	if (!wlr_seat_validate_grab_serial(seat->seat, serial)) {
-		wlr_log(L_DEBUG, "invalid serial for grab");
+		wlr_log(WLR_DEBUG, "invalid serial for grab");
 		return;
 	}
 
@@ -241,7 +288,7 @@ static void xdg_toplevel_handle_move(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *seat_resource,
 		uint32_t serial) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 	struct wlr_seat_client *seat =
 		wlr_seat_client_from_resource(seat_resource);
 
@@ -253,7 +300,7 @@ static void xdg_toplevel_handle_move(struct wl_client *client,
 	}
 
 	if (!wlr_seat_validate_grab_serial(seat->seat, serial)) {
-		wlr_log(L_DEBUG, "invalid serial for grab");
+		wlr_log(WLR_DEBUG, "invalid serial for grab");
 		return;
 	}
 
@@ -270,7 +317,7 @@ static void xdg_toplevel_handle_resize(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *seat_resource,
 		uint32_t serial, uint32_t edges) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 	struct wlr_seat_client *seat =
 		wlr_seat_client_from_resource(seat_resource);
 
@@ -282,7 +329,7 @@ static void xdg_toplevel_handle_resize(struct wl_client *client,
 	}
 
 	if (!wlr_seat_validate_grab_serial(seat->seat, serial)) {
-		wlr_log(L_DEBUG, "invalid serial for grab");
+		wlr_log(WLR_DEBUG, "invalid serial for grab");
 		return;
 	}
 
@@ -299,7 +346,7 @@ static void xdg_toplevel_handle_resize(struct wl_client *client,
 static void xdg_toplevel_handle_set_max_size(struct wl_client *client,
 		struct wl_resource *resource, int32_t width, int32_t height) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 	surface->toplevel->client_pending.max_width = width;
 	surface->toplevel->client_pending.max_height = height;
 }
@@ -307,7 +354,7 @@ static void xdg_toplevel_handle_set_max_size(struct wl_client *client,
 static void xdg_toplevel_handle_set_min_size(struct wl_client *client,
 		struct wl_resource *resource, int32_t width, int32_t height) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 	surface->toplevel->client_pending.min_width = width;
 	surface->toplevel->client_pending.min_height = height;
 }
@@ -315,7 +362,7 @@ static void xdg_toplevel_handle_set_min_size(struct wl_client *client,
 static void xdg_toplevel_handle_set_maximized(struct wl_client *client,
 		struct wl_resource *resource) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 	surface->toplevel->client_pending.maximized = true;
 	wlr_signal_emit_safe(&surface->toplevel->events.request_maximize, surface);
 }
@@ -323,7 +370,7 @@ static void xdg_toplevel_handle_set_maximized(struct wl_client *client,
 static void xdg_toplevel_handle_unset_maximized(struct wl_client *client,
 		struct wl_resource *resource) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 	surface->toplevel->client_pending.maximized = false;
 	wlr_signal_emit_safe(&surface->toplevel->events.request_maximize, surface);
 }
@@ -331,7 +378,7 @@ static void xdg_toplevel_handle_unset_maximized(struct wl_client *client,
 static void xdg_toplevel_handle_set_fullscreen(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *output_resource) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 
 	struct wlr_output *output = NULL;
 	if (output_resource != NULL) {
@@ -352,7 +399,7 @@ static void xdg_toplevel_handle_set_fullscreen(struct wl_client *client,
 static void xdg_toplevel_handle_unset_fullscreen(struct wl_client *client,
 		struct wl_resource *resource) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 
 	surface->toplevel->client_pending.fullscreen = false;
 
@@ -368,7 +415,7 @@ static void xdg_toplevel_handle_unset_fullscreen(struct wl_client *client,
 static void xdg_toplevel_handle_set_minimized(struct wl_client *client,
 		struct wl_resource *resource) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 	wlr_signal_emit_safe(&surface->toplevel->events.request_minimize, surface);
 }
 
@@ -396,16 +443,22 @@ static const struct xdg_toplevel_interface xdg_toplevel_implementation = {
 
 static void xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
 	struct wlr_xdg_surface *surface =
-		xdg_surface_from_xdg_toplevel_resource(resource);
+		wlr_xdg_surface_from_toplevel_resource(resource);
 	if (surface != NULL) {
 		destroy_xdg_toplevel(surface);
 	}
 }
 
+const struct wlr_surface_role xdg_toplevel_surface_role = {
+	.name = "xdg_toplevel",
+	.commit = handle_xdg_surface_commit,
+	.precommit = handle_xdg_surface_precommit,
+};
+
 void create_xdg_toplevel(struct wlr_xdg_surface *xdg_surface,
 		uint32_t id) {
-	if (wlr_surface_set_role(xdg_surface->surface, XDG_TOPLEVEL_ROLE,
-			xdg_surface->resource, XDG_WM_BASE_ERROR_ROLE)) {
+	if (!wlr_surface_set_role(xdg_surface->surface, &xdg_toplevel_surface_role,
+			xdg_surface, xdg_surface->resource, XDG_WM_BASE_ERROR_ROLE)) {
 		return;
 	}
 
@@ -420,6 +473,9 @@ void create_xdg_toplevel(struct wlr_xdg_surface *xdg_surface,
 	wl_signal_init(&xdg_surface->toplevel->events.request_move);
 	wl_signal_init(&xdg_surface->toplevel->events.request_resize);
 	wl_signal_init(&xdg_surface->toplevel->events.request_show_window_menu);
+	wl_signal_init(&xdg_surface->toplevel->events.set_parent);
+	wl_signal_init(&xdg_surface->toplevel->events.set_title);
+	wl_signal_init(&xdg_surface->toplevel->events.set_app_id);
 
 	xdg_surface->role = WLR_XDG_SURFACE_ROLE_TOPLEVEL;
 	xdg_surface->toplevel->base = xdg_surface;
@@ -476,6 +532,14 @@ uint32_t wlr_xdg_toplevel_set_resizing(struct wlr_xdg_surface *surface,
 		bool resizing) {
 	assert(surface->role == WLR_XDG_SURFACE_ROLE_TOPLEVEL);
 	surface->toplevel->server_pending.resizing = resizing;
+
+	return schedule_xdg_surface_configure(surface);
+}
+
+uint32_t wlr_xdg_toplevel_set_tiled(struct wlr_xdg_surface *surface,
+		uint32_t tiled) {
+	assert(surface->role == WLR_XDG_SURFACE_ROLE_TOPLEVEL);
+	surface->toplevel->server_pending.tiled = tiled;
 
 	return schedule_xdg_surface_configure(surface);
 }

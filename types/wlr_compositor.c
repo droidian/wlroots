@@ -10,14 +10,13 @@
 #define COMPOSITOR_VERSION 4
 #define SUBCOMPOSITOR_VERSION 1
 
-static const char *subsurface_role = "wl_subsurface";
+extern const struct wlr_surface_role subsurface_role;
 
 bool wlr_surface_is_subsurface(struct wlr_surface *surface) {
-	return surface->role != NULL &&
-		strcmp(surface->role, subsurface_role) == 0;
+	return surface->role == &subsurface_role;
 }
 
-struct wlr_subsurface *wlr_subsurface_from_surface(
+struct wlr_subsurface *wlr_subsurface_from_wlr_surface(
 		struct wlr_surface *surface) {
 	assert(wlr_surface_is_subsurface(surface));
 	return (struct wlr_subsurface *)surface->role_data;
@@ -57,7 +56,7 @@ static void subcompositor_handle_get_subsurface(struct wl_client *client,
 	}
 
 	if (wlr_surface_is_subsurface(surface) &&
-			wlr_subsurface_from_surface(surface) != NULL) {
+			wlr_subsurface_from_wlr_surface(surface) != NULL) {
 		wl_resource_post_error(resource,
 			WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
 			"%s%d: wl_surface@%d is already a sub-surface",
@@ -73,8 +72,8 @@ static void subcompositor_handle_get_subsurface(struct wl_client *client,
 		return;
 	}
 
-	if (wlr_surface_set_role(surface, subsurface_role, resource,
-				WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE) < 0) {
+	if (!wlr_surface_set_role(surface, &subsurface_role, NULL,
+			resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE)) {
 		return;
 	}
 
@@ -102,30 +101,30 @@ static void subcompositor_bind(struct wl_client *client, void *data,
 	}
 	wl_resource_set_implementation(resource, &subcompositor_impl,
 		subcompositor, subcompositor_resource_destroy);
-	wl_list_insert(&subcompositor->wl_resources, wl_resource_get_link(resource));
+	wl_list_insert(&subcompositor->resources, wl_resource_get_link(resource));
 }
 
 static void subcompositor_init(struct wlr_subcompositor *subcompositor,
 		struct wl_display *display) {
-	subcompositor->wl_global = wl_global_create(display,
+	subcompositor->global = wl_global_create(display,
 		&wl_subcompositor_interface, SUBCOMPOSITOR_VERSION, subcompositor,
 		subcompositor_bind);
-	if (subcompositor->wl_global == NULL) {
-		wlr_log_errno(L_ERROR, "Could not allocate subcompositor global");
+	if (subcompositor->global == NULL) {
+		wlr_log_errno(WLR_ERROR, "Could not allocate subcompositor global");
 		return;
 	}
-	wl_list_init(&subcompositor->wl_resources);
+	wl_list_init(&subcompositor->resources);
 	wl_list_init(&subcompositor->subsurface_resources);
 }
 
 static void subcompositor_finish(struct wlr_subcompositor *subcompositor) {
-	wl_global_destroy(subcompositor->wl_global);
+	wl_global_destroy(subcompositor->global);
 	struct wl_resource *resource, *tmp;
 	wl_resource_for_each_safe(resource, tmp,
 			&subcompositor->subsurface_resources) {
 		wl_resource_destroy(resource);
 	}
-	wl_resource_for_each_safe(resource, tmp, &subcompositor->wl_resources) {
+	wl_resource_for_each_safe(resource, tmp, &subcompositor->resources) {
 		wl_resource_destroy(resource);
 	}
 }
@@ -183,7 +182,7 @@ static void compositor_bind(struct wl_client *wl_client, void *data,
 	}
 	wl_resource_set_implementation(resource, &compositor_impl,
 		compositor, compositor_resource_destroy);
-	wl_list_insert(&compositor->wl_resources, wl_resource_get_link(resource));
+	wl_list_insert(&compositor->resources, wl_resource_get_link(resource));
 }
 
 void wlr_compositor_destroy(struct wlr_compositor *compositor) {
@@ -193,7 +192,7 @@ void wlr_compositor_destroy(struct wlr_compositor *compositor) {
 	wlr_signal_emit_safe(&compositor->events.destroy, compositor);
 	subcompositor_finish(&compositor->subcompositor);
 	wl_list_remove(&compositor->display_destroy.link);
-	wl_global_destroy(compositor->wl_global);
+	wl_global_destroy(compositor->global);
 	struct wl_resource *resource, *tmp;
 	wl_resource_for_each_safe(resource, tmp, &compositor->surface_resources) {
 		wl_resource_destroy(resource);
@@ -201,7 +200,7 @@ void wlr_compositor_destroy(struct wlr_compositor *compositor) {
 	wl_resource_for_each_safe(resource, tmp, &compositor->region_resources) {
 		wl_resource_destroy(resource);
 	}
-	wl_resource_for_each_safe(resource, tmp, &compositor->wl_resources) {
+	wl_resource_for_each_safe(resource, tmp, &compositor->resources) {
 		wl_resource_destroy(resource);
 	}
 	free(compositor);
@@ -218,20 +217,20 @@ struct wlr_compositor *wlr_compositor_create(struct wl_display *display,
 	struct wlr_compositor *compositor =
 		calloc(1, sizeof(struct wlr_compositor));
 	if (!compositor) {
-		wlr_log_errno(L_ERROR, "Could not allocate wlr compositor");
+		wlr_log_errno(WLR_ERROR, "Could not allocate wlr compositor");
 		return NULL;
 	}
 
-	compositor->wl_global = wl_global_create(display, &wl_compositor_interface,
+	compositor->global = wl_global_create(display, &wl_compositor_interface,
 		COMPOSITOR_VERSION, compositor, compositor_bind);
-	if (!compositor->wl_global) {
+	if (!compositor->global) {
 		free(compositor);
-		wlr_log_errno(L_ERROR, "Could not allocate compositor global");
+		wlr_log_errno(WLR_ERROR, "Could not allocate compositor global");
 		return NULL;
 	}
 	compositor->renderer = renderer;
 
-	wl_list_init(&compositor->wl_resources);
+	wl_list_init(&compositor->resources);
 	wl_list_init(&compositor->surface_resources);
 	wl_list_init(&compositor->region_resources);
 	wl_signal_init(&compositor->events.new_surface);

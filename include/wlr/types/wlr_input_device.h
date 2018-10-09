@@ -1,3 +1,11 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_TYPES_WLR_INPUT_DEVICE_H
 #define WLR_TYPES_WLR_INPUT_DEVICE_H
 
@@ -39,7 +47,7 @@ struct wlr_input_device {
 		struct wlr_keyboard *keyboard;
 		struct wlr_pointer *pointer;
 		struct wlr_touch *touch;
-		struct wlr_tablet_tool *tablet_tool;
+		struct wlr_tablet *tablet;
 		struct wlr_tablet_pad *tablet_pad;
 	};
 

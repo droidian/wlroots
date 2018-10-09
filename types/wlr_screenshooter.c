@@ -8,6 +8,7 @@
 #include <wlr/types/wlr_screenshooter.h>
 #include <wlr/util/log.h>
 #include "screenshooter-protocol.h"
+#include "util/signal.h"
 
 static struct wlr_screenshot *screenshot_from_resource(
 		struct wl_resource *resource) {
@@ -50,12 +51,12 @@ static void output_handle_frame(struct wl_listener *listener, void *_data) {
 	int32_t stride = wl_shm_buffer_get_stride(shm_buffer);
 	wl_shm_buffer_begin_access(shm_buffer);
 	void *data = wl_shm_buffer_get_data(shm_buffer);
-	bool ok = wlr_renderer_read_pixels(renderer, format, stride, width, height,
-		0, 0, 0, 0, data);
+	bool ok = wlr_renderer_read_pixels(renderer, format, NULL, stride,
+		width, height, 0, 0, 0, 0, data);
 	wl_shm_buffer_end_access(shm_buffer);
 
 	if (!ok) {
-		wlr_log(L_ERROR, "Cannot read pixels");
+		wlr_log(WLR_ERROR, "Cannot read pixels");
 		goto cleanup;
 	}
 
@@ -85,26 +86,26 @@ static void screenshooter_shoot(struct wl_client *client,
 
 	struct wlr_renderer *renderer = wlr_backend_get_renderer(output->backend);
 	if (renderer == NULL) {
-		wlr_log(L_ERROR, "Backend doesn't have a renderer");
+		wlr_log(WLR_ERROR, "Backend doesn't have a renderer");
 		return;
 	}
 
 	struct wl_shm_buffer *shm_buffer = wl_shm_buffer_get(buffer_resource);
 	if (shm_buffer == NULL) {
-		wlr_log(L_ERROR, "Invalid buffer: not a shared memory buffer");
+		wlr_log(WLR_ERROR, "Invalid buffer: not a shared memory buffer");
 		return;
 	}
 
 	int32_t width = wl_shm_buffer_get_width(shm_buffer);
 	int32_t height = wl_shm_buffer_get_height(shm_buffer);
 	if (width < output->width || height < output->height) {
-		wlr_log(L_ERROR, "Invalid buffer: too small");
+		wlr_log(WLR_ERROR, "Invalid buffer: too small");
 		return;
 	}
 
 	uint32_t format = wl_shm_buffer_get_format(shm_buffer);
 	if (!wlr_renderer_format_supported(renderer, format)) {
-		wlr_log(L_ERROR, "Invalid buffer: unsupported format");
+		wlr_log(WLR_ERROR, "Invalid buffer: unsupported format");
 		return;
 	}
 
@@ -129,7 +130,7 @@ static void screenshooter_shoot(struct wl_client *client,
 		handle_screenshot_resource_destroy);
 	wl_list_insert(&screenshooter->screenshots, &screenshot->link);
 
-	wlr_log(L_DEBUG, "new screenshot %p (res %p)", screenshot,
+	wlr_log(WLR_DEBUG, "new screenshot %p (res %p)", screenshot,
 		screenshot->resource);
 
 	struct screenshot_state *state = calloc(1, sizeof(struct screenshot_state));
@@ -177,7 +178,8 @@ void wlr_screenshooter_destroy(struct wlr_screenshooter *screenshooter) {
 	wl_list_for_each_safe(screenshot, tmp, &screenshooter->screenshots, link) {
 		screenshot_destroy(screenshot);
 	}
-	wl_global_destroy(screenshooter->wl_global);
+	wlr_signal_emit_safe(&screenshooter->events.destroy, screenshooter);
+	wl_global_destroy(screenshooter->global);
 	free(screenshooter);
 }
 
@@ -195,13 +197,14 @@ struct wlr_screenshooter *wlr_screenshooter_create(struct wl_display *display) {
 	}
 
 	wl_list_init(&screenshooter->screenshots);
+	wl_signal_init(&screenshooter->events.destroy);
 
 	screenshooter->display_destroy.notify = handle_display_destroy;
 	wl_display_add_destroy_listener(display, &screenshooter->display_destroy);
 
-	screenshooter->wl_global = wl_global_create(display,
+	screenshooter->global = wl_global_create(display,
 		&orbital_screenshooter_interface, 1, screenshooter, screenshooter_bind);
-	if (screenshooter->wl_global == NULL) {
+	if (screenshooter->global == NULL) {
 		free(screenshooter);
 		return NULL;
 	}

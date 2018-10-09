@@ -37,8 +37,8 @@ struct sample_keyboard {
 };
 
 void output_frame_notify(struct wl_listener *listener, void *data) {
-	wlr_log(L_DEBUG, "Output removed");
-	struct sample_output *sample_output = wl_container_of(listener, sample_output, frame);
+	struct sample_output *sample_output =
+		wl_container_of(listener, sample_output, frame);
 	struct sample_state *sample = sample_output->sample;
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
@@ -66,7 +66,9 @@ void output_frame_notify(struct wl_listener *listener, void *data) {
 }
 
 void output_remove_notify(struct wl_listener *listener, void *data) {
-	struct sample_output *sample_output = wl_container_of(listener, sample_output, destroy);
+	struct sample_output *sample_output =
+		wl_container_of(listener, sample_output, destroy);
+	wlr_log(WLR_DEBUG, "Output removed");
 	wl_list_remove(&sample_output->frame.link);
 	wl_list_remove(&sample_output->destroy.link);
 	free(sample_output);
@@ -74,10 +76,13 @@ void output_remove_notify(struct wl_listener *listener, void *data) {
 
 void new_output_notify(struct wl_listener *listener, void *data) {
 	struct wlr_output *output = data;
-	struct sample_state *sample = wl_container_of(listener, sample, new_output);
-	struct sample_output *sample_output = calloc(1, sizeof(struct sample_output));
+	struct sample_state *sample =
+		wl_container_of(listener, sample, new_output);
+	struct sample_output *sample_output =
+		calloc(1, sizeof(struct sample_output));
 	if (!wl_list_empty(&output->modes)) {
-		struct wlr_output_mode *mode = wl_container_of(output->modes.prev, mode, link);
+		struct wlr_output_mode *mode =
+			wl_container_of(output->modes.prev, mode, link);
 		wlr_output_set_mode(output, mode);
 	}
 	sample_output->output = output;
@@ -105,7 +110,8 @@ void keyboard_key_notify(struct wl_listener *listener, void *data) {
 }
 
 void keyboard_destroy_notify(struct wl_listener *listener, void *data) {
-	struct sample_keyboard *keyboard = wl_container_of(listener, keyboard, destroy);
+	struct sample_keyboard *keyboard =
+		wl_container_of(listener, keyboard, destroy);
 	wl_list_remove(&keyboard->destroy.link);
 	wl_list_remove(&keyboard->key.link);
 	free(keyboard);
@@ -116,7 +122,8 @@ void new_input_notify(struct wl_listener *listener, void *data) {
 	struct sample_state *sample = wl_container_of(listener, sample, new_input);
 	switch (device->type) {
 	case WLR_INPUT_DEVICE_KEYBOARD:;
-		struct sample_keyboard *keyboard = calloc(1, sizeof(struct sample_keyboard));
+		struct sample_keyboard *keyboard =
+			calloc(1, sizeof(struct sample_keyboard));
 		keyboard->device = device;
 		keyboard->sample = sample;
 		wl_signal_add(&device->events.destroy, &keyboard->destroy);
@@ -131,11 +138,17 @@ void new_input_notify(struct wl_listener *listener, void *data) {
 		rules.options = getenv("XKB_DEFAULT_OPTIONS");
 		struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 		if (!context) {
-			wlr_log(L_ERROR, "Failed to create XKB context");
+			wlr_log(WLR_ERROR, "Failed to create XKB context");
 			exit(1);
 		}
-		wlr_keyboard_set_keymap(device->keyboard, xkb_map_new_from_names(context,
-					&rules, XKB_KEYMAP_COMPILE_NO_FLAGS));
+		struct xkb_keymap *keymap = xkb_map_new_from_names(context, &rules,
+			XKB_KEYMAP_COMPILE_NO_FLAGS);
+		if (!keymap) {
+			wlr_log(WLR_ERROR, "Failed to create XKB keymap");
+			exit(1);
+		}
+		wlr_keyboard_set_keymap(device->keyboard, keymap);
+		xkb_keymap_unref(keymap);
 		xkb_context_unref(context);
 		break;
 	default:
@@ -143,8 +156,8 @@ void new_input_notify(struct wl_listener *listener, void *data) {
 	}
 }
 
-int main() {
-	wlr_log_init(L_DEBUG, NULL);
+int main(void) {
+	wlr_log_init(WLR_DEBUG, NULL);
 	struct wl_display *display = wl_display_create();
 	struct sample_state state = {
 		.color = { 1.0, 0.0, 0.0 },
@@ -152,19 +165,19 @@ int main() {
 		.last_frame = { 0 },
 		.display = display
 	};
-	struct wlr_backend *wlr = wlr_backend_autocreate(display);
-	if (!wlr) {
+	struct wlr_backend *backend = wlr_backend_autocreate(display, NULL);
+	if (!backend) {
 		exit(1);
 	}
-	wl_signal_add(&wlr->events.new_output, &state.new_output);
+	wl_signal_add(&backend->events.new_output, &state.new_output);
 	state.new_output.notify = new_output_notify;
-	wl_signal_add(&wlr->events.new_input, &state.new_input);
+	wl_signal_add(&backend->events.new_input, &state.new_input);
 	state.new_input.notify = new_input_notify;
 	clock_gettime(CLOCK_MONOTONIC, &state.last_frame);
 
-	if (!wlr_backend_start(wlr)) {
-		wlr_log(L_ERROR, "Failed to start backend");
-		wlr_backend_destroy(wlr);
+	if (!wlr_backend_start(backend)) {
+		wlr_log(WLR_ERROR, "Failed to start backend");
+		wlr_backend_destroy(backend);
 		exit(1);
 	}
 	wl_display_run(display);

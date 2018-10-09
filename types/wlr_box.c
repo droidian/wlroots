@@ -11,8 +11,8 @@ void wlr_box_closest_point(const struct wlr_box *box, double x, double y,
 	// find the closest x point
 	if (x < box->x) {
 		*dest_x = box->x;
-	} else if (x > box->x + box->width) {
-		*dest_x = box->x + box->width;
+	} else if (x >= box->x + box->width) {
+		*dest_x = box->x + box->width - 1;
 	} else {
 		*dest_x = x;
 	}
@@ -20,8 +20,8 @@ void wlr_box_closest_point(const struct wlr_box *box, double x, double y,
 	// find closest y point
 	if (y < box->y) {
 		*dest_y = box->y;
-	} else if (y > box->y + box->height) {
-		*dest_y = box->y + box->height;
+	} else if (y >= box->y + box->height) {
+		*dest_y = box->y + box->height - 1;
 	} else {
 		*dest_y = y;
 	}
@@ -61,8 +61,8 @@ bool wlr_box_contains_point(const struct wlr_box *box, double x, double y) {
 	if (wlr_box_empty(box)) {
 		return false;
 	} else {
-		return x >= box->x && x <= box->x + box->width &&
-			y >= box->y && y <= box->y + box->height;
+		return x >= box->x && x < box->x + box->width &&
+			y >= box->y && y < box->y + box->height;
 	}
 }
 
@@ -142,4 +142,13 @@ void wlr_box_rotated_bounds(const struct wlr_box *box, float rotation,
 	dest->width = ceil(fmax(x1, x2) - fmin(x1, x2));
 	dest->y = floor(fmin(y1, y2));
 	dest->height = ceil(fmax(y1, y2) - fmin(y1, y2));
+}
+
+void wlr_box_from_pixman_box32(const pixman_box32_t box, struct wlr_box *dest) {
+	*dest = (struct wlr_box){
+		.x = box.x1,
+		.y = box.y1,
+		.width = box.x2 - box.x1,
+		.height = box.y2 - box.y1,
+	};
 }

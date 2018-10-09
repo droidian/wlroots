@@ -1,10 +1,23 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_RENDER_WLR_RENDERER_H
 #define WLR_RENDER_WLR_RENDERER_H
 
 #include <stdint.h>
 #include <wayland-server-protocol.h>
+#include <wlr/render/egl.h>
 #include <wlr/render/wlr_texture.h>
 #include <wlr/types/wlr_box.h>
+
+enum wlr_renderer_read_pixels_flags {
+	WLR_RENDERER_READ_PIXELS_Y_INVERT = 1,
+};
 
 struct wlr_renderer_impl;
 
@@ -15,6 +28,9 @@ struct wlr_renderer {
 		struct wl_signal destroy;
 	} events;
 };
+
+struct wlr_renderer *wlr_renderer_autocreate(struct wlr_egl *egl, EGLenum platform,
+	void *remote_display, EGLint *config_attribs, EGLint visual_id);
 
 void wlr_renderer_begin(struct wlr_renderer *r, int width, int height);
 void wlr_renderer_end(struct wlr_renderer *r);
@@ -81,25 +97,22 @@ int wlr_renderer_get_dmabuf_formats(struct wlr_renderer *renderer,
 int wlr_renderer_get_dmabuf_modifiers(struct wlr_renderer *renderer, int format,
 	uint64_t **modifiers);
 /**
- * Try to import the given dmabuf. On success return true false otherwise.
- * If this succeeds the dmabuf can be used for rendering on a texture
- */
-bool wlr_renderer_check_import_dmabuf(struct wlr_renderer *renderer,
-	struct wlr_dmabuf_buffer *dmabuf);
-/**
  * Reads out of pixels of the currently bound surface into data. `stride` is in
  * bytes.
+ *
+ * If `flags` is not NULl, the caller indicates that it accepts frame flags
+ * defined in `enum wlr_renderer_read_pixels_flags`.
  */
 bool wlr_renderer_read_pixels(struct wlr_renderer *r, enum wl_shm_format fmt,
-	uint32_t stride, uint32_t width, uint32_t height,
+	uint32_t *flags, uint32_t stride, uint32_t width, uint32_t height,
 	uint32_t src_x, uint32_t src_y, uint32_t dst_x, uint32_t dst_y, void *data);
 /**
  * Checks if a format is supported.
  */
 bool wlr_renderer_format_supported(struct wlr_renderer *r,
 	enum wl_shm_format fmt);
-void wlr_renderer_init_wl_shm(struct wlr_renderer *r,
-	struct wl_display *display);
+void wlr_renderer_init_wl_display(struct wlr_renderer *r,
+	struct wl_display *wl_display);
 /**
  * Destroys this wlr_renderer. Textures must be destroyed separately.
  */

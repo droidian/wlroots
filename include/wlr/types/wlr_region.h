@@ -1,9 +1,16 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_TYPES_WLR_REGION_H
 #define WLR_TYPES_WLR_REGION_H
 
 #include <pixman.h>
-
-struct wl_resource;
+#include <wayland-server-protocol.h>
 
 /*
  * Creates a new region resource with the provided new ID. If `resource_list` is

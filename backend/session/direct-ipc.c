@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #ifdef __FreeBSD__
 #define __BSD_VISIBLE 1
-#define INPUT_MAJOR 0
+#include <dev/evdev/input.h>
 #endif
 #include <errno.h>
 #include <fcntl.h>
@@ -32,7 +32,7 @@ static bool have_permissions(void) {
 	cap_flag_value_t val;
 
 	if (!cap || cap_get_flag(cap, CAP_SYS_ADMIN, CAP_PERMITTED, &val) || val != CAP_SET) {
-		wlr_log(L_ERROR, "Do not have CAP_SYS_ADMIN; cannot become DRM master");
+		wlr_log(WLR_ERROR, "Do not have CAP_SYS_ADMIN; cannot become DRM master");
 		cap_free(cap);
 		return false;
 	}
@@ -44,7 +44,7 @@ static bool have_permissions(void) {
 static bool have_permissions(void) {
 #ifdef __linux__
 	if (geteuid() != 0) {
-		wlr_log(L_ERROR, "Do not have root privileges; cannot become DRM master");
+		wlr_log(WLR_ERROR, "Do not have root privileges; cannot become DRM master");
 		return false;
 	}
 #endif
@@ -130,7 +130,7 @@ static void communicate(int sock) {
 	int drm_fd = -1;
 	bool running = true;
 
-	while (running && recv_msg(sock, &drm_fd, &msg, sizeof(msg)) >= 0) {
+	while (running && recv_msg(sock, &drm_fd, &msg, sizeof(msg)) > 0) {
 		switch (msg.type) {
 		case MSG_OPEN:
 			errno = 0;
@@ -142,6 +142,7 @@ static void communicate(int sock) {
 				goto error;
 			}
 
+#ifndef __FreeBSD__
 			struct stat st;
 			if (fstat(fd, &st) < 0) {
 				ret = errno;
@@ -157,9 +158,25 @@ static void communicate(int sock) {
 			if (maj == DRM_MAJOR && drmSetMaster(fd)) {
 				ret = errno;
 			}
+#else
+			int ev;
+			struct drm_version dv = {0};
+			if (ioctl(fd, EVIOCGVERSION, &ev) == -1 &&
+					ioctl(fd, DRM_IOCTL_VERSION, &dv) == -1) {
+				ret = ENOTSUP;
+				goto error;
+			}
+
+			if (dv.version_major != 0 && drmSetMaster(fd)) {
+				ret = errno;
+			}
+#endif
+
 error:
 			send_msg(sock, ret ? -1 : fd, &ret, sizeof(ret));
-			close(fd);
+			if (fd >= 0) {
+				close(fd);
+			}
 
 			break;
 
@@ -191,8 +208,11 @@ int direct_ipc_open(int sock, const char *path) {
 
 	send_msg(sock, -1, &msg, sizeof(msg));
 
-	int fd, err;
-	recv_msg(sock, &fd, &err, sizeof(err));
+	int fd, err, ret;
+	int retry = 0;
+	do {
+		ret = recv_msg(sock, &fd, &err, sizeof(err));
+	} while (ret == 0 && retry++ < 3);
 
 	return err ? -err : fd;
 }
@@ -227,13 +247,13 @@ int direct_ipc_init(pid_t *pid_out) {
 
 	int sock[2];
 	if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sock) < 0) {
-		wlr_log_errno(L_ERROR, "Failed to create socket pair");
+		wlr_log_errno(WLR_ERROR, "Failed to create socket pair");
 		return -1;
 	}
 
 	pid_t pid = fork();
 	if (pid < 0) {
-		wlr_log_errno(L_ERROR, "Fork failed");
+		wlr_log_errno(WLR_ERROR, "Fork failed");
 		close(sock[0]);
 		close(sock[1]);
 		return -1;

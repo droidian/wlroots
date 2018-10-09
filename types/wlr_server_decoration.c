@@ -103,7 +103,7 @@ static void server_decoration_manager_handle_create(struct wl_client *client,
 		&server_decoration_impl, decoration,
 		server_decoration_destroy_resource);
 
-	wlr_log(L_DEBUG, "new server_decoration %p (res %p)", decoration,
+	wlr_log(WLR_DEBUG, "new server_decoration %p (res %p)", decoration,
 		decoration->resource);
 
 	wl_signal_init(&decoration->events.destroy);
@@ -132,7 +132,7 @@ void wlr_server_decoration_manager_set_default_mode(
 	manager->default_mode = default_mode;
 
 	struct wl_resource *resource;
-	wl_resource_for_each(resource, &manager->wl_resources) {
+	wl_resource_for_each(resource, &manager->resources) {
 		org_kde_kwin_server_decoration_manager_send_default_mode(resource,
 			manager->default_mode);
 	}
@@ -156,7 +156,7 @@ static void server_decoration_manager_bind(struct wl_client *client, void *data,
 	wl_resource_set_implementation(resource, &server_decoration_manager_impl,
 		manager, server_decoration_manager_destroy_resource);
 
-	wl_list_insert(&manager->wl_resources, wl_resource_get_link(resource));
+	wl_list_insert(&manager->resources, wl_resource_get_link(resource));
 
 	org_kde_kwin_server_decoration_manager_send_default_mode(resource,
 		manager->default_mode);
@@ -167,17 +167,18 @@ void wlr_server_decoration_manager_destroy(
 	if (manager == NULL) {
 		return;
 	}
-	wl_list_remove(&manager->display_destroy.link);
 	struct wlr_server_decoration *decoration, *tmp_decoration;
 	wl_list_for_each_safe(decoration, tmp_decoration, &manager->decorations,
 			link) {
 		server_decoration_destroy(decoration);
 	}
+	wlr_signal_emit_safe(&manager->events.destroy, manager);
+	wl_list_remove(&manager->display_destroy.link);
 	struct wl_resource *resource, *tmp_resource;
-	wl_resource_for_each_safe(resource, tmp_resource, &manager->wl_resources) {
+	wl_resource_for_each_safe(resource, tmp_resource, &manager->resources) {
 		server_decoration_manager_destroy_resource(resource);
 	}
-	wl_global_destroy(manager->wl_global);
+	wl_global_destroy(manager->global);
 	free(manager);
 }
 
@@ -194,17 +195,18 @@ struct wlr_server_decoration_manager *wlr_server_decoration_manager_create(
 	if (manager == NULL) {
 		return NULL;
 	}
-	manager->wl_global = wl_global_create(display,
+	manager->global = wl_global_create(display,
 		&org_kde_kwin_server_decoration_manager_interface, 1, manager,
 		server_decoration_manager_bind);
-	if (manager->wl_global == NULL) {
+	if (manager->global == NULL) {
 		free(manager);
 		return NULL;
 	}
 	manager->default_mode = ORG_KDE_KWIN_SERVER_DECORATION_MANAGER_MODE_NONE;
-	wl_list_init(&manager->wl_resources);
+	wl_list_init(&manager->resources);
 	wl_list_init(&manager->decorations);
 	wl_signal_init(&manager->events.new_decoration);
+	wl_signal_init(&manager->events.destroy);
 
 	manager->display_destroy.notify = handle_display_destroy;
 	wl_display_add_destroy_listener(display, &manager->display_destroy);

@@ -1,10 +1,16 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif
 #include <assert.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
+#include <time.h>
 #include <wayland-server.h>
 #include <wlr/types/wlr_box.h>
 #include <wlr/types/wlr_surface.h>
-#include <wlr/types/wlr_layer_shell.h>
+#include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/util/log.h>
 #include "rootston/desktop.h"
 #include "rootston/layers.h"
@@ -73,15 +79,40 @@ static void apply_exclusive(struct wlr_box *usable_area,
 	}
 }
 
-static void arrange_layer(struct wlr_output *output, struct wl_list *list,
+static void update_cursors(struct roots_layer_surface *roots_surface,
+		struct wl_list *seats /* struct roots_seat */) {
+	struct roots_seat *seat;
+	wl_list_for_each(seat, seats, link) {
+		double sx, sy;
+
+		struct wlr_surface *surface = desktop_surface_at(
+			seat->input->server->desktop,
+			seat->cursor->cursor->x, seat->cursor->cursor->y, &sx, &sy, NULL);
+
+		if (surface == roots_surface->layer_surface->surface) {
+			struct timespec time;
+			if (clock_gettime(CLOCK_MONOTONIC, &time) == 0) {
+				roots_cursor_update_position(seat->cursor,
+					time.tv_sec * 1000 + time.tv_nsec / 1000000);
+			} else {
+				wlr_log(WLR_ERROR, "Failed to get time, not updating"
+					"position. Errno: %s\n", strerror(errno));
+			}
+		}
+	}
+}
+
+static void arrange_layer(struct wlr_output *output,
+		struct wl_list *seats /* struct *roots_seat */,
+		struct wl_list *list /* struct *roots_layer_surface */,
 		struct wlr_box *usable_area, bool exclusive) {
 	struct roots_layer_surface *roots_surface;
 	struct wlr_box full_area = { 0 };
 	wlr_output_effective_resolution(output,
 			&full_area.width, &full_area.height);
-	wl_list_for_each(roots_surface, list, link) {
-		struct wlr_layer_surface *layer = roots_surface->layer_surface;
-		struct wlr_layer_surface_state *state = &layer->current;
+	wl_list_for_each_reverse(roots_surface, list, link) {
+		struct wlr_layer_surface_v1 *layer = roots_surface->layer_surface;
+		struct wlr_layer_surface_v1_state *state = &layer->current;
 		if (exclusive != (state->exclusive_zone > 0)) {
 			continue;
 		}
@@ -140,15 +171,28 @@ static void arrange_layer(struct wlr_output *output, struct wl_list *list,
 		}
 		if (box.width < 0 || box.height < 0) {
 			// TODO: Bubble up a protocol error?
-			wlr_layer_surface_close(layer);
+			wlr_layer_surface_v1_close(layer);
 			continue;
 		}
+
 		// Apply
+		struct wlr_box old_geo = roots_surface->geo;
 		roots_surface->geo = box;
 		apply_exclusive(usable_area, state->anchor, state->exclusive_zone,
 				state->margin.top, state->margin.right,
 				state->margin.bottom, state->margin.left);
-		wlr_layer_surface_configure(layer, box.width, box.height);
+		wlr_layer_surface_v1_configure(layer, box.width, box.height);
+
+		// Having a cursor newly end up over the moved layer will not
+		// automatically send a motion event to the surface. The event needs to
+		// be synthesized.
+		// Only update layer surfaces which kept their size (and so buffers) the
+		// same, because those with resized buffers will be handled separately.
+
+		if (roots_surface->geo.x != old_geo.x
+				|| roots_surface->geo.y != old_geo.y) {
+			update_cursors(roots_surface, seats);
+		}
 	}
 }
 
@@ -158,16 +202,16 @@ void arrange_layers(struct roots_output *output) {
 			&usable_area.width, &usable_area.height);
 
 	// Arrange exclusive surfaces from top->bottom
-	arrange_layer(output->wlr_output,
+	arrange_layer(output->wlr_output, &output->desktop->server->input->seats,
 			&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY],
 			&usable_area, true);
-	arrange_layer(output->wlr_output,
+	arrange_layer(output->wlr_output, &output->desktop->server->input->seats,
 			&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_TOP],
 			&usable_area, true);
-	arrange_layer(output->wlr_output,
+	arrange_layer(output->wlr_output, &output->desktop->server->input->seats,
 			&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM],
 			&usable_area, true);
-	arrange_layer(output->wlr_output,
+	arrange_layer(output->wlr_output, &output->desktop->server->input->seats,
 			&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND],
 			&usable_area, true);
 	memcpy(&output->usable_area, &usable_area, sizeof(struct wlr_box));
@@ -180,16 +224,16 @@ void arrange_layers(struct roots_output *output) {
 	}
 
 	// Arrange non-exlusive surfaces from top->bottom
-	arrange_layer(output->wlr_output,
+	arrange_layer(output->wlr_output, &output->desktop->server->input->seats,
 			&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY],
 			&usable_area, false);
-	arrange_layer(output->wlr_output,
+	arrange_layer(output->wlr_output, &output->desktop->server->input->seats,
 			&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_TOP],
 			&usable_area, false);
-	arrange_layer(output->wlr_output,
+	arrange_layer(output->wlr_output, &output->desktop->server->input->seats,
 			&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM],
 			&usable_area, false);
-	arrange_layer(output->wlr_output,
+	arrange_layer(output->wlr_output, &output->desktop->server->input->seats,
 			&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND],
 			&usable_area, false);
 
@@ -226,18 +270,32 @@ static void handle_output_destroy(struct wl_listener *listener, void *data) {
 		wl_container_of(listener, layer, output_destroy);
 	layer->layer_surface->output = NULL;
 	wl_list_remove(&layer->output_destroy.link);
-	wlr_layer_surface_close(layer->layer_surface);
+	wlr_layer_surface_v1_close(layer->layer_surface);
 }
 
 static void handle_surface_commit(struct wl_listener *listener, void *data) {
 	struct roots_layer_surface *layer =
 		wl_container_of(listener, layer, surface_commit);
-	struct wlr_layer_surface *layer_surface = layer->layer_surface;
+	struct wlr_layer_surface_v1 *layer_surface = layer->layer_surface;
 	struct wlr_output *wlr_output = layer_surface->output;
 	if (wlr_output != NULL) {
 		struct roots_output *output = wlr_output->data;
 		struct wlr_box old_geo = layer->geo;
 		arrange_layers(output);
+
+		// Cursor changes which happen as a consequence of resizing a layer
+		// surface are applied in arrange_layers. Because the resize happens
+		// before the underlying surface changes, it will only receive a cursor
+		// update if the new cursor position crosses the *old* sized surface in
+		// the *new* layer surface.
+		// Another cursor move event is needed when the surface actually
+		// changes.
+		struct wlr_surface *surface = layer_surface->surface;
+		if (surface->previous.width != surface->current.width ||
+				surface->previous.height != surface->current.height) {
+			update_cursors(layer, &output->desktop->server->input->seats);
+		}
+
 		if (memcmp(&old_geo, &layer->geo, sizeof(struct wlr_box)) != 0) {
 			output_damage_whole_local_surface(output, layer_surface->surface,
 					old_geo.x, old_geo.y, 0);
@@ -250,7 +308,7 @@ static void handle_surface_commit(struct wl_listener *listener, void *data) {
 	}
 }
 
-static void unmap(struct wlr_layer_surface *layer_surface) {
+static void unmap(struct wlr_layer_surface_v1 *layer_surface) {
 	struct roots_layer_surface *layer = layer_surface->data;
 	struct wlr_output *wlr_output = layer_surface->output;
 	if (wlr_output != NULL) {
@@ -279,7 +337,7 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 }
 
 static void handle_map(struct wl_listener *listener, void *data) {
-	struct wlr_layer_surface *layer_surface = data;
+	struct wlr_layer_surface_v1 *layer_surface = data;
 	struct roots_layer_surface *layer = layer_surface->data;
 	struct wlr_output *wlr_output = layer_surface->output;
 	struct roots_output *output = wlr_output->data;
@@ -291,7 +349,10 @@ static void handle_map(struct wl_listener *listener, void *data) {
 static void handle_unmap(struct wl_listener *listener, void *data) {
 	struct roots_layer_surface *layer = wl_container_of(
 			listener, layer, unmap);
+	struct wlr_output *wlr_output = layer->layer_surface->output;
+	struct roots_output *output = wlr_output->data;
 	unmap(layer->layer_surface);
+	input_update_cursor_focus(output->desktop->server->input);
 }
 
 static void popup_handle_map(struct wl_listener *listener, void *data) {
@@ -303,6 +364,7 @@ static void popup_handle_map(struct wl_listener *listener, void *data) {
 	int oy = popup->wlr_popup->geometry.y + layer->geo.y;
 	output_damage_whole_local_surface(output, popup->wlr_popup->base->surface,
 		ox, oy, 0);
+	input_update_cursor_focus(output->desktop->server->input);
 }
 
 static void popup_handle_unmap(struct wl_listener *listener, void *data) {
@@ -368,10 +430,10 @@ static void handle_new_popup(struct wl_listener *listener, void *data) {
 }
 
 void handle_layer_shell_surface(struct wl_listener *listener, void *data) {
-	struct wlr_layer_surface *layer_surface = data;
+	struct wlr_layer_surface_v1 *layer_surface = data;
 	struct roots_desktop *desktop =
 		wl_container_of(listener, desktop, layer_shell_surface);
-	wlr_log(L_DEBUG, "new layer surface: namespace %s layer %d anchor %d "
+	wlr_log(WLR_DEBUG, "new layer surface: namespace %s layer %d anchor %d "
 			"size %dx%d margin %d,%d,%d,%d",
 		layer_surface->namespace, layer_surface->layer, layer_surface->layer,
 		layer_surface->client_pending.desired_width,
@@ -380,12 +442,6 @@ void handle_layer_shell_surface(struct wl_listener *listener, void *data) {
 		layer_surface->client_pending.margin.right,
 		layer_surface->client_pending.margin.bottom,
 		layer_surface->client_pending.margin.left);
-
-	struct roots_layer_surface *roots_surface =
-		calloc(1, sizeof(struct roots_layer_surface));
-	if (!roots_surface) {
-		return;
-	}
 
 	if (!layer_surface->output) {
 		struct roots_input *input = desktop->server->input;
@@ -396,7 +452,7 @@ void handle_layer_shell_surface(struct wl_listener *listener, void *data) {
 					seat->cursor->cursor->x,
 					seat->cursor->cursor->y);
 		if (!output) {
-			wlr_log(L_ERROR, "Couldn't find output at (%.0f,%.0f)",
+			wlr_log(WLR_ERROR, "Couldn't find output at (%.0f,%.0f)",
 				seat->cursor->cursor->x,
 				seat->cursor->cursor->y);
 			output = wlr_output_layout_get_center_output(desktop->layout);
@@ -404,9 +460,15 @@ void handle_layer_shell_surface(struct wl_listener *listener, void *data) {
 		if (output) {
 			layer_surface->output = output;
 		} else {
-			wlr_layer_surface_close(layer_surface);
+			wlr_layer_surface_v1_close(layer_surface);
 			return;
 		}
+	}
+
+	struct roots_layer_surface *roots_surface =
+		calloc(1, sizeof(struct roots_layer_surface));
+	if (!roots_surface) {
+		return;
 	}
 
 	roots_surface->surface_commit.notify = handle_surface_commit;
@@ -435,7 +497,7 @@ void handle_layer_shell_surface(struct wl_listener *listener, void *data) {
 
 	// Temporarily set the layer's current state to client_pending
 	// So that we can easily arrange it
-	struct wlr_layer_surface_state old_state = layer_surface->current;
+	struct wlr_layer_surface_v1_state old_state = layer_surface->current;
 	layer_surface->current = layer_surface->client_pending;
 
 	arrange_layers(output);

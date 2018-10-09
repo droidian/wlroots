@@ -7,6 +7,12 @@
 #include "backend/libinput.h"
 #include "util/signal.h"
 
+static struct wlr_libinput_backend *get_libinput_backend_from_backend(
+		struct wlr_backend *wlr_backend) {
+	assert(wlr_backend_is_libinput(wlr_backend));
+	return (struct wlr_libinput_backend *)wlr_backend;
+}
+
 static int libinput_open_restricted(const char *path,
 		int flags, void *_backend) {
 	struct wlr_libinput_backend *backend = _backend;
@@ -26,7 +32,7 @@ static const struct libinput_interface libinput_impl = {
 static int handle_libinput_readable(int fd, uint32_t mask, void *_backend) {
 	struct wlr_libinput_backend *backend = _backend;
 	if (libinput_dispatch(backend->libinput_context) != 0) {
-		wlr_log(L_ERROR, "Failed to dispatch libinput");
+		wlr_log(WLR_ERROR, "Failed to dispatch libinput");
 		// TODO: some kind of abort?
 		return 0;
 	}
@@ -40,24 +46,24 @@ static int handle_libinput_readable(int fd, uint32_t mask, void *_backend) {
 
 static void log_libinput(struct libinput *libinput_context,
 		enum libinput_log_priority priority, const char *fmt, va_list args) {
-	_wlr_vlog(L_ERROR, fmt, args);
+	_wlr_vlog(WLR_ERROR, fmt, args);
 }
 
-static bool backend_start(struct wlr_backend *_backend) {
+static bool backend_start(struct wlr_backend *wlr_backend) {
 	struct wlr_libinput_backend *backend =
-		(struct wlr_libinput_backend *)_backend;
-	wlr_log(L_DEBUG, "Initializing libinput");
+		get_libinput_backend_from_backend(wlr_backend);
+	wlr_log(WLR_DEBUG, "Initializing libinput");
 
 	backend->libinput_context = libinput_udev_create_context(&libinput_impl,
 		backend, backend->session->udev);
 	if (!backend->libinput_context) {
-		wlr_log(L_ERROR, "Failed to create libinput context");
+		wlr_log(WLR_ERROR, "Failed to create libinput context");
 		return false;
 	}
 
-	// TODO: Let user customize seat used
-	if (libinput_udev_assign_seat(backend->libinput_context, "seat0") != 0) {
-		wlr_log(L_ERROR, "Failed to assign libinput seat");
+	if (libinput_udev_assign_seat(backend->libinput_context,
+			backend->session->seat) != 0) {
+		wlr_log(WLR_ERROR, "Failed to assign libinput seat");
 		return false;
 	}
 
@@ -75,8 +81,8 @@ static bool backend_start(struct wlr_backend *_backend) {
 	if (!no_devs && backend->wlr_device_lists.length == 0) {
 		handle_libinput_readable(libinput_fd, WL_EVENT_READABLE, backend);
 		if (backend->wlr_device_lists.length == 0) {
-			wlr_log(L_ERROR, "libinput initialization failed, no input devices");
-			wlr_log(L_ERROR, "Set WLR_LIBINPUT_NO_DEVICES=1 to suppress this check");
+			wlr_log(WLR_ERROR, "libinput initialization failed, no input devices");
+			wlr_log(WLR_ERROR, "Set WLR_LIBINPUT_NO_DEVICES=1 to suppress this check");
 			return false;
 		}
 	}
@@ -89,10 +95,10 @@ static bool backend_start(struct wlr_backend *_backend) {
 	backend->input_event = wl_event_loop_add_fd(event_loop, libinput_fd,
 			WL_EVENT_READABLE, handle_libinput_readable, backend);
 	if (!backend->input_event) {
-		wlr_log(L_ERROR, "Failed to create input event on event loop");
+		wlr_log(WLR_ERROR, "Failed to create input event on event loop");
 		return false;
 	}
-	wlr_log(L_DEBUG, "libinput successfully initialized");
+	wlr_log(WLR_DEBUG, "libinput successfully initialized");
 	return true;
 }
 
@@ -101,7 +107,7 @@ static void backend_destroy(struct wlr_backend *wlr_backend) {
 		return;
 	}
 	struct wlr_libinput_backend *backend =
-		(struct wlr_libinput_backend *)wlr_backend;
+		get_libinput_backend_from_backend(wlr_backend);
 
 	for (size_t i = 0; i < backend->wlr_device_lists.length; i++) {
 		struct wl_list *wlr_devices = backend->wlr_device_lists.items[i];
@@ -158,17 +164,16 @@ static void handle_display_destroy(struct wl_listener *listener, void *data) {
 
 struct wlr_backend *wlr_libinput_backend_create(struct wl_display *display,
 		struct wlr_session *session) {
-	assert(display && session);
-
-	struct wlr_libinput_backend *backend = calloc(1, sizeof(struct wlr_libinput_backend));
+	struct wlr_libinput_backend *backend =
+		calloc(1, sizeof(struct wlr_libinput_backend));
 	if (!backend) {
-		wlr_log(L_ERROR, "Allocation failed: %s", strerror(errno));
+		wlr_log(WLR_ERROR, "Allocation failed: %s", strerror(errno));
 		return NULL;
 	}
 	wlr_backend_init(&backend->backend, &backend_impl);
 
 	if (!wlr_list_init(&backend->wlr_device_lists)) {
-		wlr_log(L_ERROR, "Allocation failed: %s", strerror(errno));
+		wlr_log(WLR_ERROR, "Allocation failed: %s", strerror(errno));
 		goto error_backend;
 	}
 
@@ -187,8 +192,10 @@ error_backend:
 	return NULL;
 }
 
-struct libinput_device *wlr_libinput_get_device_handle(struct wlr_input_device *_dev) {
-	struct wlr_libinput_input_device *dev = (struct wlr_libinput_input_device *)_dev;
+struct libinput_device *wlr_libinput_get_device_handle(
+		struct wlr_input_device *wlr_dev) {
+	struct wlr_libinput_input_device *dev =
+		(struct wlr_libinput_input_device *)wlr_dev;
 	return dev->handle;
 }
 

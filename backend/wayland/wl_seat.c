@@ -1,8 +1,9 @@
-#define _XOPEN_SOURCE 500
+#define _POSIX_C_SOURCE 200809L
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <wayland-client.h>
 #include <wlr/interfaces/wlr_input_device.h>
 #include <wlr/interfaces/wlr_keyboard.h>
@@ -37,10 +38,8 @@ static void pointer_handle_enter(void *data, struct wl_pointer *wl_pointer,
 	}
 
 	struct wlr_wl_output *output = wl_surface_get_user_data(surface);
+	assert(output);
 	struct wlr_wl_pointer *pointer = output_get_pointer(output);
-	if (output == NULL) {
-		return;
-	}
 
 	output->enter_serial = serial;
 	backend->current_pointer = pointer;
@@ -55,6 +54,7 @@ static void pointer_handle_leave(void *data, struct wl_pointer *wl_pointer,
 	}
 
 	struct wlr_wl_output *output = wl_surface_get_user_data(surface);
+	assert(output);
 	output->enter_serial = 0;
 
 	if (backend->current_pointer == NULL ||
@@ -122,11 +122,11 @@ static void pointer_handle_axis(void *data, struct wl_pointer *wl_pointer,
 }
 
 static void pointer_handle_frame(void *data, struct wl_pointer *wl_pointer) {
-
+	// This space is intentionally left blank
 }
 
-static void pointer_handle_axis_source(void *data, struct wl_pointer *wl_pointer,
-		uint32_t axis_source) {
+static void pointer_handle_axis_source(void *data,
+		struct wl_pointer *wl_pointer, uint32_t axis_source) {
 	struct wlr_wl_backend *backend = data;
 	struct wlr_wl_pointer *pointer = backend->current_pointer;
 	if (pointer == NULL) {
@@ -138,11 +138,11 @@ static void pointer_handle_axis_source(void *data, struct wl_pointer *wl_pointer
 
 static void pointer_handle_axis_stop(void *data, struct wl_pointer *wl_pointer,
 		uint32_t time, uint32_t axis) {
-
+	// This space is intentionally left blank
 }
 
-static void pointer_handle_axis_discrete(void *data, struct wl_pointer *wl_pointer,
-		uint32_t axis, int32_t discrete) {
+static void pointer_handle_axis_discrete(void *data,
+		struct wl_pointer *wl_pointer, uint32_t axis, int32_t discrete) {
 	struct wlr_wl_backend *backend = data;
 	struct wlr_wl_pointer *pointer = backend->current_pointer;
 	if (pointer == NULL) {
@@ -169,12 +169,51 @@ static void keyboard_handle_keymap(void *data, struct wl_keyboard *wl_keyboard,
 	// TODO: set keymap
 }
 
+static uint32_t get_current_time_msec() {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return now.tv_nsec / 1000;
+}
+
 static void keyboard_handle_enter(void *data, struct wl_keyboard *wl_keyboard,
 		uint32_t serial, struct wl_surface *surface, struct wl_array *keys) {
+	struct wlr_input_device *dev = data;
+
+	uint32_t time = get_current_time_msec();
+
+	uint32_t *keycode_ptr;
+	wl_array_for_each(keycode_ptr, keys) {
+		struct wlr_event_keyboard_key event = {
+			.keycode = *keycode_ptr,
+			.state = WLR_KEY_PRESSED,
+			.time_msec = time,
+			.update_state = false,
+		};
+		wlr_keyboard_notify_key(dev->keyboard, &event);
+	}
 }
 
 static void keyboard_handle_leave(void *data, struct wl_keyboard *wl_keyboard,
 		uint32_t serial, struct wl_surface *surface) {
+	struct wlr_input_device *dev = data;
+
+	uint32_t time = get_current_time_msec();
+
+	uint32_t pressed[dev->keyboard->num_keycodes];
+	memcpy(pressed, dev->keyboard->keycodes,
+		dev->keyboard->num_keycodes * sizeof(uint32_t));
+
+	for (size_t i = 0; i < sizeof(pressed)/sizeof(pressed[0]); ++i) {
+		uint32_t keycode = pressed[i];
+
+		struct wlr_event_keyboard_key event = {
+			.keycode = keycode,
+			.state = WLR_KEY_RELEASED,
+			.time_msec = time,
+			.update_state = false,
+		};
+		wlr_keyboard_notify_key(dev->keyboard, &event);
+	}
 }
 
 static void keyboard_handle_key(void *data, struct wl_keyboard *wl_keyboard,
@@ -200,9 +239,9 @@ static void keyboard_handle_modifiers(void *data, struct wl_keyboard *wl_keyboar
 		mods_locked, group);
 }
 
-static void keyboard_handle_repeat_info(void *data, struct wl_keyboard *wl_keyboard,
-	int32_t rate, int32_t delay) {
-
+static void keyboard_handle_repeat_info(void *data,
+		struct wl_keyboard *wl_keyboard, int32_t rate, int32_t delay) {
+	// This space is intentionally left blank
 }
 
 static struct wl_keyboard_listener keyboard_listener = {
@@ -214,8 +253,15 @@ static struct wl_keyboard_listener keyboard_listener = {
 	.repeat_info = keyboard_handle_repeat_info
 };
 
+static struct wlr_wl_input_device *get_wl_input_device_from_input_device(
+		struct wlr_input_device *wlr_dev) {
+	assert(wlr_input_device_is_wl(wlr_dev));
+	return (struct wlr_wl_input_device *)wlr_dev;
+}
+
 static void input_device_destroy(struct wlr_input_device *wlr_dev) {
-	struct wlr_wl_input_device *dev = (struct wlr_wl_input_device *)wlr_dev;
+	struct wlr_wl_input_device *dev =
+		get_wl_input_device_from_input_device(wlr_dev);
 	if (dev->resource) {
 		wl_proxy_destroy(dev->resource);
 	}
@@ -236,7 +282,7 @@ static struct wlr_wl_input_device *create_wl_input_device(
 	struct wlr_wl_input_device *dev =
 		calloc(1, sizeof(struct wlr_wl_input_device));
 	if (dev == NULL) {
-		wlr_log_errno(L_ERROR, "Allocation failed");
+		wlr_log_errno(WLR_ERROR, "Allocation failed");
 		return NULL;
 	}
 	dev->backend = backend;
@@ -292,7 +338,7 @@ void create_wl_pointer(struct wl_pointer *wl_pointer,
 
 	struct wlr_wl_pointer *pointer = calloc(1, sizeof(struct wlr_wl_pointer));
 	if (pointer == NULL) {
-		wlr_log(L_ERROR, "Allocation failed");
+		wlr_log(WLR_ERROR, "Allocation failed");
 		return;
 	}
 	pointer->wl_pointer = wl_pointer;
@@ -305,7 +351,7 @@ void create_wl_pointer(struct wl_pointer *wl_pointer,
 		create_wl_input_device(backend, WLR_INPUT_DEVICE_POINTER);
 	if (dev == NULL) {
 		free(pointer);
-		wlr_log(L_ERROR, "Allocation failed");
+		wlr_log(WLR_ERROR, "Allocation failed");
 		return;
 	}
 	pointer->input_device = dev;
@@ -324,7 +370,7 @@ static void seat_handle_capabilities(void *data, struct wl_seat *wl_seat,
 	assert(backend->seat == wl_seat);
 
 	if ((caps & WL_SEAT_CAPABILITY_POINTER)) {
-		wlr_log(L_DEBUG, "seat %p offered pointer", (void*) wl_seat);
+		wlr_log(WLR_DEBUG, "seat %p offered pointer", (void*) wl_seat);
 
 		struct wl_pointer *wl_pointer = wl_seat_get_pointer(wl_seat);
 		backend->pointer = wl_pointer;
@@ -337,18 +383,18 @@ static void seat_handle_capabilities(void *data, struct wl_seat *wl_seat,
 		wl_pointer_add_listener(wl_pointer, &pointer_listener, backend);
 	}
 	if ((caps & WL_SEAT_CAPABILITY_KEYBOARD)) {
-		wlr_log(L_DEBUG, "seat %p offered keyboard", (void*) wl_seat);
+		wlr_log(WLR_DEBUG, "seat %p offered keyboard", (void*) wl_seat);
 		struct wlr_wl_input_device *dev = create_wl_input_device(backend,
 			WLR_INPUT_DEVICE_KEYBOARD);
 		if (dev == NULL) {
-			wlr_log(L_ERROR, "Allocation failed");
+			wlr_log(WLR_ERROR, "Allocation failed");
 			return;
 		}
 		struct wlr_input_device *wlr_dev = &dev->wlr_input_device;
 		wlr_dev->keyboard = calloc(1, sizeof(struct wlr_keyboard));
 		if (!wlr_dev->keyboard) {
 			free(dev);
-			wlr_log(L_ERROR, "Allocation failed");
+			wlr_log(WLR_ERROR, "Allocation failed");
 			return;
 		}
 		wlr_keyboard_init(wlr_dev->keyboard, NULL);
@@ -360,7 +406,8 @@ static void seat_handle_capabilities(void *data, struct wl_seat *wl_seat,
 	}
 }
 
-static void seat_handle_name(void *data, struct wl_seat *wl_seat, const char *name) {
+static void seat_handle_name(void *data, struct wl_seat *wl_seat,
+		const char *name) {
 	struct wlr_wl_backend *backend = data;
 	assert(backend->seat == wl_seat);
 	// Do we need to check if seatName was previously set for name change?

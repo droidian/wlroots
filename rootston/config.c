@@ -26,7 +26,10 @@ static void usage(const char *name, int ret) {
 		"                See `rootston.ini.example` for config\n"
 		"                file documentation.\n"
 		" -E <COMMAND>   Command that will be ran at startup.\n"
-		" -D             Enable damage tracking debugging.\n",
+		" -D             Enable damage tracking debugging.\n"
+		" -l <LEVEL>     Set log verbosity, where,\n"
+		"                0:SILENT, 1:ERROR, 2:INFO, 3+:DEBUG\n"
+		"                (default: DEBUG)\n",
 		name);
 
 	exit(ret);
@@ -35,7 +38,7 @@ static void usage(const char *name, int ret) {
 static struct wlr_box *parse_geometry(const char *str) {
 	// format: {width}x{height}+{x}+{y}
 	if (strlen(str) > 255) {
-		wlr_log(L_ERROR, "cannot parse geometry string, too long");
+		wlr_log(WLR_ERROR, "cannot parse geometry string, too long");
 		return NULL;
 	}
 
@@ -88,7 +91,7 @@ static struct wlr_box *parse_geometry(const char *str) {
 	return box;
 
 invalid_input:
-	wlr_log(L_ERROR, "could not parse geometry string: %s", str);
+	wlr_log(WLR_ERROR, "could not parse geometry string: %s", str);
 	free(buf);
 	free(box);
 	return NULL;
@@ -116,6 +119,51 @@ static uint32_t parse_modifier(const char *symname) {
 	}
 }
 
+static bool parse_modeline(const char *s, drmModeModeInfo *mode) {
+	char hsync[16];
+	char vsync[16];
+	float fclock;
+
+	mode->type = DRM_MODE_TYPE_USERDEF;
+
+	if (sscanf(s, "%f %hd %hd %hd %hd %hd %hd %hd %hd %15s %15s",
+		   &fclock,
+		   &mode->hdisplay,
+		   &mode->hsync_start,
+		   &mode->hsync_end,
+		   &mode->htotal,
+		   &mode->vdisplay,
+		   &mode->vsync_start,
+		   &mode->vsync_end,
+		   &mode->vtotal, hsync, vsync) != 11) {
+		return false;
+	}
+
+	mode->clock = fclock * 1000;
+	mode->vrefresh = mode->clock * 1000.0 * 1000.0
+		/ mode->htotal / mode->vtotal;
+	if (strcasecmp(hsync, "+hsync") == 0) {
+		mode->flags |= DRM_MODE_FLAG_PHSYNC;
+	} else if (strcasecmp(hsync, "-hsync") == 0) {
+		mode->flags |= DRM_MODE_FLAG_NHSYNC;
+	} else {
+		return false;
+	}
+
+	if (strcasecmp(vsync, "+vsync") == 0) {
+		mode->flags |= DRM_MODE_FLAG_PVSYNC;
+	} else if (strcasecmp(vsync, "-vsync") == 0) {
+		mode->flags |= DRM_MODE_FLAG_NVSYNC;
+	} else {
+		return false;
+	}
+
+	snprintf(mode->name, sizeof(mode->name), "%dx%d@%d",
+		 mode->hdisplay, mode->vdisplay, mode->vrefresh / 1000);
+
+	return true;
+}
+
 void add_binding_config(struct wl_list *bindings, const char* combination,
 		const char* command) {
 	struct roots_binding_config *bc =
@@ -132,7 +180,7 @@ void add_binding_config(struct wl_list *bindings, const char* combination,
 			xkb_keysym_t sym = xkb_keysym_from_name(symname,
 				XKB_KEYSYM_NO_FLAGS);
 			if (sym == XKB_KEY_NoSymbol) {
-				wlr_log(L_ERROR, "got unknown key binding symbol: %s",
+				wlr_log(WLR_ERROR, "got unknown key binding symbol: %s",
 					symname);
 				free(bc);
 				bc = NULL;
@@ -183,7 +231,7 @@ static void config_handle_cursor(struct roots_config *config,
 		free(cc->default_image);
 		cc->default_image = strdup(value);
 	} else {
-		wlr_log(L_ERROR, "got unknown cursor config: %s", name);
+		wlr_log(WLR_ERROR, "got unknown cursor config: %s", name);
 	}
 }
 
@@ -207,7 +255,7 @@ static void config_handle_keyboard(struct roots_config *config,
 	if (strcmp(name, "meta-key") == 0) {
 		kc->meta_key = parse_modifier(value);
 		if (kc->meta_key == 0) {
-			wlr_log(L_ERROR, "got unknown meta key: %s", name);
+			wlr_log(WLR_ERROR, "got unknown meta key: %s", name);
 		}
 	} else if (strcmp(name, "rules") == 0) {
 		kc->rules = strdup(value);
@@ -224,7 +272,7 @@ static void config_handle_keyboard(struct roots_config *config,
 	} else if (strcmp(name, "repeat-delay") == 0) {
 		kc->repeat_delay = strtol(value, NULL, 10);
 	} else {
-		wlr_log(L_ERROR, "got unknown keyboard config: %s", name);
+		wlr_log(WLR_ERROR, "got unknown keyboard config: %s", name);
 	}
 }
 
@@ -246,10 +294,10 @@ static int config_ini_handler(void *user, const char *section, const char *name,
 			} else if (strcasecmp(value, "false") == 0) {
 				config->xwayland = false;
 			} else {
-				wlr_log(L_ERROR, "got unknown xwayland value: %s", value);
+				wlr_log(WLR_ERROR, "got unknown xwayland value: %s", value);
 			}
 		} else {
-			wlr_log(L_ERROR, "got unknown core config: %s", name);
+			wlr_log(WLR_ERROR, "got unknown core config: %s", name);
 		}
 	} else if (strncmp(output_prefix, section, strlen(output_prefix)) == 0) {
 		const char *output_name = section + strlen(output_prefix);
@@ -269,6 +317,7 @@ static int config_ini_handler(void *user, const char *section, const char *name,
 			oc->transform = WL_OUTPUT_TRANSFORM_NORMAL;
 			oc->scale = 1;
 			oc->enable = true;
+			wl_list_init(&oc->modes);
 			wl_list_insert(&config->outputs, &oc->link);
 		}
 
@@ -278,7 +327,7 @@ static int config_ini_handler(void *user, const char *section, const char *name,
 			} else if (strcasecmp(value, "false") == 0) {
 				oc->enable = false;
 			} else {
-				wlr_log(L_ERROR, "got invalid output enable value: %s", value);
+				wlr_log(WLR_ERROR, "got invalid output enable value: %s", value);
 			}
 		} else if (strcmp(name, "x") == 0) {
 			oc->x = strtol(value, NULL, 10);
@@ -305,7 +354,7 @@ static int config_ini_handler(void *user, const char *section, const char *name,
 			} else if (strcmp(value, "flipped-270") == 0) {
 				oc->transform = WL_OUTPUT_TRANSFORM_FLIPPED_270;
 			} else {
-				wlr_log(L_ERROR, "got unknown transform value: %s", value);
+				wlr_log(WLR_ERROR, "got unknown transform value: %s", value);
 			}
 		} else if (strcmp(name, "mode") == 0) {
 			char *end;
@@ -319,9 +368,18 @@ static int config_ini_handler(void *user, const char *section, const char *name,
 				oc->mode.refresh_rate = strtof(end, &end);
 				assert(strcmp("Hz", end) == 0);
 			}
-			wlr_log(L_DEBUG, "Configured output %s with mode %dx%d@%f",
+			wlr_log(WLR_DEBUG, "Configured output %s with mode %dx%d@%f",
 					oc->name, oc->mode.width, oc->mode.height,
 					oc->mode.refresh_rate);
+		} else if (strcmp(name, "modeline") == 0) {
+			struct roots_output_mode_config *mode = calloc(1, sizeof(*mode));
+
+			if (parse_modeline(value, &mode->info)) {
+				wl_list_insert(&oc->modes, &mode->link);
+			} else {
+				free(mode);
+				wlr_log(WLR_ERROR, "Invalid modeline: %s", value);
+			}
 		}
 	} else if (strncmp(cursor_prefix, section, strlen(cursor_prefix)) == 0) {
 		const char *seat_name = section + strlen(cursor_prefix);
@@ -363,12 +421,12 @@ static int config_ini_handler(void *user, const char *section, const char *name,
 			} else if (strcasecmp(value, "false") == 0) {
 				dc->tap_enabled = false;
 			} else {
-				wlr_log(L_ERROR,
+				wlr_log(WLR_ERROR,
 					"got unknown tap_enabled value: %s",
 					value);
 			}
 		} else {
-			wlr_log(L_ERROR, "got unknown device config: %s", name);
+			wlr_log(WLR_ERROR, "got unknown device config: %s", name);
 		}
 	} else if (strcmp(section, "keyboard") == 0) {
 		config_handle_keyboard(config, "", name, value);
@@ -379,7 +437,7 @@ static int config_ini_handler(void *user, const char *section, const char *name,
 	} else if (strcmp(section, "bindings") == 0) {
 		add_binding_config(&config->bindings, name, value);
 	} else {
-		wlr_log(L_ERROR, "got unknown config section: %s", section);
+		wlr_log(WLR_ERROR, "got unknown config section: %s", section);
 	}
 
 	return 1;
@@ -400,7 +458,8 @@ struct roots_config *roots_config_create_from_args(int argc, char *argv[]) {
 	wl_list_init(&config->bindings);
 
 	int c;
-	while ((c = getopt(argc, argv, "C:E:hD")) != -1) {
+	unsigned int log_verbosity = WLR_DEBUG;
+	while ((c = getopt(argc, argv, "C:E:hDl:")) != -1) {
 		switch (c) {
 		case 'C':
 			config->config_path = strdup(optarg);
@@ -411,11 +470,18 @@ struct roots_config *roots_config_create_from_args(int argc, char *argv[]) {
 		case 'D':
 			config->debug_damage_tracking = true;
 			break;
+		case 'l':
+			log_verbosity = strtoul(optarg, NULL, 10);
+			if (log_verbosity >= WLR_LOG_IMPORTANCE_LAST) {
+				log_verbosity = WLR_LOG_IMPORTANCE_LAST - 1;
+			}
+			break;
 		case 'h':
 		case '?':
 			usage(argv[0], c != 'h');
 		}
 	}
+	wlr_log_init(log_verbosity, NULL);
 
 	if (!config->config_path) {
 		// get the config path from the current directory
@@ -423,12 +489,12 @@ struct roots_config *roots_config_create_from_args(int argc, char *argv[]) {
 		if (getcwd(cwd, sizeof(cwd)) != NULL) {
 			char buf[MAXPATHLEN];
 			if (snprintf(buf, MAXPATHLEN, "%s/%s", cwd, "rootston.ini") >= MAXPATHLEN) {
-				wlr_log(L_ERROR, "config path too long");
+				wlr_log(WLR_ERROR, "config path too long");
 				exit(1);
 			}
 			config->config_path = strdup(buf);
 		} else {
-			wlr_log(L_ERROR, "could not get cwd");
+			wlr_log(WLR_ERROR, "could not get cwd");
 			exit(1);
 		}
 	}
@@ -436,20 +502,21 @@ struct roots_config *roots_config_create_from_args(int argc, char *argv[]) {
 	int result = ini_parse(config->config_path, config_ini_handler, config);
 
 	if (result == -1) {
-		wlr_log(L_DEBUG, "No config file found. Using sensible defaults.");
+		wlr_log(WLR_DEBUG, "No config file found. Using sensible defaults.");
 		add_binding_config(&config->bindings, "Logo+Shift+E", "exit");
 		add_binding_config(&config->bindings, "Ctrl+q", "close");
 		add_binding_config(&config->bindings, "Alt+Tab", "next_window");
+		add_binding_config(&config->bindings, "Logo+Escape", "break_pointer_constraint");
 		struct roots_keyboard_config *kc =
 			calloc(1, sizeof(struct roots_keyboard_config));
 		kc->meta_key = WLR_MODIFIER_LOGO;
 		kc->name = strdup("");
 		wl_list_insert(&config->keyboards, &kc->link);
 	} else if (result == -2) {
-		wlr_log(L_ERROR, "Could not allocate memory to parse config file");
+		wlr_log(WLR_ERROR, "Could not allocate memory to parse config file");
 		exit(1);
 	} else if (result != 0) {
-		wlr_log(L_ERROR, "Could not parse config file");
+		wlr_log(WLR_ERROR, "Could not parse config file");
 		exit(1);
 	}
 
@@ -459,6 +526,10 @@ struct roots_config *roots_config_create_from_args(int argc, char *argv[]) {
 void roots_config_destroy(struct roots_config *config) {
 	struct roots_output_config *oc, *otmp = NULL;
 	wl_list_for_each_safe(oc, otmp, &config->outputs, link) {
+		struct roots_output_mode_config *omc, *omctmp = NULL;
+		wl_list_for_each_safe(omc, omctmp, &oc->modes, link) {
+			free(omc);
+		}
 		free(oc->name);
 		free(oc);
 	}
@@ -506,7 +577,7 @@ void roots_config_destroy(struct roots_config *config) {
 
 struct roots_output_config *roots_config_get_output(struct roots_config *config,
 		struct wlr_output *output) {
-	char name[83];
+	char name[88];
 	snprintf(name, sizeof(name), "%s %s %s", output->make, output->model,
 		output->serial);
 

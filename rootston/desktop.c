@@ -1,4 +1,4 @@
-#define _POSIX_C_SOURCE 199309L
+#define _POSIX_C_SOURCE 200112L
 #include <assert.h>
 #include <math.h>
 #include <stdlib.h>
@@ -7,25 +7,30 @@
 #include <wlr/types/wlr_box.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_export_dmabuf_v1.h>
 #include <wlr/types/wlr_gamma_control.h>
-#include <wlr/types/wlr_idle.h>
+#include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
+#include <wlr/types/wlr_idle.h>
 #include <wlr/types/wlr_input_inhibitor.h>
-#include <wlr/types/wlr_layer_shell.h>
-#include <wlr/types/wlr_linux_dmabuf.h>
+#include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output_layout.h>
+#include <wlr/types/wlr_pointer_constraints_v1.h>
 #include <wlr/types/wlr_primary_selection.h>
 #include <wlr/types/wlr_server_decoration.h>
 #include <wlr/types/wlr_wl_shell.h>
 #include <wlr/types/wlr_xcursor_manager.h>
+#include <wlr/types/wlr_xdg_output_v1.h>
 #include <wlr/types/wlr_xdg_shell_v6.h>
 #include <wlr/types/wlr_xdg_shell.h>
-#include <wlr/types/wlr_xdg_output.h>
+#include <wlr/types/wlr_xdg_output_v1.h>
+#include <wlr/types/wlr_tablet_v2.h>
 #include <wlr/util/log.h>
 #include "rootston/layers.h"
 #include "rootston/seat.h"
 #include "rootston/server.h"
 #include "rootston/view.h"
+#include "rootston/virtual_keyboard.h"
 #include "rootston/xcursor.h"
 #include "wlr-layer-shell-unstable-v1-protocol.h"
 
@@ -67,8 +72,8 @@ enum roots_deco_part view_get_deco_part(struct roots_view *view, double sx,
 		return ROOTS_DECO_PART_NONE;
 	}
 
-	int sw = view->wlr_surface->current->width;
-	int sh = view->wlr_surface->current->height;
+	int sw = view->wlr_surface->current.width;
+	int sh = view->wlr_surface->current.height;
 	int bw = view->border_width;
 	int titlebar_h = view->titlebar_height;
 
@@ -419,6 +424,7 @@ struct roots_subsurface *subsurface_create(struct roots_view *view,
 	view_child_init(&subsurface->view_child, view, wlr_subsurface->surface);
 	subsurface->destroy.notify = subsurface_handle_destroy;
 	wl_signal_add(&wlr_subsurface->events.destroy, &subsurface->destroy);
+	input_update_cursor_focus(view->desktop->server->input);
 	return subsurface;
 }
 
@@ -464,6 +470,7 @@ void view_map(struct roots_view *view, struct wlr_surface *surface) {
 
 	wl_list_insert(&view->desktop->views, &view->link);
 	view_damage_whole(view);
+	input_update_cursor_focus(view->desktop->server->input);
 }
 
 void view_unmap(struct roots_view *view) {
@@ -546,6 +553,23 @@ void view_update_size(struct roots_view *view, uint32_t width, uint32_t height) 
 	view_damage_whole(view);
 }
 
+void view_update_decorated(struct roots_view *view, bool decorated) {
+	if (view->decorated == decorated) {
+		return;
+	}
+
+	view_damage_whole(view);
+	view->decorated = decorated;
+	if (decorated) {
+		view->border_width = 4;
+		view->titlebar_height = 12;
+	} else {
+		view->border_width = 0;
+		view->titlebar_height = 0;
+	}
+	view_damage_whole(view);
+}
+
 static bool view_at(struct roots_view *view, double lx, double ly,
 		struct wlr_surface **surface, double *sx, double *sy) {
 	if (view->type == ROOTS_WL_SHELL_VIEW &&
@@ -556,7 +580,7 @@ static bool view_at(struct roots_view *view, double lx, double ly,
 	double view_sx = lx - view->x;
 	double view_sy = ly - view->y;
 
-	struct wlr_surface_state *state = view->wlr_surface->current;
+	struct wlr_surface_state *state = &view->wlr_surface->current;
 	struct wlr_box box = {
 		.x = 0, .y = 0,
 		.width = state->width, .height = state->height,
@@ -644,7 +668,7 @@ static struct wlr_surface *layer_surface_at(struct roots_output *output,
 		double _sx = ox - roots_surface->geo.x;
 		double _sy = oy - roots_surface->geo.y;
 
-		struct wlr_surface *sub = wlr_layer_surface_surface_at(
+		struct wlr_surface *sub = wlr_layer_surface_v1_surface_at(
 			roots_surface->layer_surface, _sx, _sy, sx, sy);
 
 		if (sub) {
@@ -753,9 +777,65 @@ static void input_inhibit_deactivate(struct wl_listener *listener, void *data) {
 	}
 }
 
+static void handle_constraint_destroy(struct wl_listener *listener,
+		void *data) {
+	struct roots_pointer_constraint *constraint =
+		wl_container_of(listener, constraint, destroy);
+	struct wlr_pointer_constraint_v1 *wlr_constraint = data;
+	struct roots_seat *seat = wlr_constraint->seat->data;
+
+	wl_list_remove(&constraint->destroy.link);
+
+	if (seat->cursor->active_constraint == wlr_constraint) {
+		wl_list_remove(&seat->cursor->constraint_commit.link);
+		wl_list_init(&seat->cursor->constraint_commit.link);
+		seat->cursor->active_constraint = NULL;
+
+		if (wlr_constraint->current.committed &
+				WLR_POINTER_CONSTRAINT_V1_STATE_CURSOR_HINT &&
+				seat->cursor->pointer_view) {
+			double sx = wlr_constraint->current.cursor_hint.x;
+			double sy = wlr_constraint->current.cursor_hint.y;
+
+			struct roots_view *view = seat->cursor->pointer_view->view;
+			rotate_child_position(&sx, &sy, 0, 0, view->width, view->height,
+				view->rotation);
+			double lx = view->x + sx;
+			double ly = view->y + sy;
+
+			wlr_cursor_warp(seat->cursor->cursor, NULL, lx, ly);
+		}
+	}
+
+	free(constraint);
+}
+
+static void handle_pointer_constraint(struct wl_listener *listener,
+		void *data) {
+	struct wlr_pointer_constraint_v1 *wlr_constraint = data;
+	struct roots_seat *seat = wlr_constraint->seat->data;
+
+	struct roots_pointer_constraint *constraint =
+		calloc(1, sizeof(struct roots_pointer_constraint));
+	constraint->constraint = wlr_constraint;
+
+	constraint->destroy.notify = handle_constraint_destroy;
+	wl_signal_add(&wlr_constraint->events.destroy, &constraint->destroy);
+
+	double sx, sy;
+	struct wlr_surface *surface = desktop_surface_at(
+		seat->input->server->desktop,
+		seat->cursor->cursor->x, seat->cursor->cursor->y, &sx, &sy, NULL);
+
+	if (surface == wlr_constraint->surface) {
+		assert(!seat->cursor->active_constraint);
+		roots_cursor_constrain(seat->cursor, wlr_constraint, sx, sy);
+	}
+}
+
 struct roots_desktop *desktop_create(struct roots_server *server,
 		struct roots_config *config) {
-	wlr_log(L_DEBUG, "Initializing roots desktop");
+	wlr_log(WLR_DEBUG, "Initializing roots desktop");
 
 	struct roots_desktop *desktop = calloc(1, sizeof(struct roots_desktop));
 	if (desktop == NULL) {
@@ -772,7 +852,7 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 	desktop->config = config;
 
 	desktop->layout = wlr_output_layout_create();
-	wlr_xdg_output_manager_create(server->wl_display, desktop->layout);
+	wlr_xdg_output_manager_v1_create(server->wl_display, desktop->layout);
 	desktop->layout_change.notify = handle_layout_change;
 	wl_signal_add(&desktop->layout->events.change, &desktop->layout_change);
 
@@ -794,12 +874,13 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 		&desktop->wl_shell_surface);
 	desktop->wl_shell_surface.notify = handle_wl_shell_surface;
 
-	desktop->layer_shell = wlr_layer_shell_create(server->wl_display);
+	desktop->layer_shell = wlr_layer_shell_v1_create(server->wl_display);
 	wl_signal_add(&desktop->layer_shell->events.new_surface,
 		&desktop->layer_shell_surface);
 	desktop->layer_shell_surface.notify = handle_layer_shell_surface;
 
-#ifdef WLR_HAS_XWAYLAND
+	desktop->tablet_v2 = wlr_tablet_v2_create(server->wl_display);
+
 	const char *cursor_theme = NULL;
 	const char *cursor_default = ROOTS_XCURSOR_DEFAULT;
 	struct roots_cursor_config *cc =
@@ -811,10 +892,19 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 		}
 	}
 
+	char cursor_size_fmt[16];
+	snprintf(cursor_size_fmt, sizeof(cursor_size_fmt),
+		"%d", ROOTS_XCURSOR_SIZE);
+	setenv("XCURSOR_SIZE", cursor_size_fmt, 1);
+	if (cursor_theme != NULL) {
+		setenv("XCURSOR_THEME", cursor_theme, 1);
+	}
+
+#ifdef WLR_HAS_XWAYLAND
 	desktop->xcursor_manager = wlr_xcursor_manager_create(cursor_theme,
 		ROOTS_XCURSOR_SIZE);
 	if (desktop->xcursor_manager == NULL) {
-		wlr_log(L_ERROR, "Cannot create XCursor manager for theme %s",
+		wlr_log(WLR_ERROR, "Cannot create XCursor manager for theme %s",
 			cursor_theme);
 		free(desktop);
 		return NULL;
@@ -828,7 +918,7 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 		desktop->xwayland_surface.notify = handle_xwayland_surface;
 
 		if (wlr_xcursor_manager_load(desktop->xcursor_manager, 1)) {
-			wlr_log(L_ERROR, "Cannot load XWayland XCursor theme");
+			wlr_log(WLR_ERROR, "Cannot load XWayland XCursor theme");
 		}
 		struct wlr_xcursor *xcursor = wlr_xcursor_manager_get_xcursor(
 			desktop->xcursor_manager, cursor_default, 1);
@@ -843,7 +933,11 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 
 	desktop->gamma_control_manager = wlr_gamma_control_manager_create(
 		server->wl_display);
+	desktop->gamma_control_manager_v1 = wlr_gamma_control_manager_v1_create(
+		server->wl_display);
 	desktop->screenshooter = wlr_screenshooter_create(server->wl_display);
+	desktop->export_dmabuf_manager_v1 =
+		wlr_export_dmabuf_manager_v1_create(server->wl_display);
 	desktop->server_decoration_manager =
 		wlr_server_decoration_manager_create(server->wl_display);
 	wlr_server_decoration_manager_set_default_mode(
@@ -858,13 +952,34 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 		wlr_input_inhibit_manager_create(server->wl_display);
 	desktop->input_inhibit_activate.notify = input_inhibit_activate;
 	wl_signal_add(&desktop->input_inhibit->events.activate,
-			&desktop->input_inhibit_activate);
+		&desktop->input_inhibit_activate);
 	desktop->input_inhibit_deactivate.notify = input_inhibit_deactivate;
 	wl_signal_add(&desktop->input_inhibit->events.deactivate,
-			&desktop->input_inhibit_deactivate);
+		&desktop->input_inhibit_deactivate);
 
-	desktop->linux_dmabuf = wlr_linux_dmabuf_create(server->wl_display,
-		server->renderer);
+	desktop->virtual_keyboard = wlr_virtual_keyboard_manager_v1_create(
+		server->wl_display);
+	wl_signal_add(&desktop->virtual_keyboard->events.new_virtual_keyboard,
+		&desktop->virtual_keyboard_new);
+	desktop->virtual_keyboard_new.notify = handle_virtual_keyboard;
+
+	desktop->screencopy = wlr_screencopy_manager_v1_create(server->wl_display);
+
+	desktop->xdg_decoration_manager =
+		wlr_xdg_decoration_manager_v1_create(server->wl_display);
+	wl_signal_add(&desktop->xdg_decoration_manager->events.new_toplevel_decoration,
+		&desktop->xdg_toplevel_decoration);
+	desktop->xdg_toplevel_decoration.notify = handle_xdg_toplevel_decoration;
+
+	desktop->pointer_constraints =
+		wlr_pointer_constraints_v1_create(server->wl_display);
+	desktop->pointer_constraint.notify = handle_pointer_constraint;
+	wl_signal_add(&desktop->pointer_constraints->events.new_constraint,
+		&desktop->pointer_constraint);
+
+	desktop->presentation =
+		wlr_presentation_create(server->wl_display, server->backend);
+
 	return desktop;
 }
 

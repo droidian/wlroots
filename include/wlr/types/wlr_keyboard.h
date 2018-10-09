@@ -1,3 +1,11 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_TYPES_WLR_KEYBOARD_H
 #define WLR_TYPES_WLR_KEYBOARD_H
 
@@ -42,7 +50,7 @@ struct wlr_keyboard_modifiers {
 struct wlr_keyboard {
 	const struct wlr_keyboard_impl *impl;
 
-	int keymap_fd;
+	char *keymap_string;
 	size_t keymap_size;
 	struct xkb_keymap *keymap;
 	struct xkb_state *xkb_state;
@@ -59,7 +67,20 @@ struct wlr_keyboard {
 	} repeat_info;
 
 	struct {
+		/**
+		 * The `key` event signals with a `wlr_event_keyboard_key` event that a
+		 * key has been pressed or released on the keyboard. This event is
+		 * emitted before the xkb state of the keyboard has been updated
+		 * (including modifiers).
+		 */
 		struct wl_signal key;
+
+		/**
+		 * The `modifiers` event signals that the modifier state of the
+		 * `wlr_keyboard` has been updated. At this time, you can read the
+		 * modifier state of the `wlr_keyboard` and handle the updated state by
+		 * sending it to clients.
+		 */
 		struct wl_signal modifiers;
 		struct wl_signal keymap;
 		struct wl_signal repeat_info;
@@ -76,7 +97,7 @@ enum wlr_key_state {
 struct wlr_event_keyboard_key {
 	uint32_t time_msec;
 	uint32_t keycode;
-	bool update_state;
+	bool update_state; // if backend doesn't update modifiers on its own
 	enum wlr_key_state state;
 };
 

@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <dev/evdev/input.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -15,6 +16,7 @@
 #include <wayland-server.h>
 #include <wlr/backend/session/interface.h>
 #include <wlr/util/log.h>
+#include <xf86drm.h>
 #include "backend/session/direct-ipc.h"
 #include "util/signal.h"
 
@@ -23,6 +25,7 @@ const struct session_impl session_direct;
 struct direct_session {
 	struct wlr_session base;
 	int tty_fd;
+	int old_tty;
 	int old_kbmode;
 	int sock;
 	pid_t child;
@@ -30,76 +33,105 @@ struct direct_session {
 	struct wl_event_source *vt_source;
 };
 
+static struct direct_session *direct_session_from_session(
+		struct wlr_session *base) {
+	assert(base->impl == &session_direct);
+	return (struct direct_session *)base;
+}
+
 static int direct_session_open(struct wlr_session *base, const char *path) {
-	struct direct_session *session = wl_container_of(base, session, base);
+	struct direct_session *session = direct_session_from_session(base);
 
 	int fd = direct_ipc_open(session->sock, path);
 	if (fd < 0) {
-		wlr_log(L_ERROR, "Failed to open %s: %s%s", path, strerror(-fd),
+		wlr_log(WLR_ERROR, "Failed to open %s: %s%s", path, strerror(-fd),
 			fd == -EINVAL ? "; is another display server running?" : "");
 		return fd;
-	}
-
-	struct stat st;
-	if (fstat(fd, &st) < 0) {
-		close(fd);
-		return -errno;
 	}
 
 	return fd;
 }
 
 static void direct_session_close(struct wlr_session *base, int fd) {
-	struct direct_session *session = wl_container_of(base, session, base);
+	struct direct_session *session = direct_session_from_session(base);
 
-	struct stat st;
-	if (fstat(fd, &st) < 0) {
-		wlr_log_errno(L_ERROR, "Stat failed");
-		close(fd);
-		return;
+	int ev;
+	struct drm_version dv = {0};
+	if (ioctl(fd, DRM_IOCTL_VERSION, &dv) == 0) {
+		direct_ipc_dropmaster(session->sock, fd);
+	} else if (ioctl(fd, EVIOCGVERSION, &ev) == 0) {
+		ioctl(fd, EVIOCREVOKE, 0);
 	}
 
 	close(fd);
 }
 
 static bool direct_change_vt(struct wlr_session *base, unsigned vt) {
-	struct direct_session *session = wl_container_of(base, session, base);
+	struct direct_session *session = direct_session_from_session(base);
+
+	// Only seat0 has VTs associated with it
+	if (strcmp(session->base.seat, "seat0") != 0) {
+		return true;
+	}
+
 	return ioctl(session->tty_fd, VT_ACTIVATE, (int)vt) == 0;
 }
 
 static void direct_session_destroy(struct wlr_session *base) {
-	struct direct_session *session = wl_container_of(base, session, base);
-	struct vt_mode mode = {
-		.mode = VT_AUTO,
-	};
+	struct direct_session *session = direct_session_from_session(base);
 
-	errno = 0;
+	if (strcmp(session->base.seat, "seat0") == 0) {
+		struct vt_mode mode = {
+			.mode = VT_AUTO,
+		};
 
-	ioctl(session->tty_fd, KDSKBMODE, session->old_kbmode);
-	ioctl(session->tty_fd, KDSETMODE, KD_TEXT);
-	ioctl(session->tty_fd, VT_SETMODE, &mode);
+		errno = 0;
 
-	if (errno) {
-		wlr_log(L_ERROR, "Failed to restore tty");
+		ioctl(session->tty_fd, KDSKBMODE, session->old_kbmode);
+		ioctl(session->tty_fd, KDSETMODE, KD_TEXT);
+		ioctl(session->tty_fd, VT_SETMODE, &mode);
+
+		ioctl(session->tty_fd, VT_ACTIVATE, session->old_tty);
+
+		if (errno) {
+			wlr_log(WLR_ERROR, "Failed to restore tty");
+		}
+
+		wl_event_source_remove(session->vt_source);
+		close(session->tty_fd);
 	}
 
 	direct_ipc_finish(session->sock, session->child);
 	close(session->sock);
 
-	wl_event_source_remove(session->vt_source);
-	close(session->tty_fd);
 	free(session);
 }
 
 static int vt_handler(int signo, void *data) {
 	struct direct_session *session = data;
+	struct drm_version dv = {0};
+	struct wlr_device *dev;
 
 	if (session->base.active) {
 		session->base.active = false;
 		wlr_signal_emit_safe(&session->base.session_signal, session);
+
+		wl_list_for_each(dev, &session->base.devices, link) {
+			if (ioctl(dev->fd, DRM_IOCTL_VERSION, &dv) == 0) {
+				direct_ipc_dropmaster(session->sock, dev->fd);
+			}
+		}
+
 		ioctl(session->tty_fd, VT_RELDISP, 1);
 	} else {
 		ioctl(session->tty_fd, VT_RELDISP, VT_ACKACQ);
+
+		wl_list_for_each(dev, &session->base.devices, link) {
+			if (ioctl(dev->fd, DRM_IOCTL_VERSION, &dv) == 0) {
+				direct_ipc_setmaster(session->sock, dev->fd);
+			}
+		}
+
 		session->base.active = true;
 		wlr_signal_emit_safe(&session->base.session_signal, session);
 	}
@@ -108,23 +140,27 @@ static int vt_handler(int signo, void *data) {
 }
 
 static bool setup_tty(struct direct_session *session, struct wl_display *display) {
-	int fd = -1, tty = -1, tty0_fd = -1;
+	int fd = -1, tty = -1, tty0_fd = -1, old_tty = 1;
 	if ((tty0_fd = open("/dev/ttyv0", O_RDWR | O_CLOEXEC)) < 0) {
-		wlr_log_errno(L_ERROR, "Could not open /dev/ttyv0 to find a free vt");
+		wlr_log_errno(WLR_ERROR, "Could not open /dev/ttyv0 to find a free vt");
+		goto error;
+	}
+	if (ioctl(tty0_fd, VT_GETACTIVE, &old_tty) != 0) {
+		wlr_log_errno(WLR_ERROR, "Could not get active vt");
 		goto error;
 	}
 	if (ioctl(tty0_fd, VT_OPENQRY, &tty) != 0) {
-		wlr_log_errno(L_ERROR, "Could not find a free vt");
+		wlr_log_errno(WLR_ERROR, "Could not find a free vt");
 		goto error;
 	}
 	close(tty0_fd);
 	char tty_path[64];
 	snprintf(tty_path, sizeof(tty_path), "/dev/ttyv%d", tty - 1);
-	wlr_log(L_INFO, "Using tty %s", tty_path);
+	wlr_log(WLR_INFO, "Using tty %s", tty_path);
 	fd = open(tty_path, O_RDWR | O_NOCTTY | O_CLOEXEC);
 
 	if (fd == -1) {
-		wlr_log_errno(L_ERROR, "Cannot open tty");
+		wlr_log_errno(WLR_ERROR, "Cannot open tty");
 		return false;
 	}
 
@@ -133,17 +169,18 @@ static bool setup_tty(struct direct_session *session, struct wl_display *display
 
 	int old_kbmode;
 	if (ioctl(fd, KDGKBMODE, &old_kbmode)) {
-		wlr_log_errno(L_ERROR, "Failed to read tty %d keyboard mode", tty);
+		wlr_log_errno(WLR_ERROR, "Failed to read tty %d keyboard mode", tty);
 		goto error;
 	}
 
 	if (ioctl(fd, KDSKBMODE, K_CODE)) {
-		wlr_log_errno(L_ERROR, "Failed to set keyboard mode K_CODE on tty %d", tty);
+		wlr_log_errno(WLR_ERROR,
+			"Failed to set keyboard mode K_CODE on tty %d", tty);
 		goto error;
 	}
 
 	if (ioctl(fd, KDSETMODE, KD_GRAPHICS)) {
-		wlr_log_errno(L_ERROR, "Failed to set graphics mode on tty %d", tty);
+		wlr_log_errno(WLR_ERROR, "Failed to set graphics mode on tty %d", tty);
 		goto error;
 	}
 
@@ -155,7 +192,7 @@ static bool setup_tty(struct direct_session *session, struct wl_display *display
 	};
 
 	if (ioctl(fd, VT_SETMODE, &mode) < 0) {
-		wlr_log(L_ERROR, "Failed to take control of tty %d", tty);
+		wlr_log(WLR_ERROR, "Failed to take control of tty %d", tty);
 		goto error;
 	}
 
@@ -168,13 +205,16 @@ static bool setup_tty(struct direct_session *session, struct wl_display *display
 
 	session->base.vtnr = tty;
 	session->tty_fd = fd;
+	session->old_tty = old_tty;
 	session->old_kbmode = old_kbmode;
 
 	return true;
 
 error:
-	// Drop back to tty 1, better than hanging in a useless blank console
-	ioctl(fd, VT_ACTIVATE, 1);
+	// In case we could not get the last active one, drop back to tty 1,
+	// better than hanging in a useless blank console. Otherwise activate the
+	// last active.
+	ioctl(fd, VT_ACTIVATE, old_tty);
 	close(fd);
 	return false;
 }
@@ -182,7 +222,7 @@ error:
 static struct wlr_session *direct_session_create(struct wl_display *disp) {
 	struct direct_session *session = calloc(1, sizeof(*session));
 	if (!session) {
-		wlr_log_errno(L_ERROR, "Allocation failed");
+		wlr_log_errno(WLR_ERROR, "Allocation failed");
 		return NULL;
 	}
 
@@ -191,13 +231,23 @@ static struct wlr_session *direct_session_create(struct wl_display *disp) {
 		goto error_session;
 	}
 
-	if (!setup_tty(session, disp)) {
-		goto error_ipc;
+	const char *seat = getenv("XDG_SEAT");
+	if (!seat) {
+		seat = "seat0";
 	}
 
-	wlr_log(L_INFO, "Successfully loaded direct session");
+	if (strcmp(seat, "seat0") == 0) {
+		if (!setup_tty(session, disp)) {
+			goto error_ipc;
+		}
+	} else {
+		session->base.vtnr = 0;
+		session->tty_fd = -1;
+	}
 
-	snprintf(session->base.seat, sizeof(session->base.seat), "seat0");
+	wlr_log(WLR_INFO, "Successfully loaded direct session");
+
+	snprintf(session->base.seat, sizeof(session->base.seat), "%s", seat);
 	session->base.impl = &session_direct;
 	return &session->base;
 

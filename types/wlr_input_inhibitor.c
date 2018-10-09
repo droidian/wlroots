@@ -4,6 +4,7 @@
 #include <wayland-server.h>
 #include "wlr/types/wlr_input_inhibitor.h"
 #include "wlr-input-inhibitor-unstable-v1-protocol.h"
+#include "util/signal.h"
 
 static const struct zwlr_input_inhibit_manager_v1_interface inhibit_manager_implementation;
 static struct zwlr_input_inhibitor_v1_interface input_inhibitor_implementation;
@@ -26,7 +27,7 @@ static void input_inhibit_manager_deactivate(
 	}
 	manager->active_client = NULL;
 	manager->active_inhibitor = NULL;
-	wl_signal_emit(&manager->events.deactivate, manager);
+	wlr_signal_emit_safe(&manager->events.deactivate, manager);
 }
 
 static void input_inhibitor_destroy(struct wl_client *client,
@@ -70,7 +71,7 @@ static void inhibit_manager_get_inhibitor(struct wl_client *client,
 	manager->active_client = client;
 	manager->active_inhibitor = wl_resource;
 
-	wl_signal_emit(&manager->events.activate, manager);
+	wlr_signal_emit_safe(&manager->events.activate, manager);
 }
 
 static const struct zwlr_input_inhibit_manager_v1_interface inhibit_manager_implementation = {
@@ -111,8 +112,9 @@ void wlr_input_inhibit_manager_destroy(
 		input_inhibitor_destroy(manager->active_client,
 				manager->active_inhibitor);
 	}
+	wlr_signal_emit_safe(&manager->events.destroy, manager);
 	wl_list_remove(&manager->display_destroy.link);
-	wl_global_destroy(manager->wl_global);
+	wl_global_destroy(manager->global);
 	free(manager);
 }
 
@@ -131,10 +133,10 @@ struct wlr_input_inhibit_manager *wlr_input_inhibit_manager_create(
 		return NULL;
 	}
 
-	manager->wl_global = wl_global_create(display,
+	manager->global = wl_global_create(display,
 			&zwlr_input_inhibit_manager_v1_interface,
 			1, manager, inhibit_manager_bind);
-	if (manager->wl_global == NULL){
+	if (manager->global == NULL){
 		wl_list_remove(&manager->display_destroy.link);
 		free(manager);
 		return NULL;
@@ -142,6 +144,7 @@ struct wlr_input_inhibit_manager *wlr_input_inhibit_manager_create(
 
 	wl_signal_init(&manager->events.activate);
 	wl_signal_init(&manager->events.deactivate);
+	wl_signal_init(&manager->events.destroy);
 
 	manager->display_destroy.notify = handle_display_destroy;
 	wl_display_add_destroy_listener(display, &manager->display_destroy);

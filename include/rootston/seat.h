@@ -10,14 +10,14 @@ struct roots_seat {
 	struct roots_input *input;
 	struct wlr_seat *seat;
 	struct roots_cursor *cursor;
-	struct wl_list link;
+	struct wl_list link; // roots_input::seats
 
 	// coordinates of the first touch point if it exists
 	int32_t touch_id;
 	double touch_x, touch_y;
 
 	// If the focused layer is set, views cannot receive keyboard focus
-	struct wlr_layer_surface *focused_layer;
+	struct wlr_layer_surface_v1 *focused_layer;
 
 	// If non-null, only this client can receive input events
 	struct wl_client *exclusive_client;
@@ -30,7 +30,8 @@ struct roots_seat {
 	struct wl_list keyboards;
 	struct wl_list pointers;
 	struct wl_list touch;
-	struct wl_list tablet_tools;
+	struct wl_list tablets;
+	struct wl_list tablet_pads;
 
 	struct wl_listener new_drag_icon;
 	struct wl_listener destroy;
@@ -59,6 +60,7 @@ struct roots_drag_icon {
 
 	struct wl_listener surface_commit;
 	struct wl_listener map;
+	struct wl_listener unmap;
 	struct wl_listener destroy;
 };
 
@@ -76,9 +78,11 @@ struct roots_touch {
 	struct wl_list link;
 };
 
-struct roots_tablet_tool {
+struct roots_tablet {
 	struct roots_seat *seat;
 	struct wlr_input_device *device;
+	struct wlr_tablet_v2_tablet *tablet_v2;
+
 	struct wl_listener device_destroy;
 	struct wl_listener axis;
 	struct wl_listener proximity;
@@ -87,14 +91,49 @@ struct roots_tablet_tool {
 	struct wl_list link;
 };
 
+struct roots_tablet_pad {
+	struct wl_list link;
+	struct wlr_tablet_v2_tablet_pad *tablet_v2_pad;
+
+	struct roots_seat *seat;
+	struct wlr_input_device *device;
+
+	struct wl_listener device_destroy;
+	struct wl_listener attach;
+	struct wl_listener button;
+	struct wl_listener ring;
+	struct wl_listener strip;
+
+	struct roots_tablet *tablet;
+	struct wl_listener tablet_destroy;
+};
+
+struct roots_tablet_tool {
+	struct wl_list link;
+	struct wl_list tool_link;
+	struct wlr_tablet_v2_tablet_tool *tablet_v2_tool;
+
+	struct roots_seat *seat;
+	double tilt_x, tilt_y;
+
+	struct wl_listener set_cursor;
+	struct wl_listener tool_destroy;
+
+	struct roots_tablet *current_tablet;
+	struct wl_listener tablet_destroy;
+};
+
+struct roots_pointer_constraint {
+	struct wlr_pointer_constraint_v1 *constraint;
+
+	struct wl_listener destroy;
+};
+
 struct roots_seat *roots_seat_create(struct roots_input *input, char *name);
 
 void roots_seat_destroy(struct roots_seat *seat);
 
 void roots_seat_add_device(struct roots_seat *seat,
-		struct wlr_input_device *device);
-
-void roots_seat_remove_device(struct roots_seat *seat,
 		struct wlr_input_device *device);
 
 void roots_seat_configure_cursor(struct roots_seat *seat);
@@ -108,7 +147,7 @@ struct roots_view *roots_seat_get_focus(struct roots_seat *seat);
 void roots_seat_set_focus(struct roots_seat *seat, struct roots_view *view);
 
 void roots_seat_set_focus_layer(struct roots_seat *seat,
-		struct wlr_layer_surface *layer);
+		struct wlr_layer_surface_v1 *layer);
 
 void roots_seat_cycle_focus(struct roots_seat *seat);
 

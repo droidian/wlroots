@@ -1,3 +1,11 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_TYPES_WLR_SERVER_DECORATION_H
 #define WLR_TYPES_WLR_SERVER_DECORATION_H
 
@@ -27,8 +35,8 @@ enum wlr_server_decoration_manager_mode {
 };
 
 struct wlr_server_decoration_manager {
-	struct wl_global *wl_global;
-	struct wl_list wl_resources;
+	struct wl_global *global;
+	struct wl_list resources;
 	struct wl_list decorations; // wlr_server_decoration::link
 
 	uint32_t default_mode; // enum wlr_server_decoration_manager_mode
@@ -37,6 +45,7 @@ struct wlr_server_decoration_manager {
 
 	struct {
 		struct wl_signal new_decoration;
+		struct wl_signal destroy;
 	} events;
 
 	void *data;

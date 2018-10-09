@@ -1,3 +1,11 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_TYPES_WLR_SURFACE_H
 #define WLR_TYPES_WLR_SURFACE_H
 
@@ -8,38 +16,105 @@
 #include <wayland-server.h>
 #include <wlr/types/wlr_output.h>
 
-struct wlr_frame_callback {
-	struct wl_resource *resource;
-	struct wl_list link;
+enum wlr_surface_state_field {
+	WLR_SURFACE_STATE_BUFFER = 1,
+	WLR_SURFACE_STATE_SURFACE_DAMAGE = 2,
+	WLR_SURFACE_STATE_BUFFER_DAMAGE = 4,
+	WLR_SURFACE_STATE_OPAQUE_REGION = 8,
+	WLR_SURFACE_STATE_INPUT_REGION = 16,
+	WLR_SURFACE_STATE_TRANSFORM = 32,
+	WLR_SURFACE_STATE_SCALE = 64,
+	WLR_SURFACE_STATE_FRAME_CALLBACK_LIST = 128,
 };
 
-#define WLR_SURFACE_INVALID_BUFFER 1
-#define WLR_SURFACE_INVALID_SURFACE_DAMAGE 2
-#define WLR_SURFACE_INVALID_BUFFER_DAMAGE 4
-#define WLR_SURFACE_INVALID_OPAQUE_REGION 8
-#define WLR_SURFACE_INVALID_INPUT_REGION 16
-#define WLR_SURFACE_INVALID_TRANSFORM 32
-#define WLR_SURFACE_INVALID_SCALE 64
-#define WLR_SURFACE_INVALID_SUBSURFACE_POSITION 128
-#define WLR_SURFACE_INVALID_FRAME_CALLBACK_LIST 256
-
 struct wlr_surface_state {
-	uint32_t invalid;
-	struct wl_resource *buffer;
-	struct wl_listener buffer_destroy_listener;
-	int32_t sx, sy;
+	uint32_t committed; // enum wlr_surface_state_field
+
+	struct wl_resource *buffer_resource;
+	int32_t dx, dy; // relative to previous position
 	pixman_region32_t surface_damage, buffer_damage;
 	pixman_region32_t opaque, input;
 	enum wl_output_transform transform;
 	int32_t scale;
-	int width, height;
+	struct wl_list frame_callback_list; // wl_resource
+
+	int width, height; // in surface-local coordinates
 	int buffer_width, buffer_height;
 
-	struct {
-		int32_t x, y;
-	} subsurface_position;
+	struct wl_listener buffer_destroy;
+};
 
-	struct wl_list frame_callback_list; // wl_surface.frame
+struct wlr_surface_role {
+	const char *name;
+	void (*commit)(struct wlr_surface *surface);
+	void (*precommit)(struct wlr_surface *surface);
+};
+
+struct wlr_surface {
+	struct wl_resource *resource;
+	struct wlr_renderer *renderer;
+	/**
+	 * The surface's buffer, if any. A surface has an attached buffer when it
+	 * commits with a non-null buffer in its pending state. A surface will not
+	 * have a buffer if it has never committed one, has committed a null buffer,
+	 * or something went wrong with uploading the buffer.
+	 */
+	struct wlr_buffer *buffer;
+	/**
+	 * The buffer position, in surface-local units.
+	 */
+	int sx, sy;
+	/**
+	 * The last commit's buffer damage, in buffer-local coordinates. This
+	 * contains both the damage accumulated by the client via
+	 * `wlr_surface_state.surface_damage` and `wlr_surface_state.buffer_damage`.
+	 * If the buffer has changed its size or moved, the whole buffer is
+	 * damaged.
+	 *
+	 * This region needs to be scaled and transformed into output coordinates,
+	 * just like the buffer's texture.
+	 */
+	pixman_region32_t buffer_damage;
+	/**
+	 * The current opaque region, in surface-local coordinates. It is clipped to
+	 * the surface bounds. If the surface's buffer is using a fully opaque
+	 * format, this is set to the whole surface.
+	 */
+	pixman_region32_t opaque_region;
+	/**
+	 * The current input region, in surface-local coordinates. It is clipped to
+	 * the surface bounds.
+	 */
+	pixman_region32_t input_region;
+	/**
+	 * `current` contains the current, committed surface state. `pending`
+	 * accumulates state changes from the client between commits and shouldn't
+	 * be accessed by the compositor directly. `previous` contains the state of
+	 * the previous commit.
+	 */
+	struct wlr_surface_state current, pending, previous;
+
+	const struct wlr_surface_role *role; // the lifetime-bound role or NULL
+	void *role_data; // role-specific data
+
+	struct {
+		struct wl_signal commit;
+		struct wl_signal new_subsurface;
+		struct wl_signal destroy;
+	} events;
+
+	struct wl_list subsurfaces; // wlr_subsurface::parent_link
+
+	// wlr_subsurface::parent_pending_link
+	struct wl_list subsurface_pending_list;
+
+	struct wl_listener renderer_destroy;
+
+	void *data;
+};
+
+struct wlr_subsurface_state {
+	int32_t x, y;
 };
 
 struct wlr_subsurface {
@@ -47,7 +122,9 @@ struct wlr_subsurface {
 	struct wlr_surface *surface;
 	struct wlr_surface *parent;
 
-	struct wlr_surface_state *cached;
+	struct wlr_subsurface_state current, pending;
+
+	struct wlr_surface_state cached;
 	bool has_cache;
 
 	bool synchronized;
@@ -62,34 +139,6 @@ struct wlr_subsurface {
 	struct {
 		struct wl_signal destroy;
 	} events;
-};
-
-struct wlr_surface {
-	struct wl_resource *resource;
-	struct wlr_renderer *renderer;
-	struct wlr_texture *texture;
-	struct wlr_surface_state *current, *pending;
-	const char *role; // the lifetime-bound role or null
-
-	float buffer_to_surface_matrix[9];
-	float surface_to_buffer_matrix[9];
-
-	struct {
-		struct wl_signal commit;
-		struct wl_signal new_subsurface;
-		struct wl_signal destroy;
-	} events;
-
-	// surface commit callback for the role that runs before all others
-	void (*role_committed)(struct wlr_surface *surface, void *role_data);
-	void *role_data;
-
-	struct wl_list subsurfaces; // wlr_subsurface::parent_link
-
-	// wlr_subsurface::parent_pending_link
-	struct wl_list subsurface_pending_list;
-
-	struct wl_listener renderer_destroy;
 
 	void *data;
 };
@@ -111,7 +160,8 @@ struct wlr_surface *wlr_surface_create(struct wl_client *client,
  * Set the lifetime role for this surface. Returns 0 on success or -1 if the
  * role cannot be set.
  */
-int wlr_surface_set_role(struct wlr_surface *surface, const char *role,
+bool wlr_surface_set_role(struct wlr_surface *surface,
+		const struct wlr_surface_role *role, void *role_data,
 		struct wl_resource *error_resource, uint32_t error_code);
 
 /**
@@ -121,6 +171,13 @@ int wlr_surface_set_role(struct wlr_surface *surface, const char *role,
  * committed a null buffer, or something went wrong with uploading the buffer.
  */
 bool wlr_surface_has_buffer(struct wlr_surface *surface);
+
+/**
+ * Get the texture of the buffer currently attached to this surface. Returns
+ * NULL if no buffer is currently attached or if something went wrong with
+ * uploading the buffer.
+ */
+struct wlr_texture *wlr_surface_get_texture(struct wlr_surface *surface);
 
 /**
  * Create a new subsurface resource with the provided new ID. If `resource_list`
@@ -159,13 +216,13 @@ void wlr_surface_send_leave(struct wlr_surface *surface,
 void wlr_surface_send_frame_done(struct wlr_surface *surface,
 		const struct timespec *when);
 
+struct wlr_box;
 /**
- * Set a callback for surface commit that runs before all the other callbacks.
- * This is intended for use by the surface role.
+ * Get the bounding box that contains the surface and all subsurfaces in
+ * surface coordinates.
+ * X and y may be negative, if there are subsurfaces with negative position.
  */
-void wlr_surface_set_role_committed(struct wlr_surface *surface,
-		void (*role_committed)(struct wlr_surface *surface, void *role_data),
-		void *role_data);
+void wlr_surface_get_extends(struct wlr_surface *surface, struct wlr_box *box);
 
 struct wlr_surface *wlr_surface_from_resource(struct wl_resource *resource);
 

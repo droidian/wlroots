@@ -1,3 +1,11 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_TYPES_WLR_OUTPUT_H
 #define WLR_TYPES_WLR_OUTPUT_H
 
@@ -6,6 +14,7 @@
 #include <time.h>
 #include <wayland-server.h>
 #include <wayland-util.h>
+#include <wlr/render/dmabuf.h>
 
 struct wlr_output_mode {
 	uint32_t flags; // enum wl_output_mode
@@ -52,11 +61,11 @@ struct wlr_output {
 	struct wlr_backend *backend;
 	struct wl_display *display;
 
-	struct wl_global *wl_global;
-	struct wl_list wl_resources;
+	struct wl_global *global;
+	struct wl_list resources;
 
 	char name[24];
-	char make[48];
+	char make[56];
 	char model[16];
 	char serial[16];
 	int32_t phys_width, phys_height; // mm
@@ -79,9 +88,15 @@ struct wlr_output {
 	float transform_matrix[9];
 
 	struct {
+		// Request to render a frame
 		struct wl_signal frame;
+		// Emitted when buffers need to be swapped (because software cursors or
+		// fullscreen damage or because of backend-specific logic)
 		struct wl_signal needs_swap;
-		struct wl_signal swap_buffers;
+		// Emitted right before buffer swap
+		struct wl_signal swap_buffers; // wlr_output_event_swap_buffers
+		// Emitted right after the buffer has been presented to the user
+		struct wl_signal present; // wlr_output_event_present
 		struct wl_signal enable;
 		struct wl_signal mode;
 		struct wl_signal scale;
@@ -98,6 +113,7 @@ struct wlr_output {
 
 	struct wl_list cursors; // wlr_output_cursor::link
 	struct wlr_output_cursor *hardware_cursor;
+	int software_cursor_locks; // number of locks forcing software cursors
 
 	// the output position in layout space reported to clients
 	int32_t lx, ly;
@@ -107,13 +123,49 @@ struct wlr_output {
 	void *data;
 };
 
+struct wlr_output_event_swap_buffers {
+	struct wlr_output *output;
+	struct timespec *when;
+	pixman_region32_t *damage;
+};
+
+enum wlr_output_present_flag {
+	// The presentation was synchronized to the "vertical retrace" by the
+	// display hardware such that tearing does not happen.
+	WLR_OUTPUT_PRESENT_VSYNC = 0x1,
+	// The display hardware provided measurements that the hardware driver
+	// converted into a presentation timestamp.
+	WLR_OUTPUT_PRESENT_HW_CLOCK = 0x2,
+	// The display hardware signalled that it started using the new image
+	// content.
+	WLR_OUTPUT_PRESENT_HW_COMPLETION = 0x4,
+	// The presentation of this update was done zero-copy.
+	WLR_OUTPUT_PRESENT_ZERO_COPY = 0x8,
+};
+
+struct wlr_output_event_present {
+	struct wlr_output *output;
+	// Time when the content update turned into light the first time.
+	struct timespec *when;
+	// Vertical retrace counter. Zero if unavailable.
+	unsigned seq;
+	// Prediction of how many nanoseconds after `when` the very next output
+	// refresh may occur. Zero if unknown.
+	int refresh; // nsec
+	uint32_t flags; // enum wlr_output_present_flag
+};
+
 struct wlr_surface;
 
-void wlr_output_enable(struct wlr_output *output, bool enable);
+/**
+ * Enables or disables the output. A disabled output is turned off and doesn't
+ * emit `frame` events.
+ */
+bool wlr_output_enable(struct wlr_output *output, bool enable);
 void wlr_output_create_global(struct wlr_output *output);
 void wlr_output_destroy_global(struct wlr_output *output);
 /**
- * Sets the output mode.
+ * Sets the output mode. Enables the output if it's currently disabled.
  */
 bool wlr_output_set_mode(struct wlr_output *output,
 	struct wlr_output_mode *mode);
@@ -159,12 +211,32 @@ bool wlr_output_swap_buffers(struct wlr_output *output, struct timespec *when,
  * it is a no-op.
  */
 void wlr_output_schedule_frame(struct wlr_output *output);
-void wlr_output_set_gamma(struct wlr_output *output,
-	uint32_t size, uint16_t *r, uint16_t *g, uint16_t *b);
-uint32_t wlr_output_get_gamma_size(struct wlr_output *output);
+/**
+ * Returns the maximum length of each gamma ramp, or 0 if unsupported.
+ */
+size_t wlr_output_get_gamma_size(struct wlr_output *output);
+/**
+ * Sets the gamma table for this output. `r`, `g` and `b` are gamma ramps for
+ * red, green and blue. `size` is the length of the ramps and must not exceed
+ * the value returned by `wlr_output_get_gamma_size`.
+ *
+ * Providing zero-sized ramps resets the gamma table.
+ */
+bool wlr_output_set_gamma(struct wlr_output *output, size_t size,
+	const uint16_t *r, const uint16_t *g, const uint16_t *b);
+bool wlr_output_export_dmabuf(struct wlr_output *output,
+	struct wlr_dmabuf_attributes *attribs);
 void wlr_output_set_fullscreen_surface(struct wlr_output *output,
 	struct wlr_surface *surface);
 struct wlr_output *wlr_output_from_resource(struct wl_resource *resource);
+/**
+ * Locks the output to only use software cursors instead of hardware cursors.
+ * This is useful if hardware cursors need to be temporarily disabled (e.g.
+ * during screen capture). There must be as many unlocks as there have been
+ * locks to restore the original state. There should never be an unlock before
+ * a lock.
+ */
+void wlr_output_lock_software_cursors(struct wlr_output *output, bool lock);
 
 
 struct wlr_output_cursor *wlr_output_cursor_create(struct wlr_output *output);

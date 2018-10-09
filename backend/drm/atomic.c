@@ -17,7 +17,7 @@ static void atomic_begin(struct wlr_drm_crtc *crtc, struct atomic *atom) {
 	if (!crtc->atomic) {
 		crtc->atomic = drmModeAtomicAlloc();
 		if (!crtc->atomic) {
-			wlr_log_errno(L_ERROR, "Allocation failed");
+			wlr_log_errno(WLR_ERROR, "Allocation failed");
 			atom->failed = true;
 			return;
 		}
@@ -35,7 +35,7 @@ static bool atomic_end(int drm_fd, struct atomic *atom) {
 
 	uint32_t flags = DRM_MODE_ATOMIC_TEST_ONLY | DRM_MODE_ATOMIC_NONBLOCK;
 	if (drmModeAtomicCommit(drm_fd, atom->req, flags, NULL)) {
-		wlr_log_errno(L_ERROR, "Atomic test failed");
+		wlr_log_errno(WLR_ERROR, "Atomic test failed");
 		drmModeAtomicSetCursor(atom->req, atom->cursor);
 		return false;
 	}
@@ -51,13 +51,13 @@ static bool atomic_commit(int drm_fd, struct atomic *atom,
 
 	int ret = drmModeAtomicCommit(drm_fd, atom->req, flags, conn);
 	if (ret) {
-		wlr_log_errno(L_ERROR, "%s: Atomic commit failed (%s)",
+		wlr_log_errno(WLR_ERROR, "%s: Atomic commit failed (%s)",
 			conn->output.name, modeset ? "modeset" : "pageflip");
 
 		// Try to commit without new changes
 		drmModeAtomicSetCursor(atom->req, atom->cursor);
 		if (drmModeAtomicCommit(drm_fd, atom->req, flags, conn)) {
-			wlr_log_errno(L_ERROR,
+			wlr_log_errno(WLR_ERROR,
 				"%s: Atomic commit without new changes failed (%s)",
 				conn->output.name, modeset ? "modeset" : "pageflip");
 		}
@@ -70,7 +70,7 @@ static bool atomic_commit(int drm_fd, struct atomic *atom,
 
 static inline void atomic_add(struct atomic *atom, uint32_t id, uint32_t prop, uint64_t val) {
 	if (!atom->failed && drmModeAtomicAddProperty(atom->req, id, prop, val) < 0) {
-		wlr_log_errno(L_ERROR, "Failed to add atomic DRM property");
+		wlr_log_errno(WLR_ERROR, "Failed to add atomic DRM property");
 		atom->failed = true;
 	}
 }
@@ -83,8 +83,8 @@ static void set_plane_props(struct atomic *atom, struct wlr_drm_plane *plane,
 	// The src_* properties are in 16.16 fixed point
 	atomic_add(atom, id, props->src_x, 0);
 	atomic_add(atom, id, props->src_y, 0);
-	atomic_add(atom, id, props->src_w, plane->surf.width << 16);
-	atomic_add(atom, id, props->src_h, plane->surf.height << 16);
+	atomic_add(atom, id, props->src_w, (uint64_t)plane->surf.width << 16);
+	atomic_add(atom, id, props->src_h, (uint64_t)plane->surf.height << 16);
 	atomic_add(atom, id, props->crtc_w, plane->surf.width);
 	atomic_add(atom, id, props->crtc_h, plane->surf.height);
 	atomic_add(atom, id, props->fb_id, fb_id);
@@ -104,8 +104,9 @@ static bool atomic_crtc_pageflip(struct wlr_drm_backend *drm,
 			drmModeDestroyPropertyBlob(drm->fd, crtc->mode_id);
 		}
 
-		if (drmModeCreatePropertyBlob(drm->fd, mode, sizeof(*mode), &crtc->mode_id)) {
-			wlr_log_errno(L_ERROR, "Unable to create property blob");
+		if (drmModeCreatePropertyBlob(drm->fd, mode, sizeof(*mode),
+				&crtc->mode_id)) {
+			wlr_log_errno(WLR_ERROR, "Unable to create property blob");
 			return false;
 		}
 	}
@@ -120,6 +121,10 @@ static bool atomic_crtc_pageflip(struct wlr_drm_backend *drm,
 	struct atomic atom;
 	atomic_begin(crtc, &atom);
 	atomic_add(&atom, conn->id, conn->props.crtc_id, crtc->id);
+	if (mode != NULL && conn->props.link_status != 0) {
+		atomic_add(&atom, conn->id, conn->props.link_status,
+			DRM_MODE_LINK_STATUS_GOOD);
+	}
 	atomic_add(&atom, crtc->id, crtc->props.mode_id, crtc->mode_id);
 	atomic_add(&atom, crtc->id, crtc->props.active, 1);
 	set_plane_props(&atom, crtc->primary, crtc->id, fb_id, true);
@@ -129,6 +134,9 @@ static bool atomic_crtc_pageflip(struct wlr_drm_backend *drm,
 static bool atomic_conn_enable(struct wlr_drm_backend *drm,
 		struct wlr_drm_connector *conn, bool enable) {
 	struct wlr_drm_crtc *crtc = conn->crtc;
+	if (crtc == NULL) {
+		return !enable;
+	}
 
 	struct atomic atom;
 	atomic_begin(crtc, &atom);
@@ -197,17 +205,23 @@ static bool atomic_crtc_move_cursor(struct wlr_drm_backend *drm,
 }
 
 static bool atomic_crtc_set_gamma(struct wlr_drm_backend *drm,
-		struct wlr_drm_crtc *crtc, uint16_t *r, uint16_t *g, uint16_t *b,
-		uint32_t size) {
-	struct drm_color_lut gamma[size];
-
+		struct wlr_drm_crtc *crtc, size_t size,
+		uint16_t *r, uint16_t *g, uint16_t *b) {
 	// Fallback to legacy gamma interface when gamma properties are not available
 	// (can happen on older intel gpu's that support gamma but not degamma)
-	if (crtc->props.gamma_lut == 0) {
-		return legacy_iface.crtc_set_gamma(drm, crtc, r, g, b, size);
+	// TEMP: This is broken on AMDGPU. Always fallback to legacy until they get
+	// it fixed. Ref https://bugs.freedesktop.org/show_bug.cgi?id=107459
+	if (crtc->props.gamma_lut == 0 || true) {
+		return legacy_iface.crtc_set_gamma(drm, crtc, size, r, g, b);
 	}
 
-	for (uint32_t i = 0; i < size; i++) {
+	struct drm_color_lut *gamma = malloc(size * sizeof(struct drm_color_lut));
+	if (gamma == NULL) {
+		wlr_log(WLR_ERROR, "Failed to allocate gamma table");
+		return false;
+	}
+
+	for (size_t i = 0; i < size; i++) {
 		gamma[i].red = r[i];
 		gamma[i].green = g[i];
 		gamma[i].blue = b[i];
@@ -218,10 +232,12 @@ static bool atomic_crtc_set_gamma(struct wlr_drm_backend *drm,
 	}
 
 	if (drmModeCreatePropertyBlob(drm->fd, gamma,
-				sizeof(struct drm_color_lut) * size, &crtc->gamma_lut)) {
-		wlr_log_errno(L_ERROR, "Unable to create property blob");
+			size * sizeof(struct drm_color_lut), &crtc->gamma_lut)) {
+		free(gamma);
+		wlr_log_errno(WLR_ERROR, "Unable to create property blob");
 		return false;
 	}
+	free(gamma);
 
 	struct atomic atom;
 	atomic_begin(crtc, &atom);
@@ -229,21 +245,20 @@ static bool atomic_crtc_set_gamma(struct wlr_drm_backend *drm,
 	return atomic_end(drm->fd, &atom);
 }
 
-static uint32_t atomic_crtc_get_gamma_size(struct wlr_drm_backend *drm,
+static size_t atomic_crtc_get_gamma_size(struct wlr_drm_backend *drm,
 		struct wlr_drm_crtc *crtc) {
-	uint64_t gamma_lut_size;
-
 	if (crtc->props.gamma_lut_size == 0) {
 		return legacy_iface.crtc_get_gamma_size(drm, crtc);
 	}
 
+	uint64_t gamma_lut_size;
 	if (!get_drm_prop(drm->fd, crtc->id, crtc->props.gamma_lut_size,
-			   &gamma_lut_size)) {
-		wlr_log(L_ERROR, "Unable to get gamma lut size");
+			&gamma_lut_size)) {
+		wlr_log(WLR_ERROR, "Unable to get gamma lut size");
 		return 0;
 	}
 
-	return (uint32_t)gamma_lut_size;
+	return (size_t)gamma_lut_size;
 }
 
 const struct wlr_drm_interface atomic_iface = {

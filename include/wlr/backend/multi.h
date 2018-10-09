@@ -1,3 +1,11 @@
+/*
+ * This an unstable interface of wlroots. No guarantees are made regarding the
+ * future consistency of this API.
+ */
+#ifndef WLR_USE_UNSTABLE
+#error "Add -DWLR_USE_UNSTABLE to enable unstable wlroots features"
+#endif
+
 #ifndef WLR_BACKEND_MULTI_H
 #define WLR_BACKEND_MULTI_H
 
@@ -20,7 +28,9 @@ void wlr_multi_backend_remove(struct wlr_backend *multi,
 	struct wlr_backend *backend);
 
 bool wlr_backend_is_multi(struct wlr_backend *backend);
-struct wlr_session *wlr_multi_get_session(struct wlr_backend *base);
 bool wlr_multi_is_empty(struct wlr_backend *backend);
+
+void wlr_multi_for_each_backend(struct wlr_backend *backend,
+		void (*callback)(struct wlr_backend *backend, void *data), void *data);
 
 #endif

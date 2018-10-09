@@ -15,7 +15,11 @@
 #include "util/signal.h"
 #include "xdg-shell-unstable-v6-client-protocol.h"
 
-int os_create_anonymous_file(off_t size);
+static struct wlr_wl_output *get_wl_output_from_output(
+		struct wlr_output *wlr_output) {
+	assert(wlr_output_is_wl(wlr_output));
+	return (struct wlr_wl_output *)wlr_output;
+}
 
 static struct wl_callback_listener frame_listener;
 
@@ -33,9 +37,9 @@ static struct wl_callback_listener frame_listener = {
 	.done = surface_frame_callback
 };
 
-static bool output_set_custom_mode(struct wlr_output *_output,
+static bool output_set_custom_mode(struct wlr_output *wlr_output,
 		int32_t width, int32_t height, int32_t refresh) {
-	struct wlr_wl_output *output = (struct wlr_wl_output *)_output;
+	struct wlr_wl_output *output = get_wl_output_from_output(wlr_output);
 	wl_egl_window_resize(output->egl_window, width, height, 0, 0);
 	wlr_output_update_custom_mode(&output->wlr_output, width, height, 0);
 	return true;
@@ -44,7 +48,7 @@ static bool output_set_custom_mode(struct wlr_output *_output,
 static bool output_make_current(struct wlr_output *wlr_output,
 		int *buffer_age) {
 	struct wlr_wl_output *output =
-		(struct wlr_wl_output *)wlr_output;
+		get_wl_output_from_output(wlr_output);
 	return wlr_egl_make_current(&output->backend->egl, output->egl_surface,
 		buffer_age);
 }
@@ -52,35 +56,42 @@ static bool output_make_current(struct wlr_output *wlr_output,
 static bool output_swap_buffers(struct wlr_output *wlr_output,
 		pixman_region32_t *damage) {
 	struct wlr_wl_output *output =
-		(struct wlr_wl_output *)wlr_output;
+		get_wl_output_from_output(wlr_output);
 
 	if (output->frame_callback != NULL) {
-		wlr_log(L_ERROR, "Skipping buffer swap");
+		wlr_log(WLR_ERROR, "Skipping buffer swap");
 		return false;
 	}
 
 	output->frame_callback = wl_surface_frame(output->surface);
 	wl_callback_add_listener(output->frame_callback, &frame_listener, output);
 
-	return wlr_egl_swap_buffers(&output->backend->egl, output->egl_surface,
-		damage);
+	if (!wlr_egl_swap_buffers(&output->backend->egl,
+			output->egl_surface, damage)) {
+		return false;
+	}
+
+	// TODO: if available, use the presentation-time protocol
+	wlr_output_send_present(wlr_output, NULL);
+	return true;
 }
 
-static void output_transform(struct wlr_output *_output,
+static void output_transform(struct wlr_output *wlr_output,
 		enum wl_output_transform transform) {
-	struct wlr_wl_output *output = (struct wlr_wl_output *)_output;
+	struct wlr_wl_output *output = get_wl_output_from_output(wlr_output);
 	output->wlr_output.transform = transform;
 }
 
 static bool output_set_cursor(struct wlr_output *wlr_output,
 		struct wlr_texture *texture, int32_t scale,
-		enum wl_output_transform transform, int32_t hotspot_x, int32_t hotspot_y,
-		bool update_texture) {
-	struct wlr_wl_output *output = (struct wlr_wl_output *)wlr_output;
+		enum wl_output_transform transform,
+		int32_t hotspot_x, int32_t hotspot_y, bool update_texture) {
+	struct wlr_wl_output *output = get_wl_output_from_output(wlr_output);
 	struct wlr_wl_backend *backend = output->backend;
 
 	struct wlr_box hotspot = { .x = hotspot_x, .y = hotspot_y };
-	wlr_box_transform(&hotspot, wlr_output_transform_invert(wlr_output->transform),
+	wlr_box_transform(&hotspot,
+		wlr_output_transform_invert(wlr_output->transform),
 		output->cursor.width, output->cursor.height, &hotspot);
 
 	// TODO: use output->wlr_output.transform to transform pixels and hotpot
@@ -147,8 +158,7 @@ static bool output_set_cursor(struct wlr_output *wlr_output,
 }
 
 static void output_destroy(struct wlr_output *wlr_output) {
-	struct wlr_wl_output *output =
-		(struct wlr_wl_output *)wlr_output;
+	struct wlr_wl_output *output = get_wl_output_from_output(wlr_output);
 	if (output == NULL) {
 		return;
 	}
@@ -182,9 +192,22 @@ void update_wl_output_cursor(struct wlr_wl_output *output) {
 	}
 }
 
-bool output_move_cursor(struct wlr_output *_output, int x, int y) {
+static bool output_move_cursor(struct wlr_output *_output, int x, int y) {
 	// TODO: only return true if x == current x and y == current y
 	return true;
+}
+
+static void output_schedule_frame(struct wlr_output *wlr_output) {
+	struct wlr_wl_output *output = get_wl_output_from_output(wlr_output);
+
+	if (output->frame_callback != NULL) {
+		wlr_log(WLR_ERROR, "Skipping frame scheduling");
+		return;
+	}
+
+	output->frame_callback = wl_surface_frame(output->surface);
+	wl_callback_add_listener(output->frame_callback, &frame_listener, output);
+	wl_surface_commit(output->surface);
 }
 
 static const struct wlr_output_impl output_impl = {
@@ -195,6 +218,7 @@ static const struct wlr_output_impl output_impl = {
 	.swap_buffers = output_swap_buffers,
 	.set_cursor = output_set_cursor,
 	.move_cursor = output_move_cursor,
+	.schedule_frame = output_schedule_frame,
 };
 
 bool wlr_output_is_wl(struct wlr_output *wlr_output) {
@@ -215,12 +239,13 @@ static struct zxdg_surface_v6_listener xdg_surface_listener = {
 	.configure = xdg_surface_handle_configure,
 };
 
-static void xdg_toplevel_handle_configure(void *data, struct zxdg_toplevel_v6 *xdg_toplevel,
+static void xdg_toplevel_handle_configure(void *data,
+		struct zxdg_toplevel_v6 *xdg_toplevel,
 		int32_t width, int32_t height, struct wl_array *states) {
 	struct wlr_wl_output *output = data;
 	assert(output && output->xdg_toplevel == xdg_toplevel);
 
-	if (width == 0 && height == 0) {
+	if (width == 0 || height == 0) {
 		return;
 	}
 	// loop over states for maximized etc?
@@ -228,7 +253,8 @@ static void xdg_toplevel_handle_configure(void *data, struct zxdg_toplevel_v6 *x
 	wlr_output_update_custom_mode(&output->wlr_output, width, height, 0);
 }
 
-static void xdg_toplevel_handle_close(void *data, struct zxdg_toplevel_v6 *xdg_toplevel) {
+static void xdg_toplevel_handle_close(void *data,
+		struct zxdg_toplevel_v6 *xdg_toplevel) {
 	struct wlr_wl_output *output = data;
 	assert(output && output->xdg_toplevel == xdg_toplevel);
 
@@ -240,9 +266,8 @@ static struct zxdg_toplevel_v6_listener xdg_toplevel_listener = {
 	.close = xdg_toplevel_handle_close,
 };
 
-struct wlr_output *wlr_wl_output_create(struct wlr_backend *_backend) {
-	assert(wlr_backend_is_wl(_backend));
-	struct wlr_wl_backend *backend = (struct wlr_wl_backend *)_backend;
+struct wlr_output *wlr_wl_output_create(struct wlr_backend *wlr_backend) {
+	struct wlr_wl_backend *backend = get_wl_backend_from_backend(wlr_backend);
 	if (!backend->started) {
 		++backend->requested_outputs;
 		return NULL;
@@ -250,7 +275,7 @@ struct wlr_output *wlr_wl_output_create(struct wlr_backend *_backend) {
 
 	struct wlr_wl_output *output;
 	if (!(output = calloc(sizeof(struct wlr_wl_output), 1))) {
-		wlr_log(L_ERROR, "Failed to allocate wlr_wl_output");
+		wlr_log(WLR_ERROR, "Failed to allocate wlr_wl_output");
 		return NULL;
 	}
 	wlr_output_init(&output->wlr_output, &backend->backend, &output_impl,
@@ -267,20 +292,20 @@ struct wlr_output *wlr_wl_output_create(struct wlr_backend *_backend) {
 
 	output->surface = wl_compositor_create_surface(backend->compositor);
 	if (!output->surface) {
-		wlr_log_errno(L_ERROR, "Could not create output surface");
+		wlr_log_errno(WLR_ERROR, "Could not create output surface");
 		goto error;
 	}
 	wl_surface_set_user_data(output->surface, output);
 	output->xdg_surface =
 		zxdg_shell_v6_get_xdg_surface(backend->shell, output->surface);
 	if (!output->xdg_surface) {
-		wlr_log_errno(L_ERROR, "Could not get xdg surface");
+		wlr_log_errno(WLR_ERROR, "Could not get xdg surface");
 		goto error;
 	}
 	output->xdg_toplevel =
 		zxdg_surface_v6_get_toplevel(output->xdg_surface);
 	if (!output->xdg_toplevel) {
-		wlr_log_errno(L_ERROR, "Could not get xdg toplevel");
+		wlr_log_errno(WLR_ERROR, "Could not get xdg toplevel");
 		goto error;
 	}
 

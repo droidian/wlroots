@@ -96,7 +96,7 @@ not use GNU extensions.
 Brackets always go on the same line, including in functions.
 Always include brackets for if/while/for, even if it's a single statement.
 ```c
-void function() {
+void function(void) {
 	if (condition1) {
 		do_thing1();
 	}
@@ -192,13 +192,13 @@ struct wlr_backend *wlr_backend_autocreate(struct wl_display *display) {
 
 	struct wlr_session *session = wlr_session_create(display);
 	if (!session) {
-		wlr_log(L_ERROR, "Failed to start a DRM session");
+		wlr_log(WLR_ERROR, "Failed to start a DRM session");
 		return NULL;
 	}
 
 	int gpu = wlr_session_find_gpu(session);
 	if (gpu == -1) {
-		wlr_log(L_ERROR, "Failed to open DRM device");
+		wlr_log(WLR_ERROR, "Failed to open DRM device");
 		goto error_session;
 	}
 
@@ -236,7 +236,7 @@ error_session:
 ## Wayland protocol implementation
 
 Each protocol generally lives in a file with the same name, usually containing
-at leats one struct for each interface in the protocol. For instance,
+at least one struct for each interface in the protocol. For instance,
 `xdg_shell` lives in `types/wlr_xdg_shell.h` and has a `wlr_xdg_surface` struct.
 
 ### Globals
@@ -248,8 +248,8 @@ listener. Example:
 
 ```c
 struct wlr_compositor {
-	struct wl_global *wl_global;
-	struct wl_list wl_resources;
+	struct wl_global *global;
+	struct wl_list resources;
 	…
 
 	struct wl_listener display_destroy;
@@ -334,9 +334,9 @@ static void subsurface_destroy(struct wlr_subsurface *subsurface) {
 		return;
 	}
 
-	wl_resource_set_user_data(subsurface->resource, NULL);
-
 	…
+
+	wl_resource_set_user_data(subsurface->resource, NULL);
 	free(subsurface);
 }
 
