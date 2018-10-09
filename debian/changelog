@@ -1,3 +1,15 @@
+wlroots (0.0.0~git20181009-1) experimental; urgency=medium
+
+  * New upstream git snapshot
+  * [7a6de38] libwlroots-dev: Depend on required dev packages based on the pc
+    file.
+    Thanks to Charles-David <droper@analphabet.me>
+  * [de444f4] Add minimal autopkgtests.  This ensures we can properly include
+    and link against libwlroots.
+  * [7411028] Drop rpath patch.  Not needed anymore
+
+ -- Guido Günther <agx@sigxcpu.org>  Tue, 09 Oct 2018 15:34:25 +0200
+
 wlroots (0.0.0~git20180524-1) experimental; urgency=medium
 
   * New upstream git snapshot
