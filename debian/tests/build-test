@@ -1,0 +1,10 @@
+#!/usr/bin/make -f
+
+CFLAGS=$(shell pkg-config --cflags wlroots)
+LIBS=$(shell pkg-config --libs wlroots)
+
+a.out: test.c
+	gcc $(CFLAGS) $< $(LIBS) -lwayland-server
+	@echo "Build test of $< succeeded"
+	./a.out
+	@rm -f a.out
