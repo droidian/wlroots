@@ -28,7 +28,7 @@ const char *atom_map[ATOM_LAST] = {
 	"UTF8_STRING",
 	"WM_S0",
 	"_NET_SUPPORTED",
-	"_NET_WM_S0",
+	"_NET_WM_CM_S0",
 	"_NET_WM_PID",
 	"_NET_WM_NAME",
 	"_NET_WM_STATE",
@@ -313,6 +313,7 @@ static void xwayland_surface_destroy(
 	wl_list_for_each_safe(child, next, &xsurface->children, parent_link) {
 		wl_list_remove(&child->parent_link);
 		wl_list_init(&child->parent_link);
+		child->parent = NULL;
 	}
 
 	if (xsurface->surface_id) {
@@ -501,7 +502,7 @@ static void read_surface_protocols(struct wlr_xwm *xwm,
 	wlr_log(WLR_DEBUG, "WM_PROTOCOLS (%zu)", atoms_len);
 }
 
-#ifdef WLR_HAS_XCB_ICCCM
+#if WLR_HAS_XCB_ICCCM
 static void read_surface_hints(struct wlr_xwm *xwm,
 		struct wlr_xwayland_surface *xsurface,
 		xcb_get_property_reply_t *reply) {
@@ -522,6 +523,12 @@ static void read_surface_hints(struct wlr_xwm *xwm,
 	memcpy(xsurface->hints, &hints, sizeof(struct wlr_xwayland_surface_hints));
 	xsurface->hints_urgency = xcb_icccm_wm_hints_get_urgency(&hints);
 
+	if (!(xsurface->hints->flags & XCB_ICCCM_WM_HINT_INPUT)) {
+		// The client didn't specify whether it wants input.
+		// Assume it does.
+		xsurface->hints->input = true;
+	}
+
 	wlr_log(WLR_DEBUG, "WM_HINTS (%d)", reply->value_len);
 	wlr_signal_emit_safe(&xsurface->events.set_hints, xsurface);
 }
@@ -533,7 +540,7 @@ static void read_surface_hints(struct wlr_xwm *xwm,
 }
 #endif
 
-#ifdef WLR_HAS_XCB_ICCCM
+#if WLR_HAS_XCB_ICCCM
 static void read_surface_normal_hints(struct wlr_xwm *xwm,
 		struct wlr_xwayland_surface *xsurface,
 		xcb_get_property_reply_t *reply) {
@@ -552,6 +559,15 @@ static void read_surface_normal_hints(struct wlr_xwm *xwm,
 	}
 	memcpy(xsurface->size_hints, &size_hints,
 		sizeof(struct wlr_xwayland_surface_size_hints));
+
+	if ((size_hints.flags & XCB_ICCCM_SIZE_HINT_P_MIN_SIZE) == 0) {
+		xsurface->size_hints->min_width = -1;
+		xsurface->size_hints->min_height = -1;
+	}
+	if ((size_hints.flags & XCB_ICCCM_SIZE_HINT_P_MAX_SIZE) == 0) {
+		xsurface->size_hints->max_width = -1;
+		xsurface->size_hints->max_height = -1;
+	}
 
 	wlr_log(WLR_DEBUG, "WM_NORMAL_HINTS (%d)", reply->value_len);
 }
@@ -797,8 +813,6 @@ static void xwm_handle_destroy_notify(struct wlr_xwm *xwm,
 
 static void xwm_handle_configure_request(struct wlr_xwm *xwm,
 		xcb_configure_request_event_t *ev) {
-	wlr_log(WLR_DEBUG, "XCB_CONFIGURE_REQUEST (%u) [%ux%u+%d,%d]", ev->window,
-		ev->width, ev->height, ev->x, ev->y);
 	struct wlr_xwayland_surface *surface = lookup_surface(xwm, ev->window);
 	if (surface == NULL) {
 		return;
@@ -806,13 +820,22 @@ static void xwm_handle_configure_request(struct wlr_xwm *xwm,
 
 	// TODO: handle ev->{parent,sibling}?
 
+	uint16_t mask = ev->value_mask;
+	uint16_t geo_mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y |
+		XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
+	if ((mask & geo_mask) == 0) {
+		return;
+	}
+
 	struct wlr_xwayland_surface_configure_event wlr_event = {
 		.surface = surface,
-		.x = ev->x,
-		.y = ev->y,
-		.width = ev->width,
-		.height = ev->height,
+		.x = mask & XCB_CONFIG_WINDOW_X ? ev->x : surface->x,
+		.y = mask & XCB_CONFIG_WINDOW_Y ? ev->y : surface->y,
+		.width = mask & XCB_CONFIG_WINDOW_WIDTH ? ev->width : surface->width,
+		.height = mask & XCB_CONFIG_WINDOW_HEIGHT ? ev->height : surface->height,
 	};
+	wlr_log(WLR_DEBUG, "XCB_CONFIGURE_REQUEST (%u) [%ux%u+%d,%d]", ev->window,
+		wlr_event.width, wlr_event.height, wlr_event.x, wlr_event.y);
 
 	wlr_signal_emit_safe(&surface->events.request_configure, &wlr_event);
 }
@@ -1172,7 +1195,7 @@ static void xwm_handle_focus_in(struct wlr_xwm *xwm,
 }
 
 static void xwm_handle_xcb_error(struct wlr_xwm *xwm, xcb_value_error_t *ev) {
-#ifdef WLR_HAS_XCB_ERRORS
+#if WLR_HAS_XCB_ERRORS
 	const char *major_name =
 		xcb_errors_get_name_for_major_code(xwm->errors_context,
 			ev->major_opcode);
@@ -1210,7 +1233,7 @@ log_raw:
 }
 
 static void xwm_handle_unhandled_event(struct wlr_xwm *xwm, xcb_generic_event_t *ev) {
-#ifdef WLR_HAS_XCB_ERRORS
+#if WLR_HAS_XCB_ERRORS
 	const char *extension;
 	const char *event_name =
 		xcb_errors_get_name_for_xcb_event(xwm->errors_context,
@@ -1395,7 +1418,7 @@ void xwm_destroy(struct wlr_xwm *xwm) {
 	if (xwm->event_source) {
 		wl_event_source_remove(xwm->event_source);
 	}
-#ifdef WLR_HAS_XCB_ERRORS
+#if WLR_HAS_XCB_ERRORS
 	if (xwm->errors_context) {
 		xcb_errors_context_free(xwm->errors_context);
 	}
@@ -1509,7 +1532,7 @@ static void xwm_create_wm_window(struct wlr_xwm *xwm) {
 
 	xcb_set_selection_owner(xwm->xcb_conn,
 		xwm->window,
-		xwm->atoms[NET_WM_S0],
+		xwm->atoms[NET_WM_CM_S0],
 		XCB_CURRENT_TIME);
 }
 
@@ -1636,7 +1659,7 @@ struct wlr_xwm *xwm_create(struct wlr_xwayland *wlr_xwayland) {
 		return NULL;
 	}
 
-#ifdef WLR_HAS_XCB_ERRORS
+#if WLR_HAS_XCB_ERRORS
 	if (xcb_errors_context_new(xwm->xcb_conn, &xwm->errors_context)) {
 		wlr_log(WLR_ERROR, "Could not allocate error context");
 		xwm_destroy(xwm);

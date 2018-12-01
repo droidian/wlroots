@@ -1,4 +1,4 @@
-#define _POSIX_C_SOURCE 199309L
+#define _POSIX_C_SOURCE 200112L
 #include <assert.h>
 #include <drm_mode.h>
 #include <EGL/egl.h>
@@ -735,11 +735,11 @@ static bool drm_connector_move_cursor(struct wlr_output *output,
 	return ok;
 }
 
-static void drm_connector_schedule_frame(struct wlr_output *output) {
+static bool drm_connector_schedule_frame(struct wlr_output *output) {
 	struct wlr_drm_connector *conn = get_drm_connector_from_output(output);
 	struct wlr_drm_backend *drm = get_drm_backend_from_backend(output->backend);
 	if (!drm->session->active) {
-		return;
+		return false;
 	}
 
 	// We need to figure out where we are in the vblank cycle
@@ -747,29 +747,33 @@ static void drm_connector_schedule_frame(struct wlr_output *output) {
 
 	struct wlr_drm_crtc *crtc = conn->crtc;
 	if (!crtc) {
-		return;
+		return false;
 	}
 	struct wlr_drm_plane *plane = crtc->primary;
 	struct gbm_bo *bo = plane->surf.back;
 	if (!bo) {
 		// We haven't swapped buffers yet -- can't do a pageflip
 		wlr_output_send_frame(output);
-		return;
+		return true;
+	}
+	if (drm->parent) {
+		bo = copy_drm_surface_mgpu(&plane->mgpu_surf, bo);
 	}
 	uint32_t fb_id = get_fb_for_bo(bo);
 
 	if (conn->pageflip_pending) {
 		wlr_log(WLR_ERROR, "Skipping pageflip on output '%s'",
 			conn->output.name);
-		return;
+		return true;
 	}
 
 	if (!drm->iface->crtc_pageflip(drm, conn, crtc, fb_id, NULL)) {
-		return;
+		return false;
 	}
 
 	conn->pageflip_pending = true;
 	wlr_output_update_enabled(output, true);
+	return true;
 }
 
 static void drm_connector_destroy(struct wlr_output *output) {
@@ -1129,6 +1133,12 @@ void scan_drm_connectors(struct wlr_drm_backend *drm) {
 					wlr_log_errno(WLR_ERROR, "Allocation failed");
 					continue;
 				}
+
+				if (drm_conn->modes[i].flags & DRM_MODE_FLAG_INTERLACE) {
+					free(mode);
+					continue;
+				}
+
 				mode->drm_mode = drm_conn->modes[i];
 				mode->wlr_mode.width = mode->drm_mode.hdisplay;
 				mode->wlr_mode.height = mode->drm_mode.vdisplay;
@@ -1354,7 +1364,6 @@ static void drm_connector_cleanup(struct wlr_drm_connector *conn) {
 		conn->output.needs_swap = false;
 		conn->output.frame_pending = false;
 
-		conn->pageflip_pending = false;
 		/* Fallthrough */
 	case WLR_DRM_CONN_NEEDS_MODESET:
 		wlr_log(WLR_INFO, "Emitting destruction signal for '%s'",

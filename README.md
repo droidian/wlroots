@@ -1,7 +1,7 @@
 # wlroots
 
 Pluggable, composable, unopinionated modules for building a
-[Wayland](http://wayland.freedesktop.org/) compositor; or about 40,000 lines of
+[Wayland](http://wayland.freedesktop.org/) compositor; or about 50,000 lines of
 code you were going to write anyway.
 
 - wlroots provides backends that abstract the underlying display and input
@@ -30,8 +30,8 @@ development tools - or any subset of these features you like, because all of
 them work independently of one another and freely compose with anything you want
 to implement yourself.
 
-**Status**: prior to 1.0 the API is not stable, but we've done most of the work
-and various projects are using wlroots to build Wayland compositors with.
+Check out our [wiki](https://github.com/swaywm/wlroots/wiki/Getting-started) to
+get started with wlroots.
 
 wlroots is developed under the direction of the
 [sway](https://github.com/swaywm/sway) project. A variety of wrapper libraries
@@ -62,12 +62,12 @@ If you choose to enable X11 support:
 * xcb
 * xcb-composite
 * xcb-xfixes
+* xcb-xinput
 * xcb-image
 * xcb-render
 * x11-xcb
 * xcb-errors (optional, for improved error reporting)
 * x11-icccm (optional, for improved Xwayland introspection)
-* xcb-xkb (optional, for improved keyboard handling on the X11 backend)
 
 Run these commands:
 
@@ -83,7 +83,8 @@ Install like so:
 wlroots comes with a test compositor called rootston, which demonstrates the
 features of the library and is used as a testbed for the development of the
 library. It may also be useful as a reference for understanding how to use
-various wlroots features.
+various wlroots features, but it's not considered a production-quality codebase
+and is not designed for daily use.
 
 If you followed the build instructions above the rootston executable can be
 found at `./build/rootston/rootston`. To use it, refer to the example config at

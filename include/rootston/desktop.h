@@ -9,14 +9,16 @@
 #include <wlr/types/wlr_idle_inhibit_v1.h>
 #include <wlr/types/wlr_idle.h>
 #include <wlr/types/wlr_input_inhibitor.h>
+#include <wlr/types/wlr_input_method_v2.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_list.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_presentation_time.h>
-#include <wlr/types/wlr_primary_selection.h>
+#include <wlr/types/wlr_gtk_primary_selection.h>
 #include <wlr/types/wlr_screencopy_v1.h>
 #include <wlr/types/wlr_screenshooter.h>
+#include <wlr/types/wlr_text_input_v3.h>
 #include <wlr/types/wlr_virtual_keyboard_v1.h>
 #include <wlr/types/wlr_wl_shell.h>
 #include <wlr/types/wlr_xcursor_manager.h>
@@ -49,11 +51,13 @@ struct roots_desktop {
 	struct wlr_export_dmabuf_manager_v1 *export_dmabuf_manager_v1;
 	struct wlr_server_decoration_manager *server_decoration_manager;
 	struct wlr_xdg_decoration_manager_v1 *xdg_decoration_manager;
-	struct wlr_primary_selection_device_manager *primary_selection_device_manager;
+	struct wlr_gtk_primary_selection_device_manager *primary_selection_device_manager;
 	struct wlr_idle *idle;
 	struct wlr_idle_inhibit_manager_v1 *idle_inhibit;
 	struct wlr_input_inhibit_manager *input_inhibit;
 	struct wlr_layer_shell_v1 *layer_shell;
+	struct wlr_input_method_manager_v2 *input_method;
+	struct wlr_text_input_manager_v3 *text_input;
 	struct wlr_virtual_keyboard_manager_v1 *virtual_keyboard;
 	struct wlr_screencopy_manager_v1 *screencopy;
 	struct wlr_tablet_manager_v2 *tablet_v2;
@@ -72,7 +76,7 @@ struct roots_desktop {
 	struct wl_listener virtual_keyboard_new;
 	struct wl_listener pointer_constraint;
 
-#ifdef WLR_HAS_XWAYLAND
+#if WLR_HAS_XWAYLAND
 	struct wlr_xwayland *xwayland;
 	struct wl_listener xwayland_surface;
 #endif

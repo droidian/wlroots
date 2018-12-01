@@ -16,7 +16,7 @@
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
-#include <wlr/types/wlr_primary_selection.h>
+#include <wlr/types/wlr_gtk_primary_selection.h>
 #include <wlr/types/wlr_server_decoration.h>
 #include <wlr/types/wlr_wl_shell.h>
 #include <wlr/types/wlr_xcursor_manager.h>
@@ -439,6 +439,11 @@ void view_destroy(struct roots_view *view) {
 		view_unmap(view);
 	}
 
+	// Can happen if fullscreened while unmapped, and hasn't been mapped
+	if (view->fullscreen_output != NULL) {
+		view->fullscreen_output->fullscreen_view = NULL;
+	}
+
 	if (view->destroy) {
 		view->destroy(view);
 	}
@@ -576,6 +581,9 @@ static bool view_at(struct roots_view *view, double lx, double ly,
 			view->wl_shell_surface->state == WLR_WL_SHELL_SURFACE_STATE_POPUP) {
 		return false;
 	}
+	if (view->wlr_surface == NULL) {
+		return false;
+	}
 
 	double view_sx = lx - view->x;
 	double view_sy = ly - view->y;
@@ -611,7 +619,7 @@ static bool view_at(struct roots_view *view, double lx, double ly,
 		_surface = wlr_wl_shell_surface_surface_at(view->wl_shell_surface,
 			view_sx, view_sy, &_sx, &_sy);
 		break;
-#ifdef WLR_HAS_XWAYLAND
+#if WLR_HAS_XWAYLAND
 	case ROOTS_XWAYLAND_VIEW:
 		_surface = wlr_surface_surface_at(view->wlr_surface,
 			view_sx, view_sy, &_sx, &_sy);
@@ -882,14 +890,18 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 	desktop->tablet_v2 = wlr_tablet_v2_create(server->wl_display);
 
 	const char *cursor_theme = NULL;
+#if WLR_HAS_XWAYLAND
 	const char *cursor_default = ROOTS_XCURSOR_DEFAULT;
+#endif
 	struct roots_cursor_config *cc =
 		roots_config_get_cursor(config, ROOTS_CONFIG_DEFAULT_SEAT_NAME);
 	if (cc != NULL) {
 		cursor_theme = cc->theme;
+#if WLR_HAS_XWAYLAND
 		if (cc->default_image != NULL) {
 			cursor_default = cc->default_image;
 		}
+#endif
 	}
 
 	char cursor_size_fmt[16];
@@ -900,7 +912,7 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 		setenv("XCURSOR_THEME", cursor_theme, 1);
 	}
 
-#ifdef WLR_HAS_XWAYLAND
+#if WLR_HAS_XWAYLAND
 	desktop->xcursor_manager = wlr_xcursor_manager_create(cursor_theme,
 		ROOTS_XCURSOR_SIZE);
 	if (desktop->xcursor_manager == NULL) {
@@ -944,7 +956,7 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 		desktop->server_decoration_manager,
 		WLR_SERVER_DECORATION_MANAGER_MODE_CLIENT);
 	desktop->primary_selection_device_manager =
-		wlr_primary_selection_device_manager_create(server->wl_display);
+		wlr_gtk_primary_selection_device_manager_create(server->wl_display);
 	desktop->idle = wlr_idle_create(server->wl_display);
 	desktop->idle_inhibit = wlr_idle_inhibit_v1_create(server->wl_display);
 
@@ -956,6 +968,11 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 	desktop->input_inhibit_deactivate.notify = input_inhibit_deactivate;
 	wl_signal_add(&desktop->input_inhibit->events.deactivate,
 		&desktop->input_inhibit_deactivate);
+
+	desktop->input_method =
+		wlr_input_method_manager_v2_create(server->wl_display);
+
+	desktop->text_input = wlr_text_input_manager_v3_create(server->wl_display);
 
 	desktop->virtual_keyboard = wlr_virtual_keyboard_manager_v1_create(
 		server->wl_display);

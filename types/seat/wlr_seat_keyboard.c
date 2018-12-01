@@ -8,11 +8,11 @@
 #include <wayland-server.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_input_device.h>
-#include <wlr/types/wlr_primary_selection.h>
+#include <wlr/types/wlr_gtk_primary_selection.h>
 #include <wlr/util/log.h>
 #include "types/wlr_seat.h"
 #include "util/signal.h"
-#include "util/os-compatibility.h"
+#include "util/shm.h"
 
 static void default_keyboard_enter(struct wlr_seat_keyboard_grab *grab,
 		struct wlr_surface *surface, uint32_t keycodes[], size_t num_keycodes,
@@ -273,7 +273,7 @@ void wlr_seat_keyboard_enter(struct wlr_seat *seat,
 		wl_array_release(&keys);
 
 		wlr_seat_client_send_selection(client);
-		wlr_seat_client_send_primary_selection(client);
+		wlr_seat_client_send_gtk_primary_selection(client);
 	}
 
 	// reinitialize the focus destroy events
@@ -341,7 +341,7 @@ static void seat_client_send_keymap(struct wlr_seat_client *client,
 			continue;
 		}
 
-		int keymap_fd = os_create_anonymous_file(keyboard->keymap_size);
+		int keymap_fd = allocate_shm_file(keyboard->keymap_size);
 		if (keymap_fd < 0) {
 			wlr_log(WLR_ERROR, "creating a keymap file for %zu bytes failed", keyboard->keymap_size);
 			continue;

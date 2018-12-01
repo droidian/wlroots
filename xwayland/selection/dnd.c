@@ -1,11 +1,10 @@
-#define _XOPEN_SOURCE 700
 #include <assert.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <wlr/types/wlr_data_device.h>
-#include <wlr/types/wlr_primary_selection.h>
+#include <wlr/types/wlr_gtk_primary_selection.h>
 #include <wlr/util/log.h>
 #include <xcb/xfixes.h>
 #include "xwayland/xwm.h"

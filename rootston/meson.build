@@ -9,13 +9,14 @@ sources = [
 	'main.c',
 	'output.c',
 	'seat.c',
+	'text_input.c',
 	'virtual_keyboard.c',
 	'wl_shell.c',
 	'xdg_shell.c',
 	'xdg_shell_v6.c',
 ]
 
-if conf_data.get('WLR_HAS_XWAYLAND', false)
+if conf_data.get('WLR_HAS_XWAYLAND', 0) == 1
 	sources += 'xwayland.c'
 endif
 

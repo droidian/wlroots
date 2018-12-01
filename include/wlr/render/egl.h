@@ -9,6 +9,12 @@
 #ifndef WLR_RENDER_EGL_H
 #define WLR_RENDER_EGL_H
 
+#include <wlr/config.h>
+
+#if !WLR_HAS_X11_BACKEND && !WLR_HAS_XWAYLAND
+#define MESA_EGL_NO_X11_HEADERS
+#endif
+
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <pixman.h>
@@ -17,6 +23,7 @@
 #include <wlr/render/dmabuf.h>
 
 struct wlr_egl {
+	EGLenum platform;
 	EGLDisplay display;
 	EGLConfig config;
 	EGLContext context;

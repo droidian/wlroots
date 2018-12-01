@@ -1,7 +1,7 @@
 project(
 	'wlroots',
 	'c',
-	version: '0.0.1',
+	version: '0.1.0',
 	license: 'MIT',
 	meson_version: '>=0.48.0',
 	default_options: [
@@ -16,17 +16,25 @@ project(
 # for a reference about clean library versioning.
 so_version = ['0', '0', '0']
 
-add_project_arguments('-Wno-unused-parameter', language: 'c')
 add_project_arguments(
-	'-DWLR_SRC_DIR="@0@"'.format(meson.current_source_dir()),
-	language: 'c',
-)
-add_project_arguments(
-	'-DWLR_USE_UNSTABLE',
+	[
+		'-DWLR_SRC_DIR="@0@"'.format(meson.current_source_dir()),
+		'-DWLR_USE_UNSTABLE',
+
+		'-Wno-unused-parameter',
+		'-Wundef',
+	],
 	language: 'c',
 )
 
 conf_data = configuration_data()
+conf_data.set10('WLR_HAS_LIBCAP', false)
+conf_data.set10('WLR_HAS_SYSTEMD', false)
+conf_data.set10('WLR_HAS_ELOGIND', false)
+conf_data.set10('WLR_HAS_X11_BACKEND', false)
+conf_data.set10('WLR_HAS_XWAYLAND', false)
+conf_data.set10('WLR_HAS_XCB_ERRORS', false)
+conf_data.set10('WLR_HAS_XCB_ICCCM', false)
 
 wlr_inc = include_directories('.', 'include')
 
@@ -42,7 +50,7 @@ endif
 # Avoid wl_buffer deprecation warnings
 add_project_arguments('-DWL_HIDE_DEPRECATED', language: 'c')
 
-wayland_server = dependency('wayland-server', version: '>=1.15')
+wayland_server = dependency('wayland-server', version: '>=1.16')
 wayland_client = dependency('wayland-client')
 wayland_egl    = dependency('wayland-egl')
 wayland_protos = dependency('wayland-protocols', version: '>=1.15')
@@ -56,23 +64,20 @@ udev           = dependency('libudev')
 pixman         = dependency('pixman-1')
 libcap         = dependency('libcap', required: get_option('libcap'))
 logind         = dependency('lib' + get_option('logind-provider'), required: get_option('logind'), version: '>=237')
-math           = cc.find_library('m', required: false)
+math           = cc.find_library('m')
+rt             = cc.find_library('rt')
 
 wlr_parts = []
 wlr_deps = []
 
 if libcap.found()
-	conf_data.set('WLR_HAS_LIBCAP', true)
+	conf_data.set10('WLR_HAS_LIBCAP', true)
 	wlr_deps += libcap
 endif
 
 if logind.found()
-	conf_data.set('WLR_HAS_' + get_option('logind-provider').to_upper(), true)
+	conf_data.set10('WLR_HAS_' + get_option('logind-provider').to_upper(), true)
 	wlr_deps += logind
-endif
-
-if cc.has_header_symbol('fcntl.h', 'posix_fallocate', prefix: '#define _POSIX_C_SOURCE 200112L')
-	conf_data.set('WLR_HAS_POSIX_FALLOCATE', true)
 endif
 
 subdir('protocol')

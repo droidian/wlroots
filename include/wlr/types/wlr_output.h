@@ -106,11 +106,6 @@ struct wlr_output {
 
 	struct wl_event_source *idle_frame;
 
-	struct wlr_surface *fullscreen_surface;
-	struct wl_listener fullscreen_surface_commit;
-	struct wl_listener fullscreen_surface_destroy;
-	int fullscreen_width, fullscreen_height;
-
 	struct wl_list cursors; // wlr_output_cursor::link
 	struct wlr_output_cursor *hardware_cursor;
 	int software_cursor_locks; // number of locks forcing software cursors
@@ -198,6 +193,12 @@ void wlr_output_effective_resolution(struct wlr_output *output,
  */
 bool wlr_output_make_current(struct wlr_output *output, int *buffer_age);
 /**
+ * Get the preferred format for reading pixels.
+ * This function might change the current rendering context.
+ */
+bool wlr_output_preferred_read_format(struct wlr_output *output,
+	enum wl_shm_format *fmt);
+/**
  * Swaps the output buffers. If the time of the frame isn't known, set `when` to
  * NULL. If the compositor doesn't support damage tracking, set `damage` to
  * NULL.
@@ -226,8 +227,6 @@ bool wlr_output_set_gamma(struct wlr_output *output, size_t size,
 	const uint16_t *r, const uint16_t *g, const uint16_t *b);
 bool wlr_output_export_dmabuf(struct wlr_output *output,
 	struct wlr_dmabuf_attributes *attribs);
-void wlr_output_set_fullscreen_surface(struct wlr_output *output,
-	struct wlr_surface *surface);
 struct wlr_output *wlr_output_from_resource(struct wl_resource *resource);
 /**
  * Locks the output to only use software cursors instead of hardware cursors.
@@ -237,6 +236,12 @@ struct wlr_output *wlr_output_from_resource(struct wl_resource *resource);
  * a lock.
  */
 void wlr_output_lock_software_cursors(struct wlr_output *output, bool lock);
+/**
+ * Renders software cursors. This is a utility function that can be called when
+ * compositors render.
+ */
+void wlr_output_render_software_cursors(struct wlr_output *output,
+	pixman_region32_t *damage);
 
 
 struct wlr_output_cursor *wlr_output_cursor_create(struct wlr_output *output);

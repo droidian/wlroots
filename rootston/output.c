@@ -86,7 +86,7 @@ static void view_for_each_surface(struct roots_view *view,
 		wlr_wl_shell_surface_for_each_surface(view->wl_shell_surface, iterator,
 			user_data);
 		break;
-#ifdef WLR_HAS_XWAYLAND
+#if WLR_HAS_XWAYLAND
 	case ROOTS_XWAYLAND_VIEW:
 		wlr_surface_for_each_surface(view->wlr_surface, iterator, user_data);
 		break;
@@ -94,7 +94,7 @@ static void view_for_each_surface(struct roots_view *view,
 	}
 }
 
-#ifdef WLR_HAS_XWAYLAND
+#if WLR_HAS_XWAYLAND
 static void xwayland_children_for_each_surface(
 		struct wlr_xwayland_surface *surface,
 		wlr_surface_iterator_func_t iterator, struct layout_data *layout_data,
@@ -157,14 +157,10 @@ static void output_for_each_surface(struct roots_output *output,
 
 	if (output->fullscreen_view != NULL) {
 		struct roots_view *view = output->fullscreen_view;
-		if (wlr_output->fullscreen_surface == view->wlr_surface) {
-			// The surface is managed by the wlr_output
-			return;
-		}
 
 		view_for_each_surface(view, layout_data, iterator, user_data);
 
-#ifdef WLR_HAS_XWAYLAND
+#if WLR_HAS_XWAYLAND
 		if (view->type == ROOTS_XWAYLAND_VIEW) {
 			xwayland_children_for_each_surface(view->xwayland_surface,
 				iterator, layout_data, user_data);
@@ -388,26 +384,6 @@ static void render_layer(struct roots_output *output,
 		&data->layout, data);
 }
 
-static bool has_standalone_surface(struct roots_view *view) {
-	if (!wl_list_empty(&view->wlr_surface->subsurfaces)) {
-		return false;
-	}
-
-	switch (view->type) {
-	case ROOTS_XDG_SHELL_V6_VIEW:
-		return wl_list_empty(&view->xdg_surface_v6->popups);
-	case ROOTS_XDG_SHELL_VIEW:
-		return wl_list_empty(&view->xdg_surface->popups);
-	case ROOTS_WL_SHELL_VIEW:
-		return wl_list_empty(&view->wl_shell_surface->popups);
-#ifdef WLR_HAS_XWAYLAND
-	case ROOTS_XWAYLAND_VIEW:
-		return wl_list_empty(&view->xwayland_surface->children);
-#endif
-	}
-	return true;
-}
-
 static void surface_send_frame_done(struct wlr_surface *surface, int sx, int sy,
 		void *_data) {
 	struct render_data *data = _data;
@@ -459,16 +435,8 @@ static void render_output(struct roots_output *output) {
 			output_box->y;
 		view_move(view, view_x, view_y);
 
-		if (has_standalone_surface(view)) {
-			wlr_output_set_fullscreen_surface(wlr_output, view->wlr_surface);
-		} else {
-			wlr_output_set_fullscreen_surface(wlr_output, NULL);
-		}
-
 		// Fullscreen views are rendered on a black background
 		clear_color[0] = clear_color[1] = clear_color[2] = 0;
-	} else {
-		wlr_output_set_fullscreen_surface(wlr_output, NULL);
 	}
 
 	bool needs_swap;
@@ -517,11 +485,6 @@ static void render_output(struct roots_output *output) {
 	if (output->fullscreen_view != NULL) {
 		struct roots_view *view = output->fullscreen_view;
 
-		if (wlr_output->fullscreen_surface == view->wlr_surface) {
-			// The output will render the fullscreen view
-			goto renderer_end;
-		}
-
 		if (view->wlr_surface != NULL) {
 			view_for_each_surface(view, &data.layout, render_surface, &data);
 		}
@@ -529,7 +492,7 @@ static void render_output(struct roots_output *output) {
 		// During normal rendering the xwayland window tree isn't traversed
 		// because all windows are rendered. Here we only want to render
 		// the fullscreen window's children so we have to traverse the tree.
-#ifdef WLR_HAS_XWAYLAND
+#if WLR_HAS_XWAYLAND
 		if (view->type == ROOTS_XWAYLAND_VIEW) {
 			xwayland_children_for_each_surface(view->xwayland_surface,
 				render_surface, &data.layout, &data);
@@ -555,6 +518,7 @@ static void render_output(struct roots_output *output) {
 			&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]);
 
 renderer_end:
+	wlr_output_render_software_cursors(wlr_output, &damage);
 	wlr_renderer_scissor(renderer, NULL);
 	wlr_renderer_end(renderer);
 
@@ -592,7 +556,7 @@ static bool view_accept_damage(struct roots_output *output,
 	if (output->fullscreen_view == view) {
 		return true;
 	}
-#ifdef WLR_HAS_XWAYLAND
+#if WLR_HAS_XWAYLAND
 	if (output->fullscreen_view->type == ROOTS_XWAYLAND_VIEW &&
 			view->type == ROOTS_XWAYLAND_VIEW) {
 		// Special case: accept damage from children
@@ -707,16 +671,11 @@ static void damage_from_surface(struct wlr_surface *surface, int sx, int sy,
 	int center_x = box.x + box.width/2;
 	int center_y = box.y + box.height/2;
 
-	enum wl_output_transform transform =
-		wlr_output_transform_invert(surface->current.transform);
-
 	pixman_region32_t damage;
 	pixman_region32_init(&damage);
-	pixman_region32_copy(&damage, &surface->buffer_damage);
-	wlr_region_transform(&damage, &damage, transform,
-		surface->current.buffer_width, surface->current.buffer_height);
-	wlr_region_scale(&damage, &damage,
-		wlr_output->scale / (float)surface->current.scale);
+	wlr_surface_get_effective_damage(surface, &damage);
+
+	wlr_region_scale(&damage, &damage, wlr_output->scale);
 	if (ceil(wlr_output->scale) > surface->current.scale) {
 		// When scaling up a surface, it'll become blurry so we need to
 		// expand the damage region

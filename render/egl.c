@@ -1,10 +1,12 @@
 #include <assert.h>
-#include <stdio.h>
+#include <drm_fourcc.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <wlr/render/egl.h>
 #include <wlr/util/log.h>
+#include <wlr/util/region.h>
 #include "glapi.h"
 
 static bool egl_get_config(EGLDisplay disp, EGLint *attribs, EGLConfig *out,
@@ -120,7 +122,7 @@ bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform, void *remote_display,
 
 	if (platform == EGL_PLATFORM_SURFACELESS_MESA) {
 		assert(remote_display == NULL);
-		egl->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+		egl->display = eglGetPlatformDisplayEXT(platform, EGL_DEFAULT_DISPLAY, NULL);
 	} else {
 		egl->display = eglGetPlatformDisplayEXT(platform, remote_display, NULL);
 	}
@@ -128,6 +130,8 @@ bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform, void *remote_display,
 		wlr_log(WLR_ERROR, "Failed to create EGL display");
 		goto error;
 	}
+
+	egl->platform = platform;
 
 	EGLint major, minor;
 	if (eglInitialize(egl->display, &major, &minor) == EGL_FALSE) {
@@ -318,12 +322,26 @@ bool wlr_egl_is_current(struct wlr_egl *egl) {
 
 bool wlr_egl_swap_buffers(struct wlr_egl *egl, EGLSurface surface,
 		pixman_region32_t *damage) {
+	// Never block when swapping buffers on Wayland
+	if (egl->platform == EGL_PLATFORM_WAYLAND_EXT) {
+		eglSwapInterval(egl->display, 0);
+	}
+
 	EGLBoolean ret;
 	if (damage != NULL && (egl->exts.swap_buffers_with_damage_ext ||
 				egl->exts.swap_buffers_with_damage_khr)) {
+		EGLint width = 0, height = 0;
+		eglQuerySurface(egl->display, surface, EGL_WIDTH, &width);
+		eglQuerySurface(egl->display, surface, EGL_HEIGHT, &height);
+
+		pixman_region32_t flipped_damage;
+		pixman_region32_init(&flipped_damage);
+		wlr_region_transform(&flipped_damage, damage,
+			WL_OUTPUT_TRANSFORM_FLIPPED_180, width, height);
+
 		int nrects;
 		pixman_box32_t *rects =
-			pixman_region32_rectangles(damage, &nrects);
+			pixman_region32_rectangles(&flipped_damage, &nrects);
 		EGLint egl_damage[4 * nrects];
 		for (int i = 0; i < nrects; ++i) {
 			egl_damage[4*i] = rects[i].x1;
@@ -331,6 +349,8 @@ bool wlr_egl_swap_buffers(struct wlr_egl *egl, EGLSurface surface,
 			egl_damage[4*i + 2] = rects[i].x2 - rects[i].x1;
 			egl_damage[4*i + 3] = rects[i].y2 - rects[i].y1;
 		}
+
+		pixman_region32_fini(&flipped_damage);
 
 		if (egl->exts.swap_buffers_with_damage_ext) {
 			ret = eglSwapBuffersWithDamageEXT(egl->display, surface, egl_damage,
@@ -382,13 +402,21 @@ EGLImageKHR wlr_egl_create_image_from_wl_drm(struct wlr_egl *egl,
 
 EGLImageKHR wlr_egl_create_image_from_dmabuf(struct wlr_egl *egl,
 		struct wlr_dmabuf_attributes *attributes) {
-	if (!egl->exts.image_base_khr) {
+	if (!egl->exts.image_base_khr || !egl->exts.image_dmabuf_import_ext) {
+		wlr_log(WLR_ERROR, "dmabuf import extension not present");
 		return NULL;
 	}
 
 	bool has_modifier = false;
-	if (attributes->modifier != DRM_FORMAT_MOD_INVALID) {
+
+	// we assume the same way we assumed formats without the import_modifiers
+	// extension that mod_linear is supported. The special mod mod_invalid
+	// is sometimes used to signal modifier unawareness which is what we
+	// have here
+	if (attributes->modifier != DRM_FORMAT_MOD_INVALID &&
+			attributes->modifier != DRM_FORMAT_MOD_LINEAR) {
 		if (!egl->exts.image_dmabuf_import_modifiers_ext) {
+			wlr_log(WLR_ERROR, "dmabuf modifiers extension not present");
 			return NULL;
 		}
 		has_modifier = true;
@@ -460,10 +488,32 @@ EGLImageKHR wlr_egl_create_image_from_dmabuf(struct wlr_egl *egl,
 
 int wlr_egl_get_dmabuf_formats(struct wlr_egl *egl,
 		int **formats) {
-	if (!egl->exts.image_dmabuf_import_ext ||
-			!egl->exts.image_dmabuf_import_modifiers_ext) {
-		wlr_log(WLR_DEBUG, "dmabuf extension not present");
+	if (!egl->exts.image_dmabuf_import_ext) {
+		wlr_log(WLR_DEBUG, "dmabuf import extension not present");
 		return -1;
+	}
+
+	// when we only have the image_dmabuf_import extension we can't query
+	// which formats are supported. These two are on almost always
+	// supported; it's the intended way to just try to create buffers.
+	// Just a guess but better than not supporting dmabufs at all,
+	// given that the modifiers extension isn't supported everywhere.
+	if (!egl->exts.image_dmabuf_import_modifiers_ext) {
+		static const int fallback_formats[] = {
+			DRM_FORMAT_ARGB8888,
+			DRM_FORMAT_XRGB8888,
+		};
+		static unsigned num = sizeof(fallback_formats) /
+			sizeof(fallback_formats[0]);
+
+		*formats = calloc(num, sizeof(int));
+		if (!*formats) {
+			wlr_log_errno(WLR_ERROR, "Allocation failed");
+			return -1;
+		}
+
+		memcpy(*formats, fallback_formats, num * sizeof(**formats));
+		return num;
 	}
 
 	EGLint num;
@@ -488,10 +538,14 @@ int wlr_egl_get_dmabuf_formats(struct wlr_egl *egl,
 
 int wlr_egl_get_dmabuf_modifiers(struct wlr_egl *egl,
 		int format, uint64_t **modifiers) {
-	if (!egl->exts.image_dmabuf_import_ext ||
-			!egl->exts.image_dmabuf_import_modifiers_ext) {
+	if (!egl->exts.image_dmabuf_import_ext) {
 		wlr_log(WLR_DEBUG, "dmabuf extension not present");
 		return -1;
+	}
+
+	if(!egl->exts.image_dmabuf_import_modifiers_ext) {
+		*modifiers = NULL;
+		return 0;
 	}
 
 	EGLint num;

@@ -1,4 +1,3 @@
-#define _XOPEN_SOURCE 700
 #define _POSIX_C_SOURCE 199309L
 #include <libavformat/avformat.h>
 #include <libavutil/display.h>
@@ -12,7 +11,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <stdbool.h>
-#include <libdrm/drm_fourcc.h>
+#include <drm_fourcc.h>
 #include "wlr-export-dmabuf-unstable-v1-client-protocol.h"
 
 struct wayland_output {

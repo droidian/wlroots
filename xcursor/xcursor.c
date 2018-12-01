@@ -203,6 +203,11 @@ XcursorImageCreate (int width, int height)
 {
     XcursorImage    *image;
 
+    if (width < 0 || height < 0)
+       return NULL;
+    if (width > XCURSOR_IMAGE_MAX_SIZE || height > XCURSOR_IMAGE_MAX_SIZE)
+       return NULL;
+
     image = malloc (sizeof (XcursorImage) +
 		    width * height * sizeof (XcursorPixel));
     if (!image)
@@ -483,7 +488,8 @@ _XcursorReadImage (XcursorFile		*file,
     if (!_XcursorReadUInt (file, &head.delay))
 	return NULL;
     /* sanity check data */
-    if (head.width >= 0x10000 || head.height > 0x10000)
+    if (head.width > XCURSOR_IMAGE_MAX_SIZE  ||
+	head.height > XCURSOR_IMAGE_MAX_SIZE)
 	return NULL;
     if (head.width == 0 || head.height == 0)
 	return NULL;
@@ -612,7 +618,7 @@ XcursorFileLoadImages (FILE *file, int size)
 #endif
 
 #ifndef XCURSORPATH
-#define XCURSORPATH "~/.icons:/usr/share/icons:/usr/share/pixmaps:~/.cursors:/usr/share/cursors/xorg-x11:"ICONDIR
+#define XCURSORPATH "~/.local/share/icons:~/.icons:/usr/share/icons:/usr/share/pixmaps:"ICONDIR
 #endif
 
 static const char *
@@ -833,7 +839,12 @@ XcursorScanTheme (const char *theme, const char *name)
      * Recurse to scan inherited themes
      */
     for (i = inherits; i && f == NULL; i = _XcursorNextPath (i))
-	f = XcursorScanTheme (i, name);
+    {
+        if (strcmp(i, theme) != 0)
+            f = XcursorScanTheme (i, name);
+        else
+            printf("Not calling XcursorScanTheme because of circular dependency: %s. %s", i, name);
+    }
     if (inherits != NULL)
 	free (inherits);
     return f;
@@ -877,9 +888,11 @@ load_all_cursors_from_dir(const char *path, int size,
 		return;
 
 	for(ent = readdir(dir); ent; ent = readdir(dir)) {
+#ifdef _DIRENT_HAVE_D_TYPE
 		if (ent->d_type != DT_UNKNOWN &&
 		    (ent->d_type != DT_REG && ent->d_type != DT_LNK))
 			continue;
+#endif
 
 		full = _XcursorBuildFullname(path, "", ent->d_name);
 		if (!full)

@@ -19,7 +19,7 @@
 extern PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES;
 
 struct wlr_gles2_pixel_format {
-	uint32_t wl_format;
+	enum wl_shm_format wl_format;
 	GLint gl_format, gl_type;
 	int depth, bpp;
 	bool has_alpha;
@@ -38,6 +38,12 @@ struct wlr_gles2_renderer {
 
 	struct wlr_egl *egl;
 	const char *exts_str;
+
+	struct {
+		bool read_format_bgra_ext;
+		bool debug_khr;
+		bool egl_image_external_oes;
+	} exts;
 
 	struct {
 		struct {
@@ -72,6 +78,7 @@ struct wlr_gles2_texture {
 	enum wlr_gles2_texture_type type;
 	int width, height;
 	bool has_alpha;
+	enum wl_shm_format wl_format; // used to interpret upload data
 	bool inverted_y;
 
 	// Not set if WLR_GLES2_TEXTURE_GLTEX
@@ -86,7 +93,9 @@ struct wlr_gles2_texture {
 
 const struct wlr_gles2_pixel_format *get_gles2_format_from_wl(
 	enum wl_shm_format fmt);
-const enum wl_shm_format *get_gles2_formats(size_t *len);
+const struct wlr_gles2_pixel_format *get_gles2_format_from_gl(
+	GLint gl_format, GLint gl_type, bool alpha);
+const enum wl_shm_format *get_gles2_wl_formats(size_t *len);
 
 struct wlr_gles2_texture *gles2_get_texture(
 	struct wlr_texture *wlr_texture);
