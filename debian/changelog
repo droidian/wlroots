@@ -1,3 +1,11 @@
+wlroots (0.2-1) experimental; urgency=medium
+
+  * New upstream release
+  * [bb72a5c] d/control: Add Vcs-* URLs
+  * [1850149] d/control: Switch Vcs-* URLs to swaywm-team
+
+ -- Guido Günther <agx@sigxcpu.org>  Sat, 01 Dec 2018 17:56:04 +0100
+
 wlroots (0.0.0~git20181009-1) experimental; urgency=medium
 
   * New upstream git snapshot
@@ -8,7 +16,7 @@ wlroots (0.0.0~git20181009-1) experimental; urgency=medium
     and link against libwlroots.
   * [7411028] Drop rpath patch.  Not needed anymore
 
- -- Guido Günther <agx@sigxcpu.org>  Tue, 09 Oct 2018 15:34:25 +0200
+ -- Guido Günther <agx@sigxcpu.org>  Sat, 01 Dec 2018 17:55:56 +0100
 
 wlroots (0.0.0~git20180524-1) experimental; urgency=medium
 
