@@ -219,8 +219,12 @@ bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform, void *remote_display,
 		goto error;
 	}
 
-	egl->display = egl->procs.eglGetPlatformDisplayEXT(platform,
-		remote_display, NULL);
+	if (platform) {
+		egl->display = egl->procs.eglGetPlatformDisplayEXT(platform,
+				remote_display, NULL);
+	} else {
+		egl->display = eglGetDisplay(remote_display);
+	}
 	if (egl->display == EGL_NO_DISPLAY) {
 		wlr_log(WLR_ERROR, "Failed to create EGL display");
 		goto error;
