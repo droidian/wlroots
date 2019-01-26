@@ -105,7 +105,7 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 	hwcDevicePtr->getDisplayAttributes(hwcDevicePtr, 0,
 			configs[0], attributes, attr_values);
 
-	wlr_log(L_INFO, "width: %i height: %i\n", attr_values[0], attr_values[1]);
+	wlr_log(WLR_INFO, "width: %i height: %i\n", attr_values[0], attr_values[1]);
 	hwc->hwcWidth = attr_values[0];
 	hwc->hwcHeight = attr_values[1];
 

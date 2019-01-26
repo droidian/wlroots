@@ -49,7 +49,7 @@ static EGLSurface egl_create_surface(struct wlr_hwcomposer_backend *backend, uns
 
 	EGLSurface surf = eglCreateWindowSurface(egl->display, egl->config, (EGLNativeWindowType)win, NULL);
 	if (surf == EGL_NO_SURFACE) {
-		wlr_log(L_ERROR, "Failed to create EGL surface");
+		wlr_log(WLR_ERROR, "Failed to create EGL surface");
 		return EGL_NO_SURFACE;
 	}
 	return surf;
@@ -72,7 +72,7 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 
 	output->egl_surface = egl_create_surface(backend, width, height);
 	if (output->egl_surface == EGL_NO_SURFACE) {
-		wlr_log(L_ERROR, "Failed to recreate EGL surface");
+		wlr_log(WLR_ERROR, "Failed to recreate EGL surface");
 		wlr_output_destroy(wlr_output);
 		return false;
 	}
@@ -147,7 +147,7 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
 	struct wlr_hwcomposer_output *output =
 		calloc(1, sizeof(struct wlr_hwcomposer_output));
 	if (output == NULL) {
-		wlr_log(L_ERROR, "Failed to allocate wlr_hwcomposer_output");
+		wlr_log(WLR_ERROR, "Failed to allocate wlr_hwcomposer_output");
 		return NULL;
 	}
 	output->backend = backend;
@@ -157,7 +157,7 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
 
 	output->egl_surface = egl_create_surface(backend, width, height);
 	if (output->egl_surface == EGL_NO_SURFACE) {
-		wlr_log(L_ERROR, "Failed to create EGL surface");
+		wlr_log(WLR_ERROR, "Failed to create EGL surface");
 		goto error;
 	}
 

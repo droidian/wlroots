@@ -10,7 +10,7 @@
 static bool backend_start(struct wlr_backend *wlr_backend) {
 	struct wlr_hwcomposer_backend *backend =
 		(struct wlr_hwcomposer_backend *)wlr_backend;
-	wlr_log(L_INFO, "Starting hwcomposer backend");
+	wlr_log(WLR_INFO, "Starting hwcomposer backend");
 
 	struct wlr_hwcomposer_output *output;
 	wl_list_for_each(output, &backend->outputs, link) {
@@ -66,12 +66,12 @@ static void handle_display_destroy(struct wl_listener *listener, void *data) {
 
 struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 		wlr_renderer_create_func_t create_renderer_func) {
-	wlr_log(L_INFO, "Creating hwcomposer backend");
+	wlr_log(WLR_INFO, "Creating hwcomposer backend");
 
 	struct wlr_hwcomposer_backend *backend =
 		calloc(1, sizeof(struct wlr_hwcomposer_backend));
 	if (!backend) {
-		wlr_log(L_ERROR, "Failed to allocate wlr_hwcomposer_backend");
+		wlr_log(WLR_ERROR, "Failed to allocate wlr_hwcomposer_backend");
 		return NULL;
 	}
 	wlr_backend_init(&backend->backend, &backend_impl);
@@ -82,7 +82,8 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 
 	static const EGLint config_attribs[] = {
 		EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-		EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,		EGL_ALPHA_SIZE, 0,
+		EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+		EGL_ALPHA_SIZE, 0,
 		EGL_RED_SIZE, 8,
 		EGL_GREEN_SIZE, 8,
 		EGL_BLUE_SIZE, 8,
@@ -97,11 +98,11 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 		create_renderer_func = wlr_renderer_autocreate;
 	}
 
-	backend->renderer = create_renderer_func(&backend->egl, EGL_PLATFORM_SURFACELESS_MESA,
+	backend->renderer = create_renderer_func(&backend->egl, 0,
 		NULL, (EGLint*)config_attribs, 0);
 
 	if (!backend->renderer) {
-		wlr_log(L_ERROR, "Failed to create renderer");
+		wlr_log(WLR_ERROR, "Failed to create renderer");
 		free(backend);
 		return NULL;
 	}
