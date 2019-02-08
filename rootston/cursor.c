@@ -7,11 +7,7 @@
 #include <wlr/util/edges.h>
 #include <wlr/util/log.h>
 #include <wlr/util/region.h>
-#ifdef __linux__
 #include <linux/input-event-codes.h>
-#elif __FreeBSD__
-#include <dev/evdev/input-event-codes.h>
-#endif
 #include "rootston/cursor.h"
 #include "rootston/desktop.h"
 #include "rootston/view.h"
@@ -35,7 +31,8 @@ void roots_cursor_destroy(struct roots_cursor *cursor) {
 	// TODO
 }
 
-static void seat_view_deco_motion(struct roots_seat_view *view, double deco_sx, double deco_sy) {
+static void seat_view_deco_motion(struct roots_seat_view *view,
+		double deco_sx, double deco_sy) {
 	struct roots_cursor *cursor = view->seat->cursor;
 
 	double sx = deco_sx;
@@ -104,8 +101,7 @@ static void seat_view_deco_button(struct roots_seat_view *view, double sx,
 }
 
 static void roots_passthrough_cursor(struct roots_cursor *cursor,
-		int64_t time) {
-	bool focus_changed;
+		uint32_t time) {
 	double sx, sy;
 	struct roots_view *view = NULL;
 	struct roots_seat *seat = cursor->seat;
@@ -149,23 +145,26 @@ static void roots_passthrough_cursor(struct roots_cursor *cursor,
 	cursor->wlr_surface = surface;
 
 	if (surface) {
-		focus_changed = (seat->seat->pointer_state.focused_surface != surface);
 		wlr_seat_pointer_notify_enter(seat->seat, surface, sx, sy);
-		if (!focus_changed && time > 0) {
-			wlr_seat_pointer_notify_motion(seat->seat, time, sx, sy);
-		}
+		wlr_seat_pointer_notify_motion(seat->seat, time, sx, sy);
 	} else {
 		wlr_seat_pointer_clear_focus(seat->seat);
 	}
 
-	struct roots_drag_icon *drag_icon;
-	wl_list_for_each(drag_icon, &seat->drag_icons, link) {
-		roots_drag_icon_update_position(drag_icon);
+	if (seat->drag_icon != NULL) {
+		roots_drag_icon_update_position(seat->drag_icon);
 	}
 }
 
+static inline int64_t timespec_to_msec(const struct timespec *a) {
+	return (int64_t)a->tv_sec * 1000 + a->tv_nsec / 1000000;
+}
+
 void roots_cursor_update_focus(struct roots_cursor *cursor) {
-	roots_passthrough_cursor(cursor, -1);
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+
+	roots_passthrough_cursor(cursor, timespec_to_msec(&now));
 }
 
 void roots_cursor_update_position(struct roots_cursor *cursor,
@@ -190,8 +189,8 @@ void roots_cursor_update_position(struct roots_cursor *cursor,
 		if (view != NULL) {
 			double dx = cursor->cursor->x - cursor->offs_x;
 			double dy = cursor->cursor->y - cursor->offs_y;
-			double x = view->x;
-			double y = view->y;
+			double x = view->box.x;
+			double y = view->box.y;
 			int width = cursor->view_width;
 			int height = cursor->view_height;
 			if (cursor->resize_edges & WLR_EDGE_TOP) {
@@ -220,8 +219,8 @@ void roots_cursor_update_position(struct roots_cursor *cursor,
 	case ROOTS_CURSOR_ROTATE:
 		view = roots_seat_get_focus(seat);
 		if (view != NULL) {
-			int ox = view->x + view->wlr_surface->current.width/2,
-				oy = view->y + view->wlr_surface->current.height/2;
+			int ox = view->box.x + view->wlr_surface->current.width/2,
+				oy = view->box.y + view->wlr_surface->current.height/2;
 			int ux = cursor->offs_x - ox,
 				uy = cursor->offs_y - oy;
 			int vx = cursor->cursor->x - ox,
@@ -310,6 +309,14 @@ void roots_cursor_handle_motion(struct roots_cursor *cursor,
 	double dx = event->delta_x;
 	double dy = event->delta_y;
 
+	double dx_unaccel = event->unaccel_dx;
+	double dy_unaccel = event->unaccel_dy;
+
+	wlr_relative_pointer_manager_v1_send_relative_motion(
+		cursor->seat->input->server->desktop->relative_pointer_manager,
+		cursor->seat->seat, (uint64_t)event->time_msec * 1000, dx, dy,
+		dx_unaccel, dy_unaccel);
+
 	if (cursor->active_constraint) {
 		struct roots_view *view = cursor->pointer_view->view;
 		assert(view);
@@ -322,11 +329,11 @@ void roots_cursor_handle_motion(struct roots_cursor *cursor,
 			double lx2 = lx1 + dx;
 			double ly2 = ly1 + dy;
 
-			double sx1 = lx1 - view->x;
-			double sy1 = ly1 - view->y;
+			double sx1 = lx1 - view->box.x;
+			double sy1 = ly1 - view->box.y;
 
-			double sx2 = lx2 - view->x;
-			double sy2 = ly2 - view->y;
+			double sx2 = lx2 - view->box.x;
+			double sy2 = ly2 - view->box.y;
 
 			double sx2_confined, sy2_confined;
 			if (!wlr_region_confine(&cursor->confine, sx1, sy1, sx2, sy2,
@@ -349,12 +356,18 @@ void roots_cursor_handle_motion_absolute(struct roots_cursor *cursor,
 	wlr_cursor_absolute_to_layout_coords(cursor->cursor, event->device, event->x,
 		event->y, &lx, &ly);
 
+	double dx = lx - cursor->cursor->x;
+	double dy = ly - cursor->cursor->y;
+	wlr_relative_pointer_manager_v1_send_relative_motion(
+		cursor->seat->input->server->desktop->relative_pointer_manager,
+		cursor->seat->seat, (uint64_t)event->time_msec * 1000, dx, dy, dx, dy);
+
 	if (cursor->pointer_view) {
 		struct roots_view *view = cursor->pointer_view->view;
 
 		if (cursor->active_constraint &&
 				!pixman_region32_contains_point(&cursor->confine,
-					floor(lx - view->x), floor(ly - view->y), NULL)) {
+					floor(lx - view->box.x), floor(ly - view->box.y), NULL)) {
 			return;
 		}
 	}
@@ -373,6 +386,10 @@ void roots_cursor_handle_axis(struct roots_cursor *cursor,
 		struct wlr_event_pointer_axis *event) {
 	wlr_seat_pointer_notify_axis(cursor->seat->seat, event->time_msec,
 		event->orientation, event->delta, event->delta_discrete, event->source);
+}
+
+void roots_cursor_handle_frame(struct roots_cursor *cursor) {
+	wlr_seat_pointer_notify_frame(cursor->seat->seat);
 }
 
 void roots_cursor_handle_touch_down(struct roots_cursor *cursor,
@@ -474,7 +491,7 @@ void roots_cursor_handle_tool_axis(struct roots_cursor *cursor,
 
 		if (cursor->active_constraint &&
 				!pixman_region32_contains_point(&cursor->confine,
-					floor(lx - view->x), floor(ly - view->y), NULL)) {
+					floor(lx - view->box.x), floor(ly - view->box.y), NULL)) {
 			return;
 		}
 	}
@@ -598,11 +615,11 @@ void roots_cursor_constrain(struct roots_cursor *cursor,
 			double sx = (boxes[0].x1 + boxes[0].x2) / 2.;
 			double sy = (boxes[0].y1 + boxes[0].y2) / 2.;
 
-			rotate_child_position(&sx, &sy, 0, 0, view->width, view->height,
+			rotate_child_position(&sx, &sy, 0, 0, view->box.width, view->box.height,
 				view->rotation);
 
-			double lx = view->x + sx;
-			double ly = view->y + sy;
+			double lx = view->box.x + sx;
+			double ly = view->box.y + sy;
 
 			wlr_cursor_warp_closest(cursor->cursor, NULL, lx, ly);
 		}

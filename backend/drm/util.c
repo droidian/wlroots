@@ -1,3 +1,5 @@
+#include <assert.h>
+#include <drm_fourcc.h>
 #include <drm_mode.h>
 #include <drm.h>
 #include <gbm.h>
@@ -6,7 +8,7 @@
 #include <wlr/util/log.h>
 #include "backend/drm/util.h"
 
-int32_t calculate_refresh_rate(drmModeModeInfo *mode) {
+int32_t calculate_refresh_rate(const drmModeModeInfo *mode) {
 	int32_t refresh = (mode->clock * 1000000LL / mode->htotal +
 		mode->vtotal / 2) / mode->vtotal;
 
@@ -118,9 +120,6 @@ void parse_edid(struct wlr_output *restrict output, size_t len, const uint8_t *d
 	uint32_t serial = data[12] | (data[13] << 8) | (data[14] << 8) | (data[15] << 8);
 	snprintf(output->serial, sizeof(output->serial), "0x%08X", serial);
 
-	output->phys_width = ((data[68] & 0xf0) << 4) | data[66];
-	output->phys_height = ((data[68] & 0x0f) << 8) | data[67];
-
 	for (size_t i = 72; i <= 108; i += 18) {
 		uint16_t flag = (data[i] << 8) | data[i + 1];
 		if (flag == 0 && data[i + 3] == 0xFC) {
@@ -179,11 +178,15 @@ static void free_fb(struct gbm_bo *bo, void *data) {
 	}
 }
 
-uint32_t get_fb_for_bo(struct gbm_bo *bo) {
+uint32_t get_fb_for_bo(struct gbm_bo *bo, uint32_t drm_format) {
 	uint32_t id = (uintptr_t)gbm_bo_get_user_data(bo);
 	if (id) {
 		return id;
 	}
+
+	assert(gbm_bo_get_format(bo) == GBM_FORMAT_ARGB8888);
+	assert(drm_format == DRM_FORMAT_ARGB8888 ||
+		drm_format == DRM_FORMAT_XRGB8888);
 
 	struct gbm_device *gbm = gbm_bo_get_device(bo);
 
@@ -193,9 +196,9 @@ uint32_t get_fb_for_bo(struct gbm_bo *bo) {
 	uint32_t handles[4] = {gbm_bo_get_handle(bo).u32};
 	uint32_t pitches[4] = {gbm_bo_get_stride(bo)};
 	uint32_t offsets[4] = {gbm_bo_get_offset(bo, 0)};
-	uint32_t format = gbm_bo_get_format(bo);
 
-	if (drmModeAddFB2(fd, width, height, format, handles, pitches, offsets, &id, 0)) {
+	if (drmModeAddFB2(fd, width, height, drm_format,
+			handles, pitches, offsets, &id, 0)) {
 		wlr_log_errno(WLR_ERROR, "Unable to add DRM framebuffer");
 	}
 

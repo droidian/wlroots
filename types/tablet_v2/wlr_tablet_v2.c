@@ -28,13 +28,14 @@ struct wlr_tablet_manager_client_v2 {
 };
 
 static void tablet_seat_destroy(struct wlr_tablet_seat_v2 *seat) {
-	wl_list_remove(&seat->link);
-	wl_list_remove(&seat->seat_destroy.link);
-
 	struct wlr_tablet_seat_client_v2 *client, *client_tmp;
 	wl_list_for_each_safe(client, client_tmp, &seat->clients, seat_link) {
 		tablet_seat_client_v2_destroy(client->resource);
 	}
+
+	wl_list_remove(&seat->link);
+	wl_list_remove(&seat->seat_destroy.link);
+	free(seat);
 }
 
 static void handle_wlr_seat_destroy(struct wl_listener *listener, void *data) {
@@ -195,7 +196,7 @@ static void get_tablet_seat(struct wl_client *wl_client, struct wl_resource *res
 	wl_list_insert(&manager->tablet_seats, &seat_client->client_link);
 	wl_list_insert(&tablet_seat->clients, &seat_client->seat_link);
 
-	// We need to emit the devices allready on the seat
+	// We need to emit the devices already on the seat
 	struct wlr_tablet_v2_tablet *tablet_pos;
 	wl_list_for_each(tablet_pos, &tablet_seat->tablets, link) {
 		add_tablet_client(seat_client, tablet_pos);

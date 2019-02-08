@@ -51,6 +51,13 @@ struct wlr_cursor {
 		struct wl_signal motion_absolute;
 		struct wl_signal button;
 		struct wl_signal axis;
+		struct wl_signal frame;
+		struct wl_signal swipe_begin;
+		struct wl_signal swipe_update;
+		struct wl_signal swipe_end;
+		struct wl_signal pinch_begin;
+		struct wl_signal pinch_update;
+		struct wl_signal pinch_end;
 
 		struct wl_signal touch_up;
 		struct wl_signal touch_down;

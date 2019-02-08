@@ -61,8 +61,8 @@ static void drag_set_focus(struct wlr_drag *drag,
 
 		struct wl_resource *device_resource;
 		wl_resource_for_each(device_resource, &focus_client->data_devices) {
-			struct wlr_data_offer *offer =
-				data_source_send_offer(drag->source, device_resource);
+			struct wlr_data_offer *offer = data_offer_create(device_resource,
+				drag->source, WLR_DATA_OFFER_DRAG);
 			if (offer == NULL) {
 				wl_resource_post_no_memory(device_resource);
 				return;
@@ -122,6 +122,9 @@ static void drag_end(struct wlr_drag *drag) {
 			drag_icon_set_mapped(drag->icon, false);
 		}
 
+		assert(drag->seat->drag == drag);
+		drag->seat->drag = NULL;
+
 		wlr_signal_emit_safe(&drag->events.destroy, drag);
 		free(drag);
 	}
@@ -174,7 +177,9 @@ static uint32_t drag_handle_pointer_button(struct wlr_seat_pointer_grab *grab,
 			};
 			wlr_signal_emit_safe(&drag->events.drop, &event);
 		} else if (drag->source->impl->dnd_finish) {
-			wlr_data_source_cancel(drag->source);
+			// This will end the grab and free `drag`
+			wlr_data_source_destroy(drag->source);
+			return 0;
 		}
 	}
 
@@ -432,6 +437,13 @@ bool seat_client_start_drag(struct wlr_seat_client *client,
 		return true;
 	}
 
+	if (seat->drag != NULL) {
+		wlr_log(WLR_DEBUG, "Refusing to start drag, "
+			"another drag is already in progress");
+		free(drag);
+		return true;
+	}
+
 	if (icon_surface) {
 		int32_t touch_id = (point ? point->touch_id : 0);
 		struct wlr_drag_icon *icon =
@@ -478,6 +490,9 @@ bool seat_client_start_drag(struct wlr_seat_client *client,
 	seat->drag = drag; // TODO: unset this thing somewhere
 	seat->drag_serial = serial;
 
+	if (seat->drag_source != NULL) {
+		wl_list_remove(&seat->drag_source_destroy.link);
+	}
 	seat->drag_source = source;
 	if (source != NULL) {
 		seat->drag_source_destroy.notify = seat_handle_drag_source_destroy;

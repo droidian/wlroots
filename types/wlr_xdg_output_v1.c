@@ -25,24 +25,10 @@ static void output_handle_resource_destroy(struct wl_resource *resource) {
 
 static void output_send_details(struct wlr_xdg_output_v1 *xdg_output,
 		struct wl_resource *resource) {
-	struct wlr_output *output = xdg_output->layout_output->output;
-
 	zxdg_output_v1_send_logical_position(resource,
 		xdg_output->x, xdg_output->y);
 	zxdg_output_v1_send_logical_size(resource,
 		xdg_output->width, xdg_output->height);
-
-	uint32_t version = wl_resource_get_version(resource);
-	if (version >= ZXDG_OUTPUT_V1_NAME_SINCE_VERSION) {
-		zxdg_output_v1_send_name(resource, output->name);
-	}
-	if (version >= ZXDG_OUTPUT_V1_DESCRIPTION_SINCE_VERSION) {
-		char description[128];
-		snprintf(description, sizeof(description), "%s %s %s (%s)",
-			output->make, output->model, output->serial, output->name);
-		zxdg_output_v1_send_description(resource, description);
-	}
-
 	zxdg_output_v1_send_done(resource);
 }
 
@@ -127,6 +113,18 @@ static void output_manager_handle_get_xdg_output(struct wl_client *client,
 
 	wl_list_insert(&xdg_output->resources,
 		wl_resource_get_link(xdg_output_resource));
+
+	// Name and description should only be sent once per output
+	uint32_t version = wl_resource_get_version(xdg_output_resource);
+	if (version >= ZXDG_OUTPUT_V1_NAME_SINCE_VERSION) {
+		zxdg_output_v1_send_name(xdg_output_resource, output->name);
+	}
+	if (version >= ZXDG_OUTPUT_V1_DESCRIPTION_SINCE_VERSION) {
+		char description[128];
+		snprintf(description, sizeof(description), "%s %s %s (%s)",
+			output->make, output->model, output->serial, output->name);
+		zxdg_output_v1_send_description(xdg_output_resource, description);
+	}
 
 	output_send_details(xdg_output, xdg_output_resource);
 }

@@ -5,6 +5,7 @@
 #include "rootston/input.h"
 #include "rootston/keyboard.h"
 #include "rootston/layers.h"
+#include "rootston/switch.h"
 #include "rootston/text_input.h"
 
 struct roots_seat {
@@ -28,14 +29,17 @@ struct roots_seat {
 	struct wl_list views; // roots_seat_view::link
 	bool has_focus;
 
-	struct wl_list drag_icons; // roots_drag_icon::link
+	struct roots_drag_icon *drag_icon; // can be NULL
 
 	struct wl_list keyboards;
 	struct wl_list pointers;
+	struct wl_list switches;
 	struct wl_list touch;
 	struct wl_list tablets;
 	struct wl_list tablet_pads;
 
+	struct wl_listener request_set_selection;
+	struct wl_listener request_set_primary_selection;
 	struct wl_listener new_drag_icon;
 	struct wl_listener destroy;
 };
@@ -57,7 +61,6 @@ struct roots_seat_view {
 struct roots_drag_icon {
 	struct roots_seat *seat;
 	struct wlr_drag_icon *wlr_drag_icon;
-	struct wl_list link;
 
 	double x, y;
 

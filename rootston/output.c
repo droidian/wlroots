@@ -67,8 +67,12 @@ static void surface_for_each_surface(struct wlr_surface *surface,
 static void view_for_each_surface(struct roots_view *view,
 		struct layout_data *layout_data, wlr_surface_iterator_func_t iterator,
 		void *user_data) {
-	layout_data->x = view->x;
-	layout_data->y = view->y;
+	if (!view->wlr_surface) {
+		return;
+	}
+
+	layout_data->x = view->box.x;
+	layout_data->y = view->box.y;
 	layout_data->width = view->wlr_surface->current.width;
 	layout_data->height = view->wlr_surface->current.height;
 	layout_data->rotation = view->rotation;
@@ -116,15 +120,14 @@ static void drag_icons_for_each_surface(struct roots_input *input,
 		void *user_data) {
 	struct roots_seat *seat;
 	wl_list_for_each(seat, &input->seats, link) {
-		struct roots_drag_icon *drag_icon;
-		wl_list_for_each(drag_icon, &seat->drag_icons, link) {
-			if (!drag_icon->wlr_drag_icon->mapped) {
-				continue;
-			}
-			surface_for_each_surface(drag_icon->wlr_drag_icon->surface,
-				drag_icon->x, drag_icon->y, 0, layout_data,
-				iterator, user_data);
+		struct roots_drag_icon *drag_icon = seat->drag_icon;
+		if (drag_icon == NULL || !drag_icon->wlr_drag_icon->mapped) {
+			continue;
 		}
+
+		surface_for_each_surface(drag_icon->wlr_drag_icon->surface,
+			drag_icon->x, drag_icon->y, 0, layout_data,
+			iterator, user_data);
 	}
 }
 
@@ -217,7 +220,7 @@ static bool surface_intersect_output(struct wlr_surface *surface,
 		.x = lx, .y = ly,
 		.width = surface->current.width, .height = surface->current.height,
 	};
-	wlr_box_rotated_bounds(&layout_box, rotation, &layout_box);
+	wlr_box_rotated_bounds(&layout_box, &layout_box, rotation);
 	return wlr_output_layout_intersects(output_layout, wlr_output, &layout_box);
 }
 
@@ -238,7 +241,7 @@ static void scissor_output(struct roots_output *output, pixman_box32_t *rect) {
 
 	enum wl_output_transform transform =
 		wlr_output_transform_invert(wlr_output->transform);
-	wlr_box_transform(&box, transform, ow, oh, &box);
+	wlr_box_transform(&box, &box, transform, ow, oh);
 
 	wlr_renderer_scissor(renderer, &box);
 }
@@ -269,7 +272,7 @@ static void render_surface(struct wlr_surface *surface, int sx, int sy,
 	}
 
 	struct wlr_box rotated;
-	wlr_box_rotated_bounds(&box, rotation, &rotated);
+	wlr_box_rotated_bounds(&rotated, &box, rotation);
 
 	pixman_region32_t damage;
 	pixman_region32_init(&damage);
@@ -304,13 +307,13 @@ static void get_decoration_box(struct roots_view *view,
 
 	struct wlr_box deco_box;
 	view_get_deco_box(view, &deco_box);
-	double sx = deco_box.x - view->x;
-	double sy = deco_box.y - view->y;
+	double sx = deco_box.x - view->box.x;
+	double sy = deco_box.y - view->box.y;
 	rotate_child_position(&sx, &sy, deco_box.width, deco_box.height,
 		view->wlr_surface->current.width,
 		view->wlr_surface->current.height, view->rotation);
-	double x = sx + view->x;
-	double y = sy + view->y;
+	double x = sx + view->box.x;
+	double y = sy + view->box.y;
 
 	wlr_output_layout_output_coords(output->desktop->layout, wlr_output, &x, &y);
 
@@ -335,7 +338,7 @@ static void render_decorations(struct roots_view *view,
 	get_decoration_box(view, output, &box);
 
 	struct wlr_box rotated;
-	wlr_box_rotated_bounds(&box, view->rotation, &rotated);
+	wlr_box_rotated_bounds(&rotated, &box, view->rotation);
 
 	pixman_region32_t damage;
 	pixman_region32_init(&damage);
@@ -522,11 +525,16 @@ renderer_end:
 	wlr_renderer_scissor(renderer, NULL);
 	wlr_renderer_end(renderer);
 
+	int width, height;
+	wlr_output_transformed_resolution(wlr_output, &width, &height);
+
 	if (server->config->debug_damage_tracking) {
-		int width, height;
-		wlr_output_transformed_resolution(wlr_output, &width, &height);
 		pixman_region32_union_rect(&damage, &damage, 0, 0, width, height);
 	}
+
+	enum wl_output_transform transform =
+		wlr_output_transform_invert(wlr_output->transform);
+	wlr_region_transform(&damage, &damage, transform, width, height);
 
 	if (!wlr_output_damage_swap_buffers(output->damage, &now, &damage)) {
 		goto damage_finish;
@@ -600,7 +608,7 @@ static void damage_whole_surface(struct wlr_surface *surface, int sx, int sy,
 		return;
 	}
 
-	wlr_box_rotated_bounds(&box, rotation, &box);
+	wlr_box_rotated_bounds(&box, &box, rotation);
 
 	wlr_output_damage_add_box(output->damage, &box);
 }
@@ -623,7 +631,7 @@ static void damage_whole_decoration(struct roots_view *view,
 	struct wlr_box box;
 	get_decoration_box(view, output, &box);
 
-	wlr_box_rotated_bounds(&box, view->rotation, &box);
+	wlr_box_rotated_bounds(&box, &box, view->rotation);
 
 	wlr_output_damage_add_box(output->damage, &box);
 }

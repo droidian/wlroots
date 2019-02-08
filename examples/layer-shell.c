@@ -1,9 +1,5 @@
 #define _POSIX_C_SOURCE 200112L
-#ifdef __linux__
 #include <linux/input-event-codes.h>
-#elif __FreeBSD__
-#include <dev/evdev/input-event-codes.h>
-#endif
 #include <assert.h>
 #include <GLES2/gl2.h>
 #include <limits.h>
@@ -87,7 +83,9 @@ static void popup_surface_frame_callback(
 		void *data, struct wl_callback *cb, uint32_t time) {
 	wl_callback_destroy(cb);
 	popup_frame_callback = NULL;
-	draw_popup();
+	if (popup) {
+		draw_popup();
+	}
 }
 
 static struct wl_callback_listener popup_frame_listener = {

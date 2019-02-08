@@ -173,8 +173,12 @@ bool wlr_output_set_custom_mode(struct wlr_output *output, int32_t width,
 void wlr_output_update_mode(struct wlr_output *output,
 		struct wlr_output_mode *mode) {
 	output->current_mode = mode;
-	wlr_output_update_custom_mode(output, mode->width, mode->height,
-		mode->refresh);
+	if (mode != NULL) {
+		wlr_output_update_custom_mode(output, mode->width, mode->height,
+			mode->refresh);
+	} else {
+		wlr_output_update_custom_mode(output, 0, 0, 0);
+	}
 }
 
 void wlr_output_update_custom_mode(struct wlr_output *output, int32_t width,
@@ -365,9 +369,6 @@ bool wlr_output_swap_buffers(struct wlr_output *output, struct timespec *when,
 		output->idle_frame = NULL;
 	}
 
-	int width, height;
-	wlr_output_transformed_resolution(output, &width, &height);
-
 	struct timespec now;
 	if (when == NULL) {
 		clock_gettime(CLOCK_MONOTONIC, &now);
@@ -384,18 +385,11 @@ bool wlr_output_swap_buffers(struct wlr_output *output, struct timespec *when,
 	pixman_region32_t render_damage;
 	pixman_region32_init(&render_damage);
 	pixman_region32_union_rect(&render_damage, &render_damage, 0, 0,
-		width, height);
+		output->width, output->height);
 	if (damage != NULL) {
 		// Damage tracking supported
 		pixman_region32_intersect(&render_damage, &render_damage, damage);
 	}
-
-	// Transform damage into renderer coordinates, ie. upside down
-	// TODO: take transformed coords, make the renderer flip the damage
-	enum wl_output_transform transform =
-		wlr_output_transform_invert(output->transform);
-	wlr_region_transform(&render_damage, &render_damage, transform,
-		width, height);
 
 	if (!output->impl->swap_buffers(output, damage ? &render_damage : NULL)) {
 		pixman_region32_fini(&render_damage);
@@ -555,7 +549,7 @@ static void output_scissor(struct wlr_output *output, pixman_box32_t *rect) {
 
 	enum wl_output_transform transform =
 		wlr_output_transform_invert(output->transform);
-	wlr_box_transform(&box, transform, ow, oh, &box);
+	wlr_box_transform(&box, &box, transform, ow, oh);
 
 	wlr_renderer_scissor(renderer, &box);
 }
@@ -675,7 +669,7 @@ static void output_cursor_update_visible(struct wlr_output_cursor *cursor) {
 
 	struct wlr_box intersection;
 	bool visible =
-		wlr_box_intersection(&output_box, &cursor_box, &intersection);
+		wlr_box_intersection(&intersection, &output_box, &cursor_box);
 
 	if (cursor->surface != NULL) {
 		if (cursor->visible && !visible) {

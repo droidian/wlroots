@@ -81,6 +81,10 @@ examples = {
 		'src': 'pointer-constraints.c',
 		'dep': [wayland_client, wlr_protos, wlroots],
 	},
+	'relative-pointer': {
+		'src': 'relative-pointer-unstable-v1.c',
+		'dep': [wayland_client, wlr_protos, wlroots],
+	},
 	'dmabuf-capture': {
 		'src': 'dmabuf-capture.c',
 		'dep': [
@@ -108,6 +112,14 @@ examples = {
 	'text-input': {
 		'src': 'text-input.c',
 		'dep': [wayland_cursor, wayland_client, wlr_protos, wlroots],
+	},
+	'foreign-toplevel': {
+		'src': 'foreign-toplevel.c',
+		'dep': [wayland_client, wlr_protos, wlroots],
+	},
+	'fullscreen-shell': {
+		'src': 'fullscreen-shell.c',
+		'dep': [wlr_protos, wlroots],
 	},
 }
 

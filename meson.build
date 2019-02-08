@@ -1,7 +1,7 @@
 project(
 	'wlroots',
 	'c',
-	version: '0.1.0',
+	version: '0.2.0',
 	license: 'MIT',
 	meson_version: '>=0.48.0',
 	default_options: [
@@ -53,10 +53,10 @@ add_project_arguments('-DWL_HIDE_DEPRECATED', language: 'c')
 wayland_server = dependency('wayland-server', version: '>=1.16')
 wayland_client = dependency('wayland-client')
 wayland_egl    = dependency('wayland-egl')
-wayland_protos = dependency('wayland-protocols', version: '>=1.15')
+wayland_protos = dependency('wayland-protocols', version: '>=1.16')
 egl            = dependency('egl')
 glesv2         = dependency('glesv2')
-drm            = dependency('libdrm')
+drm            = dependency('libdrm', version: '>=2.4.95')
 gbm            = dependency('gbm', version: '>=17.1.0')
 libinput       = dependency('libinput', version: '>=1.7.0')
 xkbcommon      = dependency('xkbcommon')
@@ -116,12 +116,6 @@ wlr_deps += [
 	math,
 ]
 
-if host_machine.system() == 'freebsd'
-	override_options = ['b_lundef=false']
-else
-	override_options = []
-endif
-
 symbols_file = 'wlroots.syms'
 symbols_flag = '-Wl,--version-script,@0@/@1@'.format(meson.current_source_dir(), symbols_file)
 lib_wlr = library(
@@ -133,7 +127,6 @@ lib_wlr = library(
 	install: true,
 	link_args : symbols_flag,
 	link_depends: symbols_file,
-	override_options: override_options,
 )
 
 wlroots = declare_dependency(

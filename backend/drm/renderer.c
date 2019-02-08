@@ -14,10 +14,6 @@
 #include "backend/drm/drm.h"
 #include "glapi.h"
 
-#ifndef DRM_FORMAT_MOD_LINEAR
-#define DRM_FORMAT_MOD_LINEAR 0
-#endif
-
 bool init_drm_renderer(struct wlr_drm_backend *drm,
 		struct wlr_drm_renderer *renderer, wlr_renderer_create_func_t create_renderer_func) {
 	renderer->gbm = gbm_create_device(drm->fd);
@@ -38,10 +34,10 @@ bool init_drm_renderer(struct wlr_drm_backend *drm,
 		EGL_NONE,
 	};
 
+	renderer->gbm_format = GBM_FORMAT_ARGB8888;
 	renderer->wlr_rend = create_renderer_func(&renderer->egl,
 		EGL_PLATFORM_GBM_MESA, renderer->gbm,
-		config_attribs, GBM_FORMAT_ARGB8888);
-
+		config_attribs, renderer->gbm_format);
 	if (!renderer->wlr_rend) {
 		wlr_log(WLR_ERROR, "Failed to create EGL/WLR renderer");
 		goto error_gbm;

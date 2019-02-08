@@ -7,24 +7,25 @@
 #include <wlr/types/wlr_box.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_data_control_v1.h>
 #include <wlr/types/wlr_export_dmabuf_v1.h>
-#include <wlr/types/wlr_gamma_control.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
+#include <wlr/types/wlr_gamma_control.h>
+#include <wlr/types/wlr_gtk_primary_selection.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
 #include <wlr/types/wlr_idle.h>
 #include <wlr/types/wlr_input_inhibitor.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
-#include <wlr/types/wlr_gtk_primary_selection.h>
 #include <wlr/types/wlr_server_decoration.h>
+#include <wlr/types/wlr_tablet_v2.h>
 #include <wlr/types/wlr_wl_shell.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_output_v1.h>
+#include <wlr/types/wlr_xdg_output_v1.h>
 #include <wlr/types/wlr_xdg_shell_v6.h>
 #include <wlr/types/wlr_xdg_shell.h>
-#include <wlr/types/wlr_xdg_output_v1.h>
-#include <wlr/types/wlr_tablet_v2.h>
 #include <wlr/util/log.h>
 #include "rootston/layers.h"
 #include "rootston/seat.h"
@@ -48,10 +49,10 @@ struct roots_view *view_create(struct roots_desktop *desktop) {
 }
 
 void view_get_box(const struct roots_view *view, struct wlr_box *box) {
-	box->x = view->x;
-	box->y = view->y;
-	box->width = view->width;
-	box->height = view->height;
+	box->x = view->box.x;
+	box->y = view->box.y;
+	box->width = view->box.width;
+	box->height = view->box.height;
 }
 
 void view_get_deco_box(const struct roots_view *view, struct wlr_box *box) {
@@ -123,15 +124,23 @@ static void view_update_output(const struct roots_view *view,
 			output->wlr_output, &box);
 		if (intersected && !intersects) {
 			wlr_surface_send_leave(view->wlr_surface, output->wlr_output);
+			if (view->toplevel_handle) {
+				wlr_foreign_toplevel_handle_v1_output_leave(
+					view->toplevel_handle, output->wlr_output);
+			}
 		}
 		if (!intersected && intersects) {
 			wlr_surface_send_enter(view->wlr_surface, output->wlr_output);
+			if (view->toplevel_handle) {
+				wlr_foreign_toplevel_handle_v1_output_enter(
+					view->toplevel_handle, output->wlr_output);
+			}
 		}
 	}
 }
 
 void view_move(struct roots_view *view, double x, double y) {
-	if (view->x == x && view->y == y) {
+	if (view->box.x == x && view->box.y == y) {
 		return;
 	}
 
@@ -149,6 +158,11 @@ void view_activate(struct roots_view *view, bool activate) {
 	if (view->activate) {
 		view->activate(view, activate);
 	}
+
+	if (view->toplevel_handle) {
+		wlr_foreign_toplevel_handle_v1_set_activated(view->toplevel_handle,
+			activate);
+	}
 }
 
 void view_resize(struct roots_view *view, uint32_t width, uint32_t height) {
@@ -162,8 +176,8 @@ void view_resize(struct roots_view *view, uint32_t width, uint32_t height) {
 
 void view_move_resize(struct roots_view *view, double x, double y,
 		uint32_t width, uint32_t height) {
-	bool update_x = x != view->x;
-	bool update_y = y != view->y;
+	bool update_x = x != view->box.x;
+	bool update_y = y != view->box.y;
 	if (!update_x && !update_y) {
 		view_resize(view, width, height);
 		return;
@@ -190,8 +204,8 @@ static struct wlr_output *view_get_output(struct roots_view *view) {
 
 	double output_x, output_y;
 	wlr_output_layout_closest_point(view->desktop->layout, NULL,
-		view->x + (double)view_box.width/2,
-		view->y + (double)view_box.height/2,
+		view->box.x + (double)view_box.width/2,
+		view->box.y + (double)view_box.height/2,
 		&output_x, &output_y);
 	return wlr_output_layout_output_at(view->desktop->layout, output_x,
 		output_y);
@@ -225,13 +239,18 @@ void view_maximize(struct roots_view *view, bool maximized) {
 		view->maximize(view, maximized);
 	}
 
+	if (view->toplevel_handle) {
+		wlr_foreign_toplevel_handle_v1_set_maximized(view->toplevel_handle,
+			maximized);
+	}
+
 	if (!view->maximized && maximized) {
 		view->maximized = true;
-		view->saved.x = view->x;
-		view->saved.y = view->y;
+		view->saved.x = view->box.x;
+		view->saved.y = view->box.y;
 		view->saved.rotation = view->rotation;
-		view->saved.width = view->width;
-		view->saved.height = view->height;
+		view->saved.width = view->box.width;
+		view->saved.height = view->box.height;
 
 		view_arrange_maximized(view);
 	}
@@ -272,8 +291,8 @@ void view_set_fullscreen(struct roots_view *view, bool fullscreen,
 		struct wlr_box view_box;
 		view_get_box(view, &view_box);
 
-		view->saved.x = view->x;
-		view->saved.y = view->y;
+		view->saved.x = view->box.x;
+		view->saved.y = view->box.y;
 		view->saved.rotation = view->rotation;
 		view->saved.width = view_box.width;
 		view->saved.height = view_box.height;
@@ -500,7 +519,12 @@ void view_unmap(struct roots_view *view) {
 	}
 
 	view->wlr_surface = NULL;
-	view->width = view->height = 0;
+	view->box.width = view->box.height = 0;
+
+	if (view->toplevel_handle) {
+		wlr_foreign_toplevel_handle_v1_destroy(view->toplevel_handle);
+		view->toplevel_handle = NULL;
+	}
 }
 
 void view_initial_focus(struct roots_view *view) {
@@ -519,6 +543,7 @@ void view_setup(struct roots_view *view) {
 		view_center(view);
 	}
 
+	view_create_foreign_toplevel_handle(view);
 	view_update_output(view, NULL);
 }
 
@@ -536,25 +561,25 @@ void view_damage_whole(struct roots_view *view) {
 	}
 }
 
-void view_update_position(struct roots_view *view, double x, double y) {
-	if (view->x == x && view->y == y) {
+void view_update_position(struct roots_view *view, int x, int y) {
+	if (view->box.x == x && view->box.y == y) {
 		return;
 	}
 
 	view_damage_whole(view);
-	view->x = x;
-	view->y = y;
+	view->box.x = x;
+	view->box.y = y;
 	view_damage_whole(view);
 }
 
-void view_update_size(struct roots_view *view, uint32_t width, uint32_t height) {
-	if (view->width == width && view->height == height) {
+void view_update_size(struct roots_view *view, int width, int height) {
+	if (view->box.width == width && view->box.height == height) {
 		return;
 	}
 
 	view_damage_whole(view);
-	view->width = width;
-	view->height = height;
+	view->box.width = width;
+	view->box.height = height;
 	view_damage_whole(view);
 }
 
@@ -575,6 +600,66 @@ void view_update_decorated(struct roots_view *view, bool decorated) {
 	view_damage_whole(view);
 }
 
+void view_set_title(struct roots_view *view, const char *title) {
+	if (view->toplevel_handle) {
+		wlr_foreign_toplevel_handle_v1_set_title(view->toplevel_handle, title);
+	}
+}
+
+void view_set_app_id(struct roots_view *view, const char *app_id) {
+	if (view->toplevel_handle) {
+		wlr_foreign_toplevel_handle_v1_set_app_id(view->toplevel_handle, app_id);
+	}
+}
+
+static void handle_toplevel_handle_request_maximize(struct wl_listener *listener,
+		void *data) {
+	struct roots_view *view = wl_container_of(listener, view,
+			toplevel_handle_request_maximize);
+	struct wlr_foreign_toplevel_handle_v1_maximized_event *event = data;
+	view_maximize(view, event->maximized);
+}
+
+static void handle_toplevel_handle_request_activate(struct wl_listener *listener,
+		void *data) {
+	struct roots_view *view =
+		wl_container_of(listener, view, toplevel_handle_request_activate);
+	struct wlr_foreign_toplevel_handle_v1_activated_event *event = data;
+
+	struct roots_seat *seat;
+	wl_list_for_each(seat, &view->desktop->server->input->seats, link) {
+		if (event->seat == seat->seat) {
+			roots_seat_set_focus(seat, view);
+		}
+	}
+}
+
+static void handle_toplevel_handle_request_close(struct wl_listener *listener,
+		void *data) {
+	struct roots_view *view =
+		wl_container_of(listener, view, toplevel_handle_request_close);
+	view_close(view);
+}
+
+void view_create_foreign_toplevel_handle(struct roots_view *view) {
+	view->toplevel_handle =
+		wlr_foreign_toplevel_handle_v1_create(
+			view->desktop->foreign_toplevel_manager_v1);
+
+	view->toplevel_handle_request_maximize.notify =
+		handle_toplevel_handle_request_maximize;
+	wl_signal_add(&view->toplevel_handle->events.request_maximize,
+			&view->toplevel_handle_request_maximize);
+	view->toplevel_handle_request_activate.notify =
+		handle_toplevel_handle_request_activate;
+	wl_signal_add(&view->toplevel_handle->events.request_activate,
+			&view->toplevel_handle_request_activate);
+	view->toplevel_handle_request_close.notify =
+		handle_toplevel_handle_request_close;
+	wl_signal_add(&view->toplevel_handle->events.request_close,
+			&view->toplevel_handle_request_close);
+}
+
 static bool view_at(struct roots_view *view, double lx, double ly,
 		struct wlr_surface **surface, double *sx, double *sy) {
 	if (view->type == ROOTS_WL_SHELL_VIEW &&
@@ -585,8 +670,8 @@ static bool view_at(struct roots_view *view, double lx, double ly,
 		return false;
 	}
 
-	double view_sx = lx - view->x;
-	double view_sy = ly - view->y;
+	double view_sx = lx - view->box.x;
+	double view_sy = ly - view->box.y;
 
 	struct wlr_surface_state *state = &view->wlr_surface->current;
 	struct wlr_box box = {
@@ -806,10 +891,10 @@ static void handle_constraint_destroy(struct wl_listener *listener,
 			double sy = wlr_constraint->current.cursor_hint.y;
 
 			struct roots_view *view = seat->cursor->pointer_view->view;
-			rotate_child_position(&sx, &sy, 0, 0, view->width, view->height,
+			rotate_child_position(&sx, &sy, 0, 0, view->box.width, view->box.height,
 				view->rotation);
-			double lx = view->x + sx;
-			double ly = view->y + sy;
+			double lx = view->box.x + sx;
+			double ly = view->box.y + sy;
 
 			wlr_cursor_warp(seat->cursor->cursor, NULL, lx, ly);
 		}
@@ -955,11 +1040,10 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 	wlr_server_decoration_manager_set_default_mode(
 		desktop->server_decoration_manager,
 		WLR_SERVER_DECORATION_MANAGER_MODE_CLIENT);
-	desktop->primary_selection_device_manager =
-		wlr_gtk_primary_selection_device_manager_create(server->wl_display);
 	desktop->idle = wlr_idle_create(server->wl_display);
 	desktop->idle_inhibit = wlr_idle_inhibit_v1_create(server->wl_display);
-
+	desktop->primary_selection_device_manager =
+		wlr_gtk_primary_selection_device_manager_create(server->wl_display);
 	desktop->input_inhibit =
 		wlr_input_inhibit_manager_create(server->wl_display);
 	desktop->input_inhibit_activate.notify = input_inhibit_activate;
@@ -996,6 +1080,14 @@ struct roots_desktop *desktop_create(struct roots_server *server,
 
 	desktop->presentation =
 		wlr_presentation_create(server->wl_display, server->backend);
+	desktop->foreign_toplevel_manager_v1 =
+		wlr_foreign_toplevel_manager_v1_create(server->wl_display);
+	desktop->relative_pointer_manager =
+		wlr_relative_pointer_manager_v1_create(server->wl_display);
+	desktop->pointer_gestures =
+		wlr_pointer_gestures_v1_create(server->wl_display);
+
+	wlr_data_control_manager_v1_create(server->wl_display);
 
 	return desktop;
 }

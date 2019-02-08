@@ -23,6 +23,8 @@ static const char *device_type(enum wlr_input_device_type type) {
 		return "keyboard";
 	case WLR_INPUT_DEVICE_POINTER:
 		return "pointer";
+	case WLR_INPUT_DEVICE_SWITCH:
+		return "switch";
 	case WLR_INPUT_DEVICE_TOUCH:
 		return "touch";
 	case WLR_INPUT_DEVICE_TABLET_TOOL:
@@ -134,10 +136,11 @@ static inline int64_t timespec_to_msec(const struct timespec *a) {
 }
 
 void input_update_cursor_focus(struct roots_input *input) {
-	struct roots_seat *seat;
 	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+
+	struct roots_seat *seat;
 	wl_list_for_each(seat, &input->seats, link) {
-		clock_gettime(CLOCK_MONOTONIC, &now);
 		roots_cursor_update_position(seat->cursor, timespec_to_msec(&now));
 	}
 }

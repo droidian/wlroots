@@ -23,6 +23,7 @@
 struct wlr_seat_client {
 	struct wl_client *client;
 	struct wlr_seat *seat;
+	struct wl_list link;
 
 	// lists of wl_resource
 	struct wl_list resources;
@@ -30,13 +31,10 @@ struct wlr_seat_client {
 	struct wl_list keyboards;
 	struct wl_list touches;
 	struct wl_list data_devices;
-	struct wl_list primary_selection_devices;
 
 	struct {
 		struct wl_signal destroy;
 	} events;
-
-	struct wl_list link;
 };
 
 struct wlr_touch_point {
@@ -70,6 +68,7 @@ struct wlr_pointer_grab_interface {
 	void (*axis)(struct wlr_seat_pointer_grab *grab, uint32_t time,
 			enum wlr_axis_orientation orientation, double value,
 			int32_t value_discrete, enum wlr_axis_source source);
+	void (*frame)(struct wlr_seat_pointer_grab *grab);
 	void (*cancel)(struct wlr_seat_pointer_grab *grab);
 };
 
@@ -136,6 +135,7 @@ struct wlr_seat_pointer_state {
 	struct wlr_seat *seat;
 	struct wlr_seat_client *focused_client;
 	struct wlr_surface *focused_surface;
+	double sx, sy;
 
 	struct wlr_seat_pointer_grab *grab;
 	struct wlr_seat_pointer_grab *default_grab;
@@ -168,6 +168,10 @@ struct wlr_seat_keyboard_state {
 
 	struct wlr_seat_keyboard_grab *grab;
 	struct wlr_seat_keyboard_grab *default_grab;
+
+	struct {
+		struct wl_signal focus_change; // wlr_seat_keyboard_focus_change_event
+	} events;
 };
 
 struct wlr_seat_touch_state {
@@ -181,6 +185,8 @@ struct wlr_seat_touch_state {
 	struct wlr_seat_touch_grab *default_grab;
 };
 
+struct wlr_primary_selection_source;
+
 struct wlr_seat {
 	struct wl_global *global;
 	struct wl_display *display;
@@ -193,14 +199,16 @@ struct wlr_seat {
 
 	struct wlr_data_source *selection_source;
 	uint32_t selection_serial;
+	struct wl_list selection_offers; // wlr_data_offer::link
 
-	struct wlr_gtk_primary_selection_source *primary_selection_source;
+	struct wlr_primary_selection_source *primary_selection_source;
 	uint32_t primary_selection_serial;
 
 	// `drag` goes away before `drag_source`, when the implicit grab ends
 	struct wlr_drag *drag;
 	struct wlr_data_source *drag_source;
 	uint32_t drag_serial;
+	struct wl_list drag_offers; // wlr_data_offer::link
 
 	struct wlr_seat_pointer_state pointer_state;
 	struct wlr_seat_keyboard_state keyboard_state;
@@ -221,13 +229,18 @@ struct wlr_seat {
 		struct wl_signal touch_grab_begin;
 		struct wl_signal touch_grab_end;
 
+		// wlr_seat_pointer_request_set_cursor_event
 		struct wl_signal request_set_cursor;
 
-		struct wl_signal selection;
-		struct wl_signal primary_selection;
+		// wlr_seat_request_set_selection_event
+		struct wl_signal request_set_selection;
+		struct wl_signal set_selection;
+		// wlr_seat_request_set_primary_selection_event
+		struct wl_signal request_set_primary_selection;
+		struct wl_signal set_primary_selection;
 
-		struct wl_signal start_drag;
-		struct wl_signal new_drag_icon;
+		struct wl_signal start_drag; // wlr_drag
+		struct wl_signal new_drag_icon; // wlr_drag_icon
 
 		struct wl_signal destroy;
 	} events;
@@ -242,10 +255,25 @@ struct wlr_seat_pointer_request_set_cursor_event {
 	int32_t hotspot_x, hotspot_y;
 };
 
+struct wlr_seat_request_set_selection_event {
+	struct wlr_data_source *source;
+	uint32_t serial;
+};
+
+struct wlr_seat_request_set_primary_selection_event {
+	struct wlr_primary_selection_source *source;
+	uint32_t serial;
+};
+
 struct wlr_seat_pointer_focus_change_event {
 	struct wlr_seat *seat;
 	struct wlr_surface *old_surface, *new_surface;
 	double sx, sy;
+};
+
+struct wlr_seat_keyboard_focus_change_event {
+	struct wlr_seat *seat;
+	struct wlr_surface *old_surface, *new_surface;
 };
 
 /**
@@ -323,6 +351,13 @@ void wlr_seat_pointer_send_axis(struct wlr_seat *wlr_seat, uint32_t time,
 		int32_t value_discrete, enum wlr_axis_source source);
 
 /**
+ * Send a frame event to the surface with pointer focus. Compositors should use
+ * `wlr_seat_pointer_notify_frame()` to send axis events to respect pointer
+ * grabs.
+ */
+void wlr_seat_pointer_send_frame(struct wlr_seat *wlr_seat);
+
+/**
  * Start a grab of the pointer of this seat. The grabber is responsible for
  * handling all pointer events until the grab ends.
  */
@@ -363,6 +398,13 @@ uint32_t wlr_seat_pointer_notify_button(struct wlr_seat *wlr_seat,
 void wlr_seat_pointer_notify_axis(struct wlr_seat *wlr_seat, uint32_t time,
 		enum wlr_axis_orientation orientation, double value,
 		int32_t value_discrete, enum wlr_axis_source source);
+
+/**
+ * Notify the seat of a frame event. Frame events are sent to end a group of
+ * events that logically belong together. Motion, button and axis events should
+ * all be followed by a frame event.
+ */
+void wlr_seat_pointer_notify_frame(struct wlr_seat *wlr_seat);
 
 /**
  * Whether or not the pointer has a grab other than the default grab.

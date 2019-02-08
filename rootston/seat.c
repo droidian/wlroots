@@ -7,8 +7,11 @@
 #include <wayland-server.h>
 #include <wlr/backend/libinput.h>
 #include <wlr/config.h>
+#include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_idle.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
+#include <wlr/types/wlr_primary_selection.h>
+#include <wlr/types/wlr_switch.h>
 #include <wlr/types/wlr_tablet_v2.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/util/log.h>
@@ -18,7 +21,6 @@
 #include "rootston/seat.h"
 #include "rootston/text_input.h"
 #include "rootston/xcursor.h"
-
 
 static void handle_keyboard_key(struct wl_listener *listener, void *data) {
 	struct roots_keyboard *keyboard =
@@ -73,6 +75,84 @@ static void handle_cursor_axis(struct wl_listener *listener, void *data) {
 	wlr_idle_notify_activity(desktop->idle, cursor->seat->seat);
 	struct wlr_event_pointer_axis *event = data;
 	roots_cursor_handle_axis(cursor, event);
+}
+
+static void handle_cursor_frame(struct wl_listener *listener, void *data) {
+	struct roots_cursor *cursor =
+		wl_container_of(listener, cursor, frame);
+	struct roots_desktop *desktop = cursor->seat->input->server->desktop;
+	wlr_idle_notify_activity(desktop->idle, cursor->seat->seat);
+	roots_cursor_handle_frame(cursor);
+}
+
+static void handle_swipe_begin(struct wl_listener *listener, void *data) {
+	struct roots_cursor *cursor =
+		wl_container_of(listener, cursor, swipe_begin);
+	struct wlr_pointer_gestures_v1 *gestures =
+		cursor->seat->input->server->desktop->pointer_gestures;
+	struct wlr_event_pointer_swipe_begin *event = data;
+	wlr_pointer_gestures_v1_send_swipe_begin(gestures, cursor->seat->seat,
+			event->time_msec, event->fingers);
+}
+
+static void handle_swipe_update(struct wl_listener *listener, void *data) {
+	struct roots_cursor *cursor =
+		wl_container_of(listener, cursor, swipe_update);
+	struct wlr_pointer_gestures_v1 *gestures =
+		cursor->seat->input->server->desktop->pointer_gestures;
+	struct wlr_event_pointer_swipe_update *event = data;
+	wlr_pointer_gestures_v1_send_swipe_update(gestures, cursor->seat->seat,
+			event->time_msec, event->dx, event->dy);
+}
+
+static void handle_swipe_end(struct wl_listener *listener, void *data) {
+	struct roots_cursor *cursor =
+		wl_container_of(listener, cursor, swipe_end);
+	struct wlr_pointer_gestures_v1 *gestures =
+		cursor->seat->input->server->desktop->pointer_gestures;
+	struct wlr_event_pointer_swipe_end *event = data;
+	wlr_pointer_gestures_v1_send_swipe_end(gestures, cursor->seat->seat,
+			event->time_msec, event->cancelled);
+}
+
+static void handle_pinch_begin(struct wl_listener *listener, void *data) {
+	struct roots_cursor *cursor =
+		wl_container_of(listener, cursor, pinch_begin);
+	struct wlr_pointer_gestures_v1 *gestures =
+		cursor->seat->input->server->desktop->pointer_gestures;
+	struct wlr_event_pointer_pinch_begin *event = data;
+	wlr_pointer_gestures_v1_send_pinch_begin(gestures, cursor->seat->seat,
+			event->time_msec, event->fingers);
+}
+
+static void handle_pinch_update(struct wl_listener *listener, void *data) {
+	struct roots_cursor *cursor =
+		wl_container_of(listener, cursor, pinch_update);
+	struct wlr_pointer_gestures_v1 *gestures =
+		cursor->seat->input->server->desktop->pointer_gestures;
+	struct wlr_event_pointer_pinch_update *event = data;
+	wlr_pointer_gestures_v1_send_pinch_update(gestures, cursor->seat->seat,
+			event->time_msec, event->dx, event->dy,
+			event->scale, event->rotation);
+}
+
+static void handle_pinch_end(struct wl_listener *listener, void *data) {
+	struct roots_cursor *cursor =
+		wl_container_of(listener, cursor, pinch_end);
+	struct wlr_pointer_gestures_v1 *gestures =
+		cursor->seat->input->server->desktop->pointer_gestures;
+	struct wlr_event_pointer_pinch_end *event = data;
+	wlr_pointer_gestures_v1_send_pinch_end(gestures, cursor->seat->seat,
+			event->time_msec, event->cancelled);
+}
+
+static void handle_switch_toggle(struct wl_listener *listener, void *data) {
+	struct roots_switch *lid_switch =
+		wl_container_of(listener, lid_switch, toggle);
+	struct roots_desktop *desktop = lid_switch->seat->input->server->desktop;
+	wlr_idle_notify_activity(desktop->idle, lid_switch->seat->seat);
+	struct wlr_event_switch_toggle *event = data;
+	roots_switch_handle_toggle(lid_switch, event);
 }
 
 static void handle_touch_down(struct wl_listener *listener, void *data) {
@@ -432,6 +512,27 @@ static void roots_seat_init_cursor(struct roots_seat *seat) {
 	wl_signal_add(&wlr_cursor->events.axis, &seat->cursor->axis);
 	seat->cursor->axis.notify = handle_cursor_axis;
 
+	wl_signal_add(&wlr_cursor->events.frame, &seat->cursor->frame);
+	seat->cursor->frame.notify = handle_cursor_frame;
+
+	wl_signal_add(&wlr_cursor->events.swipe_begin, &seat->cursor->swipe_begin);
+	seat->cursor->swipe_begin.notify = handle_swipe_begin;
+
+	wl_signal_add(&wlr_cursor->events.swipe_update, &seat->cursor->swipe_update);
+	seat->cursor->swipe_update.notify = handle_swipe_update;
+
+	wl_signal_add(&wlr_cursor->events.swipe_end, &seat->cursor->swipe_end);
+	seat->cursor->swipe_end.notify = handle_swipe_end;
+
+	wl_signal_add(&wlr_cursor->events.pinch_begin, &seat->cursor->pinch_begin);
+	seat->cursor->pinch_begin.notify = handle_pinch_begin;
+
+	wl_signal_add(&wlr_cursor->events.pinch_update, &seat->cursor->pinch_update);
+	seat->cursor->pinch_update.notify = handle_pinch_update;
+
+	wl_signal_add(&wlr_cursor->events.pinch_end, &seat->cursor->pinch_end);
+	seat->cursor->pinch_end.notify = handle_pinch_end;
+
 	wl_signal_add(&wlr_cursor->events.touch_down, &seat->cursor->touch_down);
 	seat->cursor->touch_down.notify = handle_touch_down;
 
@@ -493,7 +594,9 @@ static void roots_drag_icon_handle_destroy(struct wl_listener *listener,
 		wl_container_of(listener, icon, destroy);
 	roots_drag_icon_damage_whole(icon);
 
-	wl_list_remove(&icon->link);
+	assert(icon->seat->drag_icon == icon);
+	icon->seat->drag_icon = NULL;
+
 	wl_list_remove(&icon->surface_commit.link);
 	wl_list_remove(&icon->unmap.link);
 	wl_list_remove(&icon->destroy.link);
@@ -521,9 +624,26 @@ static void roots_seat_handle_new_drag_icon(struct wl_listener *listener,
 	icon->destroy.notify = roots_drag_icon_handle_destroy;
 	wl_signal_add(&wlr_drag_icon->events.destroy, &icon->destroy);
 
-	wl_list_insert(&seat->drag_icons, &icon->link);
+	assert(seat->drag_icon == NULL);
+	seat->drag_icon = icon;
 
 	roots_drag_icon_update_position(icon);
+}
+
+static void roots_seat_handle_request_set_selection(
+		struct wl_listener *listener, void *data) {
+	struct roots_seat *seat =
+		wl_container_of(listener, seat, request_set_selection);
+	struct wlr_seat_request_set_selection_event *event = data;
+	wlr_seat_set_selection(seat->seat, event->source, event->serial);
+}
+
+static void roots_seat_handle_request_set_primary_selection(
+		struct wl_listener *listener, void *data) {
+	struct roots_seat *seat =
+		wl_container_of(listener, seat, request_set_primary_selection);
+	struct wlr_seat_request_set_primary_selection_event *event = data;
+	wlr_seat_set_primary_selection(seat->seat, event->source, event->serial);
 }
 
 void roots_drag_icon_update_position(struct roots_drag_icon *icon) {
@@ -587,8 +707,8 @@ struct roots_seat *roots_seat_create(struct roots_input *input, char *name) {
 	wl_list_init(&seat->touch);
 	wl_list_init(&seat->tablets);
 	wl_list_init(&seat->tablet_pads);
+	wl_list_init(&seat->switches);
 	wl_list_init(&seat->views);
-	wl_list_init(&seat->drag_icons);
 
 	seat->input = input;
 
@@ -610,6 +730,14 @@ struct roots_seat *roots_seat_create(struct roots_input *input, char *name) {
 
 	wl_list_insert(&input->seats, &seat->link);
 
+	seat->request_set_selection.notify =
+		roots_seat_handle_request_set_selection;
+	wl_signal_add(&seat->seat->events.request_set_selection,
+		&seat->request_set_selection);
+	seat->request_set_primary_selection.notify =
+		roots_seat_handle_request_set_primary_selection;
+	wl_signal_add(&seat->seat->events.request_set_primary_selection,
+		&seat->request_set_primary_selection);
 	seat->new_drag_icon.notify = roots_seat_handle_new_drag_icon;
 	wl_signal_add(&seat->seat->events.new_drag_icon, &seat->new_drag_icon);
 	seat->destroy.notify = roots_seat_handle_destroy;
@@ -708,6 +836,36 @@ static void seat_add_pointer(struct roots_seat *seat,
 
 	wlr_cursor_attach_input_device(seat->cursor->cursor, device);
 	roots_seat_configure_cursor(seat);
+}
+
+static void handle_switch_destroy(struct wl_listener *listener, void *data) {
+	struct roots_switch *lid_switch =
+		wl_container_of(listener, lid_switch, device_destroy);
+	struct roots_seat *seat = lid_switch->seat;
+
+	wl_list_remove(&lid_switch->link);
+	wl_list_remove(&lid_switch->device_destroy.link);
+	free(lid_switch);
+
+	seat_update_capabilities(seat);
+}
+
+static void seat_add_switch(struct roots_seat *seat,
+		struct wlr_input_device *device) {
+	assert(device->type == WLR_INPUT_DEVICE_SWITCH);
+		struct roots_switch *lid_switch = calloc(1, sizeof(struct roots_switch));
+	if (!lid_switch) {
+		wlr_log(WLR_ERROR, "could not allocate switch for seat");
+		return;
+	}
+	device->data = lid_switch;
+	lid_switch->device = device;
+	lid_switch->seat = seat;
+	wl_list_insert(&seat->switches, &lid_switch->link);
+	lid_switch->device_destroy.notify = handle_switch_destroy;
+
+	lid_switch->toggle.notify = handle_switch_toggle;
+	wl_signal_add(&lid_switch->device->lid_switch->events.toggle, &lid_switch->toggle);
 }
 
 static void handle_touch_destroy(struct wl_listener *listener, void *data) {
@@ -952,6 +1110,9 @@ void roots_seat_add_device(struct roots_seat *seat,
 		break;
 	case WLR_INPUT_DEVICE_POINTER:
 		seat_add_pointer(seat, device);
+		break;
+	case WLR_INPUT_DEVICE_SWITCH:
+		seat_add_switch(seat, device);
 		break;
 	case WLR_INPUT_DEVICE_TOUCH:
 		seat_add_touch(seat, device);
@@ -1341,8 +1502,8 @@ void roots_seat_begin_move(struct roots_seat *seat, struct roots_view *view) {
 		cursor->view_x = view->saved.x;
 		cursor->view_y = view->saved.y;
 	} else {
-		cursor->view_x = view->x;
-		cursor->view_y = view->y;
+		cursor->view_x = view->box.x;
+		cursor->view_y = view->box.y;
 	}
 	view_maximize(view, false);
 	wlr_seat_pointer_clear_focus(seat->seat);
@@ -1363,8 +1524,8 @@ void roots_seat_begin_resize(struct roots_seat *seat, struct roots_view *view,
 		cursor->view_width = view->saved.width;
 		cursor->view_height = view->saved.height;
 	} else {
-		cursor->view_x = view->x;
-		cursor->view_y = view->y;
+		cursor->view_x = view->box.x;
+		cursor->view_y = view->box.y;
 		struct wlr_box box;
 		view_get_box(view, &box);
 		cursor->view_width = box.width;
