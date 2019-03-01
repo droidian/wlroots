@@ -3,8 +3,8 @@
 CFLAGS=$(shell pkg-config --cflags wlroots)
 LIBS=$(shell pkg-config --libs wlroots)
 
-a.out: test.c
+a.out: debian/tests/test.c
 	gcc $(CFLAGS) $< $(LIBS) -lwayland-server
 	@echo "Build test of $< succeeded"
-	./a.out
+	WLR_BACKENDS=noop ./a.out
 	@rm -f a.out
