@@ -1,9 +1,13 @@
-wlroots (0.4.1-1~1.gbp7f7d9f) UNRELEASED; urgency=medium
+wlroots (0.4.1-1) experimental; urgency=medium
 
-  * UNRELEASED
   * New upstream version 0.4.1
+  * [109f084] Add shlibs file.  Upstream intends to bump so names on ABI
+    breaks. (Closes: #921884)
+  * [56e169d] Rename library package due to soname bump
+  * [1612b99] Bump standards version to 4.3.0
+  * [1230e30] d/copyright: Update since some code got dropped
 
- -- Guido Günther <agx@sigxcpu.org>  Fri, 01 Mar 2019 11:07:44 +0100
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 01 Mar 2019 11:39:22 +0100
 
 wlroots (0.3-1) experimental; urgency=medium
 
