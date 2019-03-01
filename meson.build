@@ -1,7 +1,7 @@
 project(
 	'wlroots',
 	'c',
-	version: '0.2.0',
+	version: '0.4.1',
 	license: 'MIT',
 	meson_version: '>=0.48.0',
 	default_options: [
@@ -14,7 +14,7 @@ project(
 # Format of so_version is CURRENT, REVISION, AGE.
 # See: https://autotools.io/libtool/version.html
 # for a reference about clean library versioning.
-so_version = ['0', '0', '0']
+so_version = ['1', '2', '0']
 
 add_project_arguments(
 	[
@@ -53,7 +53,7 @@ add_project_arguments('-DWL_HIDE_DEPRECATED', language: 'c')
 wayland_server = dependency('wayland-server', version: '>=1.16')
 wayland_client = dependency('wayland-client')
 wayland_egl    = dependency('wayland-egl')
-wayland_protos = dependency('wayland-protocols', version: '>=1.16')
+wayland_protos = dependency('wayland-protocols', version: '>=1.17')
 egl            = dependency('egl')
 glesv2         = dependency('glesv2')
 drm            = dependency('libdrm', version: '>=2.4.95')

@@ -159,6 +159,9 @@ bool wlr_output_set_mode(struct wlr_output *output,
 	if (!output->impl || !output->impl->set_mode) {
 		return false;
 	}
+	if (output->current_mode == mode) {
+		return true;
+	}
 	return output->impl->set_mode(output, mode);
 }
 
@@ -166,6 +169,10 @@ bool wlr_output_set_custom_mode(struct wlr_output *output, int32_t width,
 		int32_t height, int32_t refresh) {
 	if (!output->impl || !output->impl->set_custom_mode) {
 		return false;
+	}
+	if (output->width == width && output->height == height &&
+			output->refresh == refresh) {
+		return true;
 	}
 	return output->impl->set_custom_mode(output, width, height, refresh);
 }
@@ -246,6 +253,19 @@ void wlr_output_set_scale(struct wlr_output *output, float scale) {
 	}
 
 	wlr_signal_emit_safe(&output->events.scale, output);
+}
+
+void wlr_output_set_subpixel(struct wlr_output *output, enum wl_output_subpixel subpixel) {
+	if (output->subpixel == subpixel) {
+		return;
+	}
+
+	output->subpixel = subpixel;
+
+	struct wl_resource *resource;
+	wl_resource_for_each(resource, &output->resources) {
+		output_send_to_resource(resource);
+	}
 }
 
 static void handle_display_destroy(struct wl_listener *listener, void *data) {

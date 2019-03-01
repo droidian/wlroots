@@ -73,8 +73,8 @@ static void data_device_start_drag(struct wl_client *client,
 
 	struct wlr_data_source *wlr_source =
 		source != NULL ? &source->source : NULL;
-	if (!seat_client_start_drag(seat_client, wlr_source, icon,
-			origin, serial)) {
+	struct wlr_drag *drag = wlr_drag_create(seat_client, wlr_source, icon);
+	if (drag == NULL) {
 		wl_resource_post_no_memory(device_resource);
 		return;
 	}
@@ -82,6 +82,8 @@ static void data_device_start_drag(struct wl_client *client,
 	if (source != NULL) {
 		source->finalized = true;
 	}
+
+	wlr_seat_request_start_drag(seat_client->seat, drag, origin, serial);
 }
 
 static void data_device_release(struct wl_client *client,
@@ -124,6 +126,13 @@ void seat_client_send_selection(struct wlr_seat_client *seat_client) {
 	struct wlr_data_source *source = seat_client->seat->selection_source;
 	if (source != NULL) {
 		source->accepted = false;
+	}
+
+	// Make all current offers inert
+	struct wlr_data_offer *offer, *tmp;
+	wl_list_for_each_safe(offer, tmp,
+			&seat_client->seat->selection_offers, link) {
+		data_offer_destroy(offer);
 	}
 
 	struct wl_resource *device_resource;
