@@ -20,7 +20,7 @@ static void default_pointer_motion(struct wlr_seat_pointer_grab *grab,
 }
 
 static uint32_t default_pointer_button(struct wlr_seat_pointer_grab *grab,
-		uint32_t time, uint32_t button, uint32_t state) {
+		uint32_t time, uint32_t button, enum wlr_button_state state) {
 	return wlr_seat_pointer_send_button(grab->seat, time, button, state);
 }
 
@@ -235,7 +235,7 @@ void wlr_seat_pointer_send_motion(struct wlr_seat *wlr_seat, uint32_t time,
 }
 
 uint32_t wlr_seat_pointer_send_button(struct wlr_seat *wlr_seat, uint32_t time,
-		uint32_t button, uint32_t state) {
+		uint32_t button, enum wlr_button_state state) {
 	struct wlr_seat_client *client = wlr_seat->pointer_state.focused_client;
 	if (client == NULL) {
 		return 0;
@@ -337,22 +337,27 @@ void wlr_seat_pointer_notify_motion(struct wlr_seat *wlr_seat, uint32_t time,
 }
 
 uint32_t wlr_seat_pointer_notify_button(struct wlr_seat *wlr_seat,
-		uint32_t time, uint32_t button, uint32_t state) {
+		uint32_t time, uint32_t button, enum wlr_button_state state) {
 	clock_gettime(CLOCK_MONOTONIC, &wlr_seat->last_event);
-	if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
+	if (state == WLR_BUTTON_PRESSED) {
 		if (wlr_seat->pointer_state.button_count == 0) {
 			wlr_seat->pointer_state.grab_button = button;
 			wlr_seat->pointer_state.grab_time = time;
 		}
 		wlr_seat->pointer_state.button_count++;
 	} else {
-		wlr_seat->pointer_state.button_count--;
+		if (wlr_seat->pointer_state.button_count == 0) {
+			wlr_log(WLR_ERROR, "Corrupted seat button count");
+		} else {
+			wlr_seat->pointer_state.button_count--;
+		}
 	}
 
 	struct wlr_seat_pointer_grab *grab = wlr_seat->pointer_state.grab;
 	uint32_t serial = grab->interface->button(grab, time, button, state);
 
-	if (serial && wlr_seat->pointer_state.button_count == 1) {
+	if (serial && wlr_seat->pointer_state.button_count == 1 &&
+			state == WLR_BUTTON_PRESSED) {
 		wlr_seat->pointer_state.grab_serial = serial;
 	}
 
@@ -407,10 +412,16 @@ bool wlr_seat_validate_pointer_grab_serial(struct wlr_seat *seat,
 		struct wlr_surface *origin, uint32_t serial) {
 	if (seat->pointer_state.button_count != 1 ||
 			seat->pointer_state.grab_serial != serial) {
+		wlr_log(WLR_DEBUG, "Pointer grab serial validation failed: "
+			"button_count=%"PRIu32" grab_serial=%"PRIu32" (got %"PRIu32")",
+			seat->pointer_state.button_count,
+			seat->pointer_state.grab_serial, serial);
 		return false;
 	}
 
 	if (origin != NULL && seat->pointer_state.focused_surface != origin) {
+		wlr_log(WLR_DEBUG, "Pointer grab serial validation failed: "
+			"invalid origin surface");
 		return false;
 	}
 

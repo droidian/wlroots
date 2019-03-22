@@ -1,7 +1,7 @@
 project(
 	'wlroots',
 	'c',
-	version: '0.4.1',
+	version: '0.5.0',
 	license: 'MIT',
 	meson_version: '>=0.48.0',
 	default_options: [
@@ -14,18 +14,33 @@ project(
 # Format of so_version is CURRENT, REVISION, AGE.
 # See: https://autotools.io/libtool/version.html
 # for a reference about clean library versioning.
-so_version = ['1', '2', '0']
+so_version = ['2', '3', '1']
 
-add_project_arguments(
-	[
-		'-DWLR_SRC_DIR="@0@"'.format(meson.current_source_dir()),
-		'-DWLR_USE_UNSTABLE',
+add_project_arguments([
+	'-DWLR_SRC_DIR="@0@"'.format(meson.current_source_dir()),
+	'-DWLR_USE_UNSTABLE',
+], language: 'c')
 
-		'-Wno-unused-parameter',
-		'-Wundef',
-	],
-	language: 'c',
-)
+cc = meson.get_compiler('c')
+
+add_project_arguments(cc.get_supported_arguments([
+	'-Wundef',
+	'-Wlogical-op',
+	'-Wmissing-include-dirs',
+	'-Wold-style-definition',
+	'-Wpointer-arith',
+	'-Winit-self',
+	'-Wstrict-prototypes',
+	'-Wredundant-decls',
+	'-Wimplicit-fallthrough=2',
+	'-Wendif-labels',
+	'-Wstrict-aliasing=2',
+	'-Woverflow',
+
+	'-Wno-missing-braces',
+	'-Wno-missing-field-initializers',
+	'-Wno-unused-parameter',
+]), language: 'c')
 
 conf_data = configuration_data()
 conf_data.set10('WLR_HAS_LIBCAP', false)
@@ -37,8 +52,6 @@ conf_data.set10('WLR_HAS_XCB_ERRORS', false)
 conf_data.set10('WLR_HAS_XCB_ICCCM', false)
 
 wlr_inc = include_directories('.', 'include')
-
-cc = meson.get_compiler('c')
 
 # Clang complains about some zeroed initializer lists (= {0}), even though they
 # are valid

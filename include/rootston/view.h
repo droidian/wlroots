@@ -20,6 +20,8 @@ struct roots_view_interface {
 	void (*maximize)(struct roots_view *view, bool maximized);
 	void (*set_fullscreen)(struct roots_view *view, bool fullscreen);
 	void (*close)(struct roots_view *view);
+	void (*for_each_surface)(struct roots_view *view,
+		wlr_surface_iterator_func_t iterator, void *user_data);
 	void (*destroy)(struct roots_view *view);
 };
 
@@ -222,7 +224,6 @@ struct roots_xdg_toplevel_decoration {
 void view_init(struct roots_view *view, const struct roots_view_interface *impl,
 	enum roots_view_type type, struct roots_desktop *desktop);
 void view_destroy(struct roots_view *view);
-void view_activate(struct roots_view *view, bool activate);
 void view_apply_damage(struct roots_view *view);
 void view_damage_whole(struct roots_view *view);
 void view_update_position(struct roots_view *view, int x, int y);
@@ -251,6 +252,8 @@ void view_set_title(struct roots_view *view, const char *title);
 void view_set_app_id(struct roots_view *view, const char *app_id);
 void view_create_foreign_toplevel_handle(struct roots_view *view);
 void view_get_deco_box(const struct roots_view *view, struct wlr_box *box);
+void view_for_each_surface(struct roots_view *view,
+	wlr_surface_iterator_func_t iterator, void *user_data);
 
 struct roots_wl_shell_surface *roots_wl_shell_surface_from_view(
 	struct roots_view *view);

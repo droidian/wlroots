@@ -1,4 +1,4 @@
-#define _POSIX_C_SOURCE 200112L
+#define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -92,7 +92,7 @@ _Noreturn static void exec_xwayland(struct wlr_xwayland *wlr_xwayland) {
 
 	// Closes stdout/stderr depending on log verbosity
 	enum wlr_log_importance verbosity = wlr_log_get_verbosity();
-	int devnull = open("/dev/null", O_WRONLY | O_CREAT, 0666);
+	int devnull = open("/dev/null", O_WRONLY | O_CREAT | O_CLOEXEC, 0666);
 	if (devnull < 0) {
 		wlr_log_errno(WLR_ERROR, "XWayland: failed to open /dev/null");
 		_exit(EXIT_FAILURE);
@@ -165,11 +165,8 @@ static void xwayland_finish_display(struct wlr_xwayland *wlr_xwayland) {
 
 	unlink_display_sockets(wlr_xwayland->display);
 	wlr_xwayland->display = -1;
-	unsetenv("DISPLAY");
+	wlr_xwayland->display_name[0] = '\0';
 }
-
-static bool xwayland_start_display(struct wlr_xwayland *wlr_xwayland,
-	struct wl_display *wl_display);
 
 static bool xwayland_start_server(struct wlr_xwayland *wlr_xwayland);
 static bool xwayland_start_server_lazy(struct wlr_xwayland *wlr_xwayland);
@@ -284,10 +281,8 @@ static bool xwayland_start_display(struct wlr_xwayland *wlr_xwayland,
 		return false;
 	}
 
-	char display_name[16];
-	snprintf(display_name, sizeof(display_name), ":%d", wlr_xwayland->display);
-	setenv("DISPLAY", display_name, true);
-
+	snprintf(wlr_xwayland->display_name, sizeof(wlr_xwayland->display_name),
+		":%d", wlr_xwayland->display);
 	return true;
 }
 
