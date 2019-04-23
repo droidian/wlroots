@@ -1,3 +1,10 @@
+wlroots (0.5.0-2) experimental; urgency=medium
+
+  [ Birger Schacht ]
+  * [3fa04fe] Update copyright file
+
+ -- Guido Günther <agx@sigxcpu.org>  Tue, 23 Apr 2019 09:46:18 +0200
+
 wlroots (0.5.0-1) experimental; urgency=medium
 
   * New upstream version 0.5.0
