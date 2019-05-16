@@ -39,7 +39,7 @@ Files: protocol/gtk-primary-selection.xml
 Copyright: 2015, 2016 Red Hat
 License: Expat
 
-Files: protocol/input_method_unstable_v2.xml
+Files: protocol/input-method-unstable-v2.xml
 Copyright: 2008-2011 Kristian Høgsberg
  2010-2011 Intel Corporation
  2012-2013 Collabora, Ltd.
@@ -49,7 +49,7 @@ Copyright: 2008-2011 Kristian Høgsberg
  2018       Purism SPC
 License: Expat
 
-Files: protocol/virtual_keyboard_unstable_v1.xml
+Files: protocol/virtual-keyboard-unstable-v1.xml
 Copyright: 2008-2011  Kristian Høgsberg
  2010-2013  Intel Corporation
  2012-2013  Collabora, Ltd.
@@ -74,7 +74,8 @@ Copyright: 2015 Giulio camuffo
  2018 Simon Ser
 License: Expat
 
-Files: protocol/wlr-input-inhibitor-unstable-v1.xml, protocol/wlr-layer-shell-unstable-v1.xml
+Files: protocol/wlr-input-inhibitor-unstable-v1.xml
+ protocol/wlr-layer-shell-unstable-v1.xml
 Copyright: 2018 Drew DeVault
 License: Expat
 
@@ -251,7 +252,7 @@ License: LGPL-2.1+
  You should have received a copy of the GNU Lesser General Public License
  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-Files: include/rootston/ini.h, rootston/ini.c
+Files: include/rootston/ini.h rootston/ini.c
 Copyright: 2009 Ben Hoyt
 License: BSD-3-Clause
  Redistribution and use in source and binary forms, with or without
