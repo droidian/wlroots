@@ -31,9 +31,10 @@ static void output_handle_scale(struct wl_listener *listener, void *data) {
 	wlr_output_damage_add_whole(output_damage);
 }
 
-static void output_handle_needs_swap(struct wl_listener *listener, void *data) {
+static void output_handle_needs_frame(struct wl_listener *listener,
+		void *data) {
 	struct wlr_output_damage *output_damage =
-		wl_container_of(listener, output_damage, output_needs_swap);
+		wl_container_of(listener, output_damage, output_needs_frame);
 	pixman_region32_union(&output_damage->current, &output_damage->current,
 		&output_damage->output->damage);
 	wlr_output_schedule_frame(output_damage->output);
@@ -48,6 +49,23 @@ static void output_handle_frame(struct wl_listener *listener, void *data) {
 	}
 
 	wlr_signal_emit_safe(&output_damage->events.frame, output_damage);
+}
+
+static void output_handle_commit(struct wl_listener *listener, void *data) {
+	struct wlr_output_damage *output_damage =
+		wl_container_of(listener, output_damage, output_commit);
+
+	if (!(output_damage->output->pending.committed & WLR_OUTPUT_STATE_BUFFER)) {
+		return;
+	}
+
+	// same as decrementing, but works on unsigned integers
+	output_damage->previous_idx += WLR_OUTPUT_DAMAGE_PREVIOUS_LEN - 1;
+	output_damage->previous_idx %= WLR_OUTPUT_DAMAGE_PREVIOUS_LEN;
+
+	pixman_region32_copy(&output_damage->previous[output_damage->previous_idx],
+		&output_damage->current);
+	pixman_region32_clear(&output_damage->current);
 }
 
 struct wlr_output_damage *wlr_output_damage_create(struct wlr_output *output) {
@@ -75,10 +93,12 @@ struct wlr_output_damage *wlr_output_damage_create(struct wlr_output *output) {
 	output_damage->output_transform.notify = output_handle_transform;
 	wl_signal_add(&output->events.scale, &output_damage->output_scale);
 	output_damage->output_scale.notify = output_handle_scale;
-	wl_signal_add(&output->events.needs_swap, &output_damage->output_needs_swap);
-	output_damage->output_needs_swap.notify = output_handle_needs_swap;
+	wl_signal_add(&output->events.needs_frame, &output_damage->output_needs_frame);
+	output_damage->output_needs_frame.notify = output_handle_needs_frame;
 	wl_signal_add(&output->events.frame, &output_damage->output_frame);
 	output_damage->output_frame.notify = output_handle_frame;
+	wl_signal_add(&output->events.commit, &output_damage->output_commit);
+	output_damage->output_commit.notify = output_handle_commit;
 
 	return output_damage;
 }
@@ -92,8 +112,9 @@ void wlr_output_damage_destroy(struct wlr_output_damage *output_damage) {
 	wl_list_remove(&output_damage->output_mode.link);
 	wl_list_remove(&output_damage->output_transform.link);
 	wl_list_remove(&output_damage->output_scale.link);
-	wl_list_remove(&output_damage->output_needs_swap.link);
+	wl_list_remove(&output_damage->output_needs_frame.link);
 	wl_list_remove(&output_damage->output_frame.link);
+	wl_list_remove(&output_damage->output_commit.link);
 	pixman_region32_fini(&output_damage->current);
 	for (size_t i = 0; i < WLR_OUTPUT_DAMAGE_PREVIOUS_LEN; ++i) {
 		pixman_region32_fini(&output_damage->previous[i]);
@@ -101,12 +122,12 @@ void wlr_output_damage_destroy(struct wlr_output_damage *output_damage) {
 	free(output_damage);
 }
 
-bool wlr_output_damage_make_current(struct wlr_output_damage *output_damage,
-		bool *needs_swap, pixman_region32_t *damage) {
+bool wlr_output_damage_attach_render(struct wlr_output_damage *output_damage,
+		bool *needs_frame, pixman_region32_t *damage) {
 	struct wlr_output *output = output_damage->output;
 
 	int buffer_age = -1;
-	if (!wlr_output_make_current(output, &buffer_age)) {
+	if (!wlr_output_attach_render(output, &buffer_age)) {
 		return false;
 	}
 
@@ -136,24 +157,7 @@ bool wlr_output_damage_make_current(struct wlr_output_damage *output_damage,
 		}
 	}
 
-	*needs_swap = output->needs_swap || pixman_region32_not_empty(damage);
-	return true;
-}
-
-bool wlr_output_damage_swap_buffers(struct wlr_output_damage *output_damage,
-		struct timespec *when, pixman_region32_t *damage) {
-	if (!wlr_output_swap_buffers(output_damage->output, when, damage)) {
-		return false;
-	}
-
-	// same as decrementing, but works on unsigned integers
-	output_damage->previous_idx += WLR_OUTPUT_DAMAGE_PREVIOUS_LEN - 1;
-	output_damage->previous_idx %= WLR_OUTPUT_DAMAGE_PREVIOUS_LEN;
-
-	pixman_region32_copy(&output_damage->previous[output_damage->previous_idx],
-		&output_damage->current);
-	pixman_region32_clear(&output_damage->current);
-
+	*needs_frame = output->needs_frame || pixman_region32_not_empty(damage);
 	return true;
 }
 

@@ -22,6 +22,7 @@ struct roots_output {
 	struct wlr_box usable_area;
 
 	struct wl_listener destroy;
+	struct wl_listener enable;
 	struct wl_listener mode;
 	struct wl_listener transform;
 	struct wl_listener present;
@@ -60,6 +61,8 @@ void output_for_each_surface(struct roots_output *output,
 	roots_surface_iterator_func_t iterator, void *user_data);
 
 void handle_new_output(struct wl_listener *listener, void *data);
+void handle_output_manager_apply(struct wl_listener *listener, void *data);
+void handle_output_manager_test(struct wl_listener *listener, void *data);
 
 struct roots_view;
 struct roots_drag_icon;

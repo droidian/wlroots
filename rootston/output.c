@@ -8,12 +8,10 @@
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_presentation_time.h>
-#include <wlr/types/wlr_wl_shell.h>
 #include <wlr/types/wlr_xdg_shell_v6.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
 #include <wlr/util/region.h>
-#include <wlr/xwayland.h>
 #include "rootston/config.h"
 #include "rootston/layers.h"
 #include "rootston/output.h"
@@ -122,12 +120,18 @@ void output_surface_for_each_surface(struct roots_output *output,
 void output_view_for_each_surface(struct roots_output *output,
 		struct roots_view *view, roots_surface_iterator_func_t iterator,
 		void *user_data) {
+	struct wlr_box *output_box =
+		wlr_output_layout_get_box(output->desktop->layout, output->wlr_output);
+	if (!output_box) {
+		return;
+	}
+
 	struct surface_iterator_data data = {
 		.user_iterator = iterator,
 		.user_data = user_data,
 		.output = output,
-		.ox = view->box.x - output->wlr_output->lx,
-		.oy = view->box.y - output->wlr_output->ly,
+		.ox = view->box.x - output_box->x,
+		.oy = view->box.y - output_box->y,
 		.width = view->box.width,
 		.height = view->box.height,
 		.rotation = view->rotation,
@@ -140,11 +144,17 @@ void output_view_for_each_surface(struct roots_output *output,
 void output_xwayland_children_for_each_surface(
 		struct roots_output *output, struct wlr_xwayland_surface *surface,
 		roots_surface_iterator_func_t iterator, void *user_data) {
+	struct wlr_box *output_box =
+		wlr_output_layout_get_box(output->desktop->layout, output->wlr_output);
+	if (!output_box) {
+		return;
+	}
+
 	struct wlr_xwayland_surface *child;
 	wl_list_for_each(child, &surface->children, parent_link) {
 		if (child->mapped) {
-			double ox = child->x - output->wlr_output->lx;
-			double oy = child->y - output->wlr_output->ly;
+			double ox = child->x - output_box->x;
+			double oy = child->y - output_box->y;
 			output_surface_for_each_surface(output, child->surface,
 				ox, oy, iterator, user_data);
 		}
@@ -164,12 +174,35 @@ void output_layer_for_each_surface(struct roots_output *output,
 		output_surface_for_each_surface(output, wlr_layer_surface_v1->surface,
 			layer_surface->geo.x, layer_surface->geo.y, iterator,
 			user_data);
+
+		struct wlr_xdg_popup *state;
+		wl_list_for_each(state, &wlr_layer_surface_v1->popups, link) {
+			struct wlr_xdg_surface *popup = state->base;
+			if (!popup->configured) {
+				continue;
+			}
+
+			double popup_sx, popup_sy;
+			popup_sx = layer_surface->geo.x;
+			popup_sx += popup->popup->geometry.x - popup->geometry.x;
+			popup_sy = layer_surface->geo.y;
+			popup_sy += popup->popup->geometry.y - popup->geometry.y;
+
+			output_surface_for_each_surface(output, popup->surface,
+				popup_sx, popup_sy, iterator, user_data);
+		}
 	}
 }
 
 void output_drag_icons_for_each_surface(struct roots_output *output,
 		struct roots_input *input, roots_surface_iterator_func_t iterator,
 		void *user_data) {
+	struct wlr_box *output_box =
+		wlr_output_layout_get_box(output->desktop->layout, output->wlr_output);
+	if (!output_box) {
+		return;
+	}
+
 	struct roots_seat *seat;
 	wl_list_for_each(seat, &input->seats, link) {
 		struct roots_drag_icon *drag_icon = seat->drag_icon;
@@ -177,8 +210,8 @@ void output_drag_icons_for_each_surface(struct roots_output *output,
 			continue;
 		}
 
-		double ox = drag_icon->x - output->wlr_output->lx;
-		double oy = drag_icon->y - output->wlr_output->ly;
+		double ox = drag_icon->x - output_box->x;
+		double oy = drag_icon->y - output_box->y;
 		output_surface_for_each_surface(output,
 			drag_icon->wlr_drag_icon->surface, ox, oy, iterator, user_data);
 	}
@@ -407,6 +440,82 @@ static void set_mode(struct wlr_output *output,
 	}
 }
 
+static void update_output_manager_config(struct roots_desktop *desktop) {
+	struct wlr_output_configuration_v1 *config =
+		wlr_output_configuration_v1_create();
+
+	struct roots_output *output;
+	wl_list_for_each(output, &desktop->outputs, link) {
+		struct wlr_output_configuration_head_v1 *config_head =
+			wlr_output_configuration_head_v1_create(config, output->wlr_output);
+		struct wlr_box *output_box = wlr_output_layout_get_box(
+			output->desktop->layout, output->wlr_output);
+		if (output_box) {
+			config_head->state.x = output_box->x;
+			config_head->state.y = output_box->y;
+		}
+	}
+
+	wlr_output_manager_v1_set_configuration(desktop->output_manager_v1, config);
+}
+
+void handle_output_manager_apply(struct wl_listener *listener, void *data) {
+	struct roots_desktop *desktop =
+		wl_container_of(listener, desktop, output_manager_apply);
+	struct wlr_output_configuration_v1 *config = data;
+
+	bool ok = true;
+	struct wlr_output_configuration_head_v1 *config_head;
+	// First disable outputs we need to disable
+	wl_list_for_each(config_head, &config->heads, link) {
+		struct wlr_output *wlr_output = config_head->state.output;
+		if (!config_head->state.enabled) {
+			ok &= wlr_output_enable(wlr_output, false);
+			wlr_output_layout_remove(desktop->layout, wlr_output);
+		}
+	}
+
+	// Then enable outputs that need to
+	wl_list_for_each(config_head, &config->heads, link) {
+		struct wlr_output *wlr_output = config_head->state.output;
+		if (!config_head->state.enabled) {
+			continue;
+		}
+		ok &= wlr_output_enable(wlr_output, true);
+		if (config_head->state.mode != NULL) {
+			ok &= wlr_output_set_mode(wlr_output, config_head->state.mode);
+		} else {
+			ok &= wlr_output_set_custom_mode(wlr_output,
+				config_head->state.custom_mode.width,
+				config_head->state.custom_mode.height,
+				config_head->state.custom_mode.refresh);
+		}
+		wlr_output_layout_add(desktop->layout, wlr_output,
+			config_head->state.x, config_head->state.y);
+		wlr_output_set_transform(wlr_output, config_head->state.transform);
+		wlr_output_set_scale(wlr_output, config_head->state.scale);
+	}
+
+	if (ok) {
+		wlr_output_configuration_v1_send_succeeded(config);
+	} else {
+		wlr_output_configuration_v1_send_failed(config);
+	}
+	wlr_output_configuration_v1_destroy(config);
+
+	update_output_manager_config(desktop);
+}
+
+void handle_output_manager_test(struct wl_listener *listener, void *data) {
+	struct roots_desktop *desktop =
+		wl_container_of(listener, desktop, output_manager_test);
+	struct wlr_output_configuration_v1 *config = data;
+
+	// TODO: implement test-only mode
+	wlr_output_configuration_v1_send_succeeded(config);
+	wlr_output_configuration_v1_destroy(config);
+}
+
 static void output_destroy(struct roots_output *output) {
 	// TODO: cursor
 	//example_config_configure_cursor(sample->config, sample->cursor,
@@ -414,6 +523,7 @@ static void output_destroy(struct roots_output *output) {
 
 	wl_list_remove(&output->link);
 	wl_list_remove(&output->destroy.link);
+	wl_list_remove(&output->enable.link);
 	wl_list_remove(&output->mode.link);
 	wl_list_remove(&output->transform.link);
 	wl_list_remove(&output->present.link);
@@ -424,7 +534,14 @@ static void output_destroy(struct roots_output *output) {
 
 static void output_handle_destroy(struct wl_listener *listener, void *data) {
 	struct roots_output *output = wl_container_of(listener, output, destroy);
+	struct roots_desktop *desktop = output->desktop;
 	output_destroy(output);
+	update_output_manager_config(desktop);
+}
+
+static void output_handle_enable(struct wl_listener *listener, void *data) {
+	struct roots_output *output = wl_container_of(listener, output, enable);
+	update_output_manager_config(output->desktop);
 }
 
 static void output_damage_handle_frame(struct wl_listener *listener,
@@ -445,6 +562,7 @@ static void output_handle_mode(struct wl_listener *listener, void *data) {
 	struct roots_output *output =
 		wl_container_of(listener, output, mode);
 	arrange_layers(output);
+	update_output_manager_config(output->desktop);
 }
 
 static void output_handle_transform(struct wl_listener *listener, void *data) {
@@ -502,6 +620,8 @@ void handle_new_output(struct wl_listener *listener, void *data) {
 
 	output->destroy.notify = output_handle_destroy;
 	wl_signal_add(&wlr_output->events.destroy, &output->destroy);
+	output->enable.notify = output_handle_enable;
+	wl_signal_add(&wlr_output->events.enable, &output->enable);
 	output->mode.notify = output_handle_mode;
 	wl_signal_add(&wlr_output->events.mode, &output->mode);
 	output->transform.notify = output_handle_transform;
@@ -522,12 +642,8 @@ void handle_new_output(struct wl_listener *listener, void *data) {
 	struct roots_output_config *output_config =
 		roots_config_get_output(config, wlr_output);
 
-	if ((!output_config || output_config->enable) && !wl_list_empty(&wlr_output->modes)) {
-		struct wlr_output_mode *mode =
-			wl_container_of(wlr_output->modes.prev, mode, link);
-		wlr_output_set_mode(wlr_output, mode);
-	}
-
+	struct wlr_output_mode *preferred_mode =
+		wlr_output_preferred_mode(wlr_output);
 	if (output_config) {
 		if (output_config->enable) {
 			if (wlr_output_is_drm(wlr_output)) {
@@ -541,6 +657,8 @@ void handle_new_output(struct wl_listener *listener, void *data) {
 
 			if (output_config->mode.width) {
 				set_mode(wlr_output, output_config);
+			} else if (preferred_mode != NULL) {
+				wlr_output_set_mode(wlr_output, preferred_mode);
 			}
 
 			wlr_output_set_scale(wlr_output, output_config->scale);
@@ -551,6 +669,9 @@ void handle_new_output(struct wl_listener *listener, void *data) {
 			wlr_output_enable(wlr_output, false);
 		}
 	} else {
+		if (preferred_mode != NULL) {
+			wlr_output_set_mode(wlr_output, preferred_mode);
+		}
 		wlr_output_layout_add_auto(desktop->layout, wlr_output);
 	}
 
@@ -562,4 +683,6 @@ void handle_new_output(struct wl_listener *listener, void *data) {
 
 	arrange_layers(output);
 	output_damage_whole(output);
+
+	update_output_manager_config(desktop);
 }

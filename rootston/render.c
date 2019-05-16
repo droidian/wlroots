@@ -58,7 +58,7 @@ static void render_texture(struct wlr_output *wlr_output,
 	pixman_region32_intersect(&damage, &damage, output_damage);
 	bool damaged = pixman_region32_not_empty(&damage);
 	if (!damaged) {
-		goto damage_finish;
+		goto buffer_damage_finish;
 	}
 
 	int nrects;
@@ -68,7 +68,7 @@ static void render_texture(struct wlr_output *wlr_output,
 		wlr_render_texture_with_matrix(renderer, texture, matrix, alpha);
 	}
 
-damage_finish:
+buffer_damage_finish:
 	pixman_region32_fini(&damage);
 }
 
@@ -121,7 +121,7 @@ static void render_decorations(struct roots_output *output,
 	pixman_region32_intersect(&damage, &damage, data->damage);
 	bool damaged = pixman_region32_not_empty(&damage);
 	if (!damaged) {
-		goto damage_finish;
+		goto buffer_damage_finish;
 	}
 
 	float matrix[9];
@@ -137,7 +137,7 @@ static void render_decorations(struct roots_output *output,
 		wlr_render_quad_with_matrix(renderer, color, matrix);
 	}
 
-damage_finish:
+buffer_damage_finish:
 	pixman_region32_fini(&damage);
 }
 
@@ -220,26 +220,27 @@ void output_render(struct roots_output *output) {
 		clear_color[0] = clear_color[1] = clear_color[2] = 0;
 	}
 
-	bool needs_swap;
-	pixman_region32_t damage;
-	pixman_region32_init(&damage);
-	if (!wlr_output_damage_make_current(output->damage, &needs_swap, &damage)) {
+	bool needs_frame;
+	pixman_region32_t buffer_damage;
+	pixman_region32_init(&buffer_damage);
+	if (!wlr_output_damage_attach_render(output->damage, &needs_frame,
+			&buffer_damage)) {
 		return;
 	}
 
 	struct render_data data = {
-		.damage = &damage,
+		.damage = &buffer_damage,
 		.alpha = 1.0,
 	};
 
-	if (!needs_swap) {
+	if (!needs_frame) {
 		// Output doesn't need swap and isn't damaged, skip rendering completely
-		goto damage_finish;
+		goto buffer_damage_finish;
 	}
 
 	wlr_renderer_begin(renderer, wlr_output->width, wlr_output->height);
 
-	if (!pixman_region32_not_empty(&damage)) {
+	if (!pixman_region32_not_empty(&buffer_damage)) {
 		// Output isn't damaged but needs buffer swap
 		goto renderer_end;
 	}
@@ -249,15 +250,15 @@ void output_render(struct roots_output *output) {
 	}
 
 	int nrects;
-	pixman_box32_t *rects = pixman_region32_rectangles(&damage, &nrects);
+	pixman_box32_t *rects = pixman_region32_rectangles(&buffer_damage, &nrects);
 	for (int i = 0; i < nrects; ++i) {
 		scissor_output(output->wlr_output, &rects[i]);
 		wlr_renderer_clear(renderer, clear_color);
 	}
 
-	render_layer(output, &damage,
+	render_layer(output, &buffer_damage,
 		&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND]);
-	render_layer(output, &damage,
+	render_layer(output, &buffer_damage,
 		&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM]);
 
 	// If a view is fullscreen on this output, render it
@@ -285,40 +286,47 @@ void output_render(struct roots_output *output) {
 			render_view(output, view, &data);
 		}
 		// Render top layer above shell views
-		render_layer(output, &damage,
+		render_layer(output, &buffer_damage,
 			&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]);
 	}
 
-	render_drag_icons(output, &damage, server->input);
+	render_drag_icons(output, &buffer_damage, server->input);
 
-	render_layer(output, &damage,
+	render_layer(output, &buffer_damage,
 		&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]);
 
 renderer_end:
-	wlr_output_render_software_cursors(wlr_output, &damage);
+	wlr_output_render_software_cursors(wlr_output, &buffer_damage);
 	wlr_renderer_scissor(renderer, NULL);
 	wlr_renderer_end(renderer);
 
 	int width, height;
 	wlr_output_transformed_resolution(wlr_output, &width, &height);
 
-	if (server->config->debug_damage_tracking) {
-		pixman_region32_union_rect(&damage, &damage, 0, 0, width, height);
-	}
+	pixman_region32_t frame_damage;
+	pixman_region32_init(&frame_damage);
 
 	enum wl_output_transform transform =
 		wlr_output_transform_invert(wlr_output->transform);
-	wlr_region_transform(&damage, &damage, transform, width, height);
+	wlr_region_transform(&frame_damage, &output->damage->current,
+		transform, width, height);
 
-	if (!wlr_output_damage_swap_buffers(output->damage, &now, &damage)) {
-		goto damage_finish;
+	if (server->config->debug_damage_tracking) {
+		pixman_region32_union_rect(&frame_damage, &frame_damage,
+			0, 0, wlr_output->width, wlr_output->height);
+	}
+
+	wlr_output_set_damage(wlr_output, &frame_damage);
+	pixman_region32_fini(&frame_damage);
+
+	if (!wlr_output_commit(wlr_output)) {
+		goto buffer_damage_finish;
 	}
 	output->last_frame = desktop->last_frame = now;
 
-damage_finish:
-	pixman_region32_fini(&damage);
+buffer_damage_finish:
+	pixman_region32_fini(&buffer_damage);
 
 	// Send frame done events to all surfaces
-	output_for_each_surface(output, surface_send_frame_done_iterator,
-		&now);
+	output_for_each_surface(output, surface_send_frame_done_iterator, &now);
 }

@@ -17,13 +17,19 @@ static void output_transform(struct wlr_output *wlr_output,
 	// empty
 }
 
-static bool output_make_current(struct wlr_output *wlr_output, int *buffer_age) {
+static bool output_set_custom_mode(struct wlr_output *wlr_output,
+		int32_t width, int32_t height, int32_t refresh) {
+	wlr_output_update_custom_mode(wlr_output, width, height, refresh);
 	return true;
 }
 
-static bool output_swap_buffers(struct wlr_output *wlr_output,
-		pixman_region32_t *damage) {
-	return true;
+static bool output_attach_render(struct wlr_output *wlr_output,
+		int *buffer_age) {
+	return false;
+}
+
+static bool output_commit(struct wlr_output *wlr_output) {
+	return false;
 }
 
 static void output_destroy(struct wlr_output *wlr_output) {
@@ -37,9 +43,10 @@ static void output_destroy(struct wlr_output *wlr_output) {
 
 static const struct wlr_output_impl output_impl = {
 	.transform = output_transform,
+	.set_custom_mode = output_set_custom_mode,
 	.destroy = output_destroy,
-	.make_current = output_make_current,
-	.swap_buffers = output_swap_buffers,
+	.attach_render = output_attach_render,
+	.commit = output_commit,
 };
 
 bool wlr_output_is_noop(struct wlr_output *wlr_output) {
@@ -61,8 +68,8 @@ struct wlr_output *wlr_noop_add_output(struct wlr_backend *wlr_backend) {
 
 	strncpy(wlr_output->make, "noop", sizeof(wlr_output->make));
 	strncpy(wlr_output->model, "noop", sizeof(wlr_output->model));
-	snprintf(wlr_output->name, sizeof(wlr_output->name), "NOOP-%d",
-		wl_list_length(&backend->outputs) + 1);
+	snprintf(wlr_output->name, sizeof(wlr_output->name), "NOOP-%zd",
+		++backend->last_output_num);
 
 	wl_list_insert(&backend->outputs, &output->link);
 

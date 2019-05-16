@@ -7,6 +7,7 @@
 #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_gamma_control.h>
+#include <wlr/types/wlr_gtk_primary_selection.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
 #include <wlr/types/wlr_idle.h>
 #include <wlr/types/wlr_input_inhibitor.h>
@@ -14,16 +15,15 @@
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_list.h>
 #include <wlr/types/wlr_output_layout.h>
+#include <wlr/types/wlr_output_management_v1.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_pointer_gestures_v1.h>
 #include <wlr/types/wlr_presentation_time.h>
-#include <wlr/types/wlr_gtk_primary_selection.h>
 #include <wlr/types/wlr_relative_pointer_v1.h>
 #include <wlr/types/wlr_screencopy_v1.h>
 #include <wlr/types/wlr_screenshooter.h>
 #include <wlr/types/wlr_text_input_v3.h>
 #include <wlr/types/wlr_virtual_keyboard_v1.h>
-#include <wlr/types/wlr_wl_shell.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_xdg_shell_v6.h>
@@ -45,7 +45,6 @@ struct roots_desktop {
 	struct wlr_xcursor_manager *xcursor_manager;
 
 	struct wlr_compositor *compositor;
-	struct wlr_wl_shell *wl_shell;
 	struct wlr_xdg_shell_v6 *xdg_shell_v6;
 	struct wlr_xdg_shell *xdg_shell;
 	struct wlr_gamma_control_manager *gamma_control_manager;
@@ -69,18 +68,20 @@ struct roots_desktop {
 	struct wlr_foreign_toplevel_manager_v1 *foreign_toplevel_manager_v1;
 	struct wlr_relative_pointer_manager_v1 *relative_pointer_manager;
 	struct wlr_pointer_gestures_v1 *pointer_gestures;
+	struct wlr_output_manager_v1 *output_manager_v1;
 
 	struct wl_listener new_output;
 	struct wl_listener layout_change;
 	struct wl_listener xdg_shell_v6_surface;
 	struct wl_listener xdg_shell_surface;
-	struct wl_listener wl_shell_surface;
 	struct wl_listener layer_shell_surface;
 	struct wl_listener xdg_toplevel_decoration;
 	struct wl_listener input_inhibit_activate;
 	struct wl_listener input_inhibit_deactivate;
 	struct wl_listener virtual_keyboard_new;
 	struct wl_listener pointer_constraint;
+	struct wl_listener output_manager_apply;
+	struct wl_listener output_manager_test;
 
 #if WLR_HAS_XWAYLAND
 	struct wlr_xwayland *xwayland;
@@ -103,7 +104,6 @@ struct wlr_surface *desktop_surface_at(struct roots_desktop *desktop,
 void handle_xdg_shell_v6_surface(struct wl_listener *listener, void *data);
 void handle_xdg_shell_surface(struct wl_listener *listener, void *data);
 void handle_xdg_toplevel_decoration(struct wl_listener *listener, void *data);
-void handle_wl_shell_surface(struct wl_listener *listener, void *data);
 void handle_layer_shell_surface(struct wl_listener *listener, void *data);
 void handle_xwayland_surface(struct wl_listener *listener, void *data);
 

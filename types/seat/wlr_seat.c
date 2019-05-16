@@ -12,7 +12,7 @@
 #include "types/wlr_seat.h"
 #include "util/signal.h"
 
-#define SEAT_VERSION 6
+#define SEAT_VERSION 7
 
 static void seat_handle_get_pointer(struct wl_client *client,
 		struct wl_resource *seat_resource, uint32_t id) {
@@ -254,8 +254,13 @@ struct wlr_seat *wlr_seat_create(struct wl_display *display, const char *name) {
 	seat->touch_state.seat = seat;
 	wl_list_init(&seat->touch_state.touch_points);
 
+	// TODO: always use SEAT_VERSION (requires libwayland 1.17)
+	uint32_t version = SEAT_VERSION;
+	if (wl_seat_interface.version < SEAT_VERSION) {
+		version = wl_seat_interface.version;
+	}
 	seat->global = wl_global_create(display, &wl_seat_interface,
-		SEAT_VERSION, seat, seat_handle_bind);
+		version, seat, seat_handle_bind);
 	if (seat->global == NULL) {
 		free(touch_grab);
 		free(pointer_grab);
