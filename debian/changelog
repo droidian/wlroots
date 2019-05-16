@@ -1,3 +1,10 @@
+wlroots (0.6.0-1) experimental; urgency=medium
+
+  * New upstream version 0.6.0
+  * Adjust to soname bump
+
+ -- Guido Günther <agx@sigxcpu.org>  Thu, 16 May 2019 17:25:26 +0200
+
 wlroots (0.5.0-2) experimental; urgency=medium
 
   [ Birger Schacht ]
