@@ -78,6 +78,10 @@ Files: protocol/wlr-input-inhibitor-unstable-v1.xml, protocol/wlr-layer-shell-un
 Copyright: 2018 Drew DeVault
 License: Expat
 
+Files: protocol/wlr-output-management-unstable-v1.xml
+Copyright: 2019 Purism SPC
+License: Expat
+
 Files: protocol/wlr-screencopy-unstable-v1.xml
 Copyright: 2018 Simon Ser
 License: Expat
