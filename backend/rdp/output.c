@@ -2,7 +2,7 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <stdlib.h>
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/interfaces/wlr_output.h>
 #include <wlr/util/log.h>
@@ -62,13 +62,6 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 	return true;
 }
 
-static void output_transform(struct wlr_output *wlr_output,
-		enum wl_output_transform transform) {
-	struct wlr_rdp_output *output =
-		rdp_output_from_output(wlr_output);
-	output->wlr_output.transform = transform;
-}
-
 static bool output_attach_render(struct wlr_output *wlr_output,
 		int *buffer_age) {
 	struct wlr_rdp_output *output =
@@ -79,6 +72,9 @@ static bool output_attach_render(struct wlr_output *wlr_output,
 
 static bool rfx_swap_buffers(
 		struct wlr_rdp_output *output, pixman_region32_t *damage) {
+	if (!pixman_region32_not_empty(damage)) {
+		return true;
+	}
 	struct wlr_rdp_peer_context *context = output->context;
 	freerdp_peer *peer = context->peer;
 	rdpUpdate *update = peer->update;
@@ -239,7 +235,6 @@ static void output_destroy(struct wlr_output *wlr_output) {
 
 static const struct wlr_output_impl output_impl = {
 	.set_custom_mode = output_set_custom_mode,
-	.transform = output_transform,
 	.destroy = output_destroy,
 	.attach_render = output_attach_render,
 	.commit = output_commit,

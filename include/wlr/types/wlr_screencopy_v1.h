@@ -10,7 +10,7 @@
 #define WLR_TYPES_WLR_SCREENCOPY_V1_H
 
 #include <stdbool.h>
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wlr/types/wlr_box.h>
 
 struct wlr_screencopy_manager_v1 {
@@ -43,6 +43,8 @@ struct wlr_screencopy_frame_v1 {
 
 	struct wlr_output *output;
 	struct wl_listener output_precommit;
+	struct wl_listener output_destroy;
+	struct wl_listener output_enable;
 
 	void *data;
 };

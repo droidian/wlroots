@@ -3,11 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/util/log.h>
 #include "types/wlr_seat.h"
 #include "util/signal.h"
+#include "util/array.h"
 
 static void default_pointer_enter(struct wlr_seat_pointer_grab *grab,
 		struct wlr_surface *surface, double sx, double sy) {
@@ -148,7 +149,7 @@ void wlr_seat_pointer_enter(struct wlr_seat *wlr_seat,
 
 	// leave the previously entered surface
 	if (focused_client != NULL && focused_surface != NULL) {
-		uint32_t serial = wl_display_next_serial(wlr_seat->display);
+		uint32_t serial = wlr_seat_client_next_serial(focused_client);
 		struct wl_resource *resource;
 		wl_resource_for_each(resource, &focused_client->pointers) {
 			if (wlr_seat_client_from_pointer_resource(resource) == NULL) {
@@ -162,7 +163,7 @@ void wlr_seat_pointer_enter(struct wlr_seat *wlr_seat,
 
 	// enter the current surface
 	if (client != NULL && surface != NULL) {
-		uint32_t serial = wl_display_next_serial(wlr_seat->display);
+		uint32_t serial = wlr_seat_client_next_serial(client);
 		struct wl_resource *resource;
 		wl_resource_for_each(resource, &client->pointers) {
 			if (wlr_seat_client_from_pointer_resource(resource) == NULL) {
@@ -241,7 +242,7 @@ uint32_t wlr_seat_pointer_send_button(struct wlr_seat *wlr_seat, uint32_t time,
 		return 0;
 	}
 
-	uint32_t serial = wl_display_next_serial(wlr_seat->display);
+	uint32_t serial = wlr_seat_client_next_serial(client);
 	struct wl_resource *resource;
 	wl_resource_for_each(resource, &client->pointers) {
 		if (wlr_seat_client_from_pointer_resource(resource) == NULL) {
@@ -339,26 +340,32 @@ void wlr_seat_pointer_notify_motion(struct wlr_seat *wlr_seat, uint32_t time,
 uint32_t wlr_seat_pointer_notify_button(struct wlr_seat *wlr_seat,
 		uint32_t time, uint32_t button, enum wlr_button_state state) {
 	clock_gettime(CLOCK_MONOTONIC, &wlr_seat->last_event);
+
+	struct wlr_seat_pointer_state* pointer_state = &wlr_seat->pointer_state;
+
 	if (state == WLR_BUTTON_PRESSED) {
-		if (wlr_seat->pointer_state.button_count == 0) {
-			wlr_seat->pointer_state.grab_button = button;
-			wlr_seat->pointer_state.grab_time = time;
+		if (pointer_state->button_count == 0) {
+			pointer_state->grab_button = button;
+			pointer_state->grab_time = time;
 		}
-		wlr_seat->pointer_state.button_count++;
+		set_add(pointer_state->buttons, &pointer_state->button_count,
+			WLR_POINTER_BUTTONS_CAP, button);
 	} else {
-		if (wlr_seat->pointer_state.button_count == 0) {
-			wlr_log(WLR_ERROR, "Corrupted seat button count");
-		} else {
-			wlr_seat->pointer_state.button_count--;
-		}
+		set_remove(pointer_state->buttons, &pointer_state->button_count,
+			WLR_POINTER_BUTTONS_CAP, button);
 	}
 
-	struct wlr_seat_pointer_grab *grab = wlr_seat->pointer_state.grab;
+
+	struct wlr_seat_pointer_grab *grab = pointer_state->grab;
 	uint32_t serial = grab->interface->button(grab, time, button, state);
 
-	if (serial && wlr_seat->pointer_state.button_count == 1 &&
+	wlr_log(WLR_DEBUG, "button_count=%zu grab_serial=%"PRIu32" serial=%"PRIu32"",
+		pointer_state->button_count,
+		pointer_state->grab_serial, serial);
+
+	if (serial && pointer_state->button_count == 1 &&
 			state == WLR_BUTTON_PRESSED) {
-		wlr_seat->pointer_state.grab_serial = serial;
+		pointer_state->grab_serial = serial;
 	}
 
 	return serial;
@@ -413,7 +420,7 @@ bool wlr_seat_validate_pointer_grab_serial(struct wlr_seat *seat,
 	if (seat->pointer_state.button_count != 1 ||
 			seat->pointer_state.grab_serial != serial) {
 		wlr_log(WLR_DEBUG, "Pointer grab serial validation failed: "
-			"button_count=%"PRIu32" grab_serial=%"PRIu32" (got %"PRIu32")",
+			"button_count=%zu grab_serial=%"PRIu32" (got %"PRIu32")",
 			seat->pointer_state.button_count,
 			seat->pointer_state.grab_serial, serial);
 		return false;

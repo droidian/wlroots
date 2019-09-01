@@ -2,7 +2,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_surface.h>
@@ -60,6 +60,10 @@ static void layer_surface_handle_ack_configure(struct wl_client *client,
 
 	bool found = false;
 	struct wlr_layer_surface_v1_configure *configure, *tmp;
+
+	if (!surface) {
+		return;
+	}
 	wl_list_for_each_safe(configure, tmp, &surface->configure_list, link) {
 		if (configure->serial < serial) {
 			layer_surface_configure_destroy(configure);
@@ -88,6 +92,10 @@ static void layer_surface_handle_ack_configure(struct wl_client *client,
 static void layer_surface_handle_set_size(struct wl_client *client,
 		struct wl_resource *resource, uint32_t width, uint32_t height) {
 	struct wlr_layer_surface_v1 *surface = layer_surface_from_resource(resource);
+
+	if (!surface) {
+		return;
+	}
 	surface->client_pending.desired_width = width;
 	surface->client_pending.desired_height = height;
 }
@@ -105,12 +113,20 @@ static void layer_surface_handle_set_anchor(struct wl_client *client,
 			"invalid anchor %d", anchor);
 	}
 	struct wlr_layer_surface_v1 *surface = layer_surface_from_resource(resource);
+
+	if (!surface) {
+		return;
+	}
 	surface->client_pending.anchor = anchor;
 }
 
 static void layer_surface_handle_set_exclusive_zone(struct wl_client *client,
 		struct wl_resource *resource, int32_t zone) {
 	struct wlr_layer_surface_v1 *surface = layer_surface_from_resource(resource);
+
+	if (!surface) {
+		return;
+	}
 	surface->client_pending.exclusive_zone = zone;
 }
 
@@ -118,6 +134,10 @@ static void layer_surface_handle_set_margin(
 		struct wl_client *client, struct wl_resource *resource,
 		int32_t top, int32_t right, int32_t bottom, int32_t left) {
 	struct wlr_layer_surface_v1 *surface = layer_surface_from_resource(resource);
+
+	if (!surface) {
+		return;
+	}
 	surface->client_pending.margin.top = top;
 	surface->client_pending.margin.right = right;
 	surface->client_pending.margin.bottom = bottom;
@@ -128,6 +148,10 @@ static void layer_surface_handle_set_keyboard_interactivity(
 		struct wl_client *client, struct wl_resource *resource,
 		uint32_t interactive) {
 	struct wlr_layer_surface_v1 *surface = layer_surface_from_resource(resource);
+
+	if (!surface) {
+		return;
+	}
 	surface->client_pending.keyboard_interactive = !!interactive;
 }
 
@@ -139,6 +163,9 @@ static void layer_surface_handle_get_popup(struct wl_client *client,
 	struct wlr_xdg_surface *popup_surface =
 		wlr_xdg_surface_from_popup_resource(popup_resource);
 
+	if (!parent) {
+		return;
+	}
 	assert(popup_surface->role == WLR_XDG_SURFACE_ROLE_POPUP);
 	struct wlr_xdg_popup *popup = popup_surface->popup;
 	popup->parent = parent->surface;
@@ -161,6 +188,11 @@ static void layer_surface_unmap(struct wlr_layer_surface_v1 *surface) {
 	// TODO: probably need to ungrab before this event
 	wlr_signal_emit_safe(&surface->events.unmap, surface);
 
+	struct wlr_xdg_popup *popup, *popup_tmp;
+	wl_list_for_each_safe(popup, popup_tmp, &surface->popups, link) {
+		wlr_xdg_popup_destroy(popup->base);
+	}
+
 	struct wlr_layer_surface_v1_configure *configure, *tmp;
 	wl_list_for_each_safe(configure, tmp, &surface->configure_list, link) {
 		layer_surface_configure_destroy(configure);
@@ -168,10 +200,6 @@ static void layer_surface_unmap(struct wlr_layer_surface_v1 *surface) {
 
 	surface->configured = surface->mapped = false;
 	surface->configure_serial = 0;
-	if (surface->configure_idle) {
-		wl_event_source_remove(surface->configure_idle);
-		surface->configure_idle = NULL;
-	}
 	surface->configure_next_serial = 0;
 }
 

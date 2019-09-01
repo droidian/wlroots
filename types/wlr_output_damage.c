@@ -1,7 +1,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <time.h>
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wlr/types/wlr_box.h>
 #include <wlr/types/wlr_output_damage.h>
 #include <wlr/types/wlr_output.h>
@@ -59,12 +59,25 @@ static void output_handle_commit(struct wl_listener *listener, void *data) {
 		return;
 	}
 
-	// same as decrementing, but works on unsigned integers
-	output_damage->previous_idx += WLR_OUTPUT_DAMAGE_PREVIOUS_LEN - 1;
-	output_damage->previous_idx %= WLR_OUTPUT_DAMAGE_PREVIOUS_LEN;
+	pixman_region32_t *prev;
+	switch (output_damage->output->pending.buffer_type) {
+	case WLR_OUTPUT_STATE_BUFFER_RENDER:
+		// render-buffers have been swapped, rotate the damage
 
-	pixman_region32_copy(&output_damage->previous[output_damage->previous_idx],
-		&output_damage->current);
+		// same as decrementing, but works on unsigned integers
+		output_damage->previous_idx += WLR_OUTPUT_DAMAGE_PREVIOUS_LEN - 1;
+		output_damage->previous_idx %= WLR_OUTPUT_DAMAGE_PREVIOUS_LEN;
+
+		prev = &output_damage->previous[output_damage->previous_idx];
+		pixman_region32_copy(prev, &output_damage->current);
+		break;
+	case WLR_OUTPUT_STATE_BUFFER_SCANOUT:
+		// accumulate render-buffer damage
+		prev = &output_damage->previous[output_damage->previous_idx];
+		pixman_region32_union(prev, prev, &output_damage->current);
+		break;
+	}
+
 	pixman_region32_clear(&output_damage->current);
 }
 
@@ -131,6 +144,8 @@ bool wlr_output_damage_attach_render(struct wlr_output_damage *output_damage,
 		return false;
 	}
 
+	*needs_frame =
+		output->needs_frame || pixman_region32_not_empty(&output_damage->current);
 	// Check if we can use damage tracking
 	if (buffer_age <= 0 || buffer_age - 1 > WLR_OUTPUT_DAMAGE_PREVIOUS_LEN) {
 		int width, height;
@@ -138,6 +153,7 @@ bool wlr_output_damage_attach_render(struct wlr_output_damage *output_damage,
 
 		// Buffer new or too old, damage the whole output
 		pixman_region32_union_rect(damage, damage, 0, 0, width, height);
+		*needs_frame = true;
 	} else {
 		pixman_region32_copy(damage, &output_damage->current);
 
@@ -157,7 +173,6 @@ bool wlr_output_damage_attach_render(struct wlr_output_damage *output_damage,
 		}
 	}
 
-	*needs_frame = output->needs_frame || pixman_region32_not_empty(damage);
 	return true;
 }
 

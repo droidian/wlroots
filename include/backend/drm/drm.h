@@ -7,10 +7,11 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <time.h>
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wayland-util.h>
 #include <wlr/backend/drm.h>
 #include <wlr/backend/session.h>
+#include <wlr/render/drm_format_set.h>
 #include <wlr/render/egl.h>
 #include <xf86drmMode.h>
 #include "iface.h"
@@ -21,12 +22,11 @@ struct wlr_drm_plane {
 	uint32_t type;
 	uint32_t id;
 
-	uint32_t possible_crtcs;
-
 	struct wlr_drm_surface surf;
 	struct wlr_drm_surface mgpu_surf;
 
 	uint32_t drm_format; // ARGB8888 or XRGB8888
+	struct wlr_drm_format_set formats;
 
 	// Only used by cursor
 	float matrix[9];
@@ -47,14 +47,15 @@ struct wlr_drm_crtc {
 	// Legacy only
 	drmModeCrtc *legacy_crtc;
 
-	union {
-		struct {
-			struct wlr_drm_plane *overlay;
-			struct wlr_drm_plane *primary;
-			struct wlr_drm_plane *cursor;
-		};
-		struct wlr_drm_plane *planes[3];
-	};
+	struct wlr_drm_plane *primary;
+	struct wlr_drm_plane *cursor;
+
+	/*
+	 * We don't support overlay planes yet, but we keep track of them to
+	 * give to DRM lease clients.
+	 */
+	size_t num_overlays;
+	uint32_t *overlays;
 
 	union wlr_drm_crtc_props props;
 
@@ -70,31 +71,12 @@ struct wlr_drm_backend {
 	struct wlr_drm_backend *parent;
 	const struct wlr_drm_interface *iface;
 	clockid_t clock;
+	bool addfb2_modifiers;
 
 	int fd;
 
 	size_t num_crtcs;
 	struct wlr_drm_crtc *crtcs;
-	size_t num_planes;
-	struct wlr_drm_plane *planes;
-
-	union {
-		struct {
-			size_t num_overlay_planes;
-			size_t num_primary_planes;
-			size_t num_cursor_planes;
-		};
-		size_t num_type_planes[3];
-	};
-
-	union {
-		struct {
-			struct wlr_drm_plane *overlay_planes;
-			struct wlr_drm_plane *primary_planes;
-			struct wlr_drm_plane *cursor_planes;
-		};
-		struct wlr_drm_plane *type_planes[3];
-	};
 
 	struct wl_display *display;
 	struct wl_event_source *drm_event;
@@ -116,8 +98,6 @@ enum wlr_drm_connector_state {
 	WLR_DRM_CONN_NEEDS_MODESET,
 	WLR_DRM_CONN_CLEANUP,
 	WLR_DRM_CONN_CONNECTED,
-	// Connector disappeared, waiting for being destroyed on next page-flip
-	WLR_DRM_CONN_DISAPPEARED,
 };
 
 struct wlr_drm_mode {
@@ -146,6 +126,13 @@ struct wlr_drm_connector {
 	bool pageflip_pending;
 	struct wl_event_source *retry_pageflip;
 	struct wl_list link;
+
+	// DMA-BUF to be displayed on next commit
+	struct wlr_dmabuf_attributes pending_dmabuf;
+	// Buffer submitted to the kernel but not yet displayed
+	struct wlr_buffer *pending_buffer;
+	// Buffer currently being displayed
+	struct wlr_buffer *current_buffer;
 };
 
 struct wlr_drm_backend *get_drm_backend_from_backend(

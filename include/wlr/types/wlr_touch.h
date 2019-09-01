@@ -10,12 +10,12 @@
 #define WLR_TYPES_WLR_TOUCH_H
 
 #include <stdint.h>
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 
 struct wlr_touch_impl;
 
 struct wlr_touch {
-	struct wlr_touch_impl *impl;
+	const struct wlr_touch_impl *impl;
 
 	struct {
 		struct wl_signal down;

@@ -1,7 +1,7 @@
 project(
 	'wlroots',
 	'c',
-	version: '0.6.0',
+	version: '0.7.0',
 	license: 'MIT',
 	meson_version: '>=0.48.0',
 	default_options: [
@@ -14,10 +14,9 @@ project(
 # Format of so_version is CURRENT, REVISION, AGE.
 # See: https://autotools.io/libtool/version.html
 # for a reference about clean library versioning.
-so_version = ['3', '4', '1']
+so_version = ['3', '5', '1']
 
 add_project_arguments([
-	'-DWLR_SRC_DIR="@0@"'.format(meson.current_source_dir()),
 	'-DWLR_USE_UNSTABLE',
 ], language: 'c')
 
@@ -41,6 +40,43 @@ add_project_arguments(cc.get_supported_arguments([
 	'-Wno-unused-parameter',
 ]), language: 'c')
 
+# Compute the relative path used by compiler invocations.
+source_root = meson.current_source_dir().split('/')
+build_root = meson.build_root().split('/')
+relative_dir_parts = []
+i = 0
+in_prefix = true
+foreach p : build_root
+	if i >= source_root.length() or not in_prefix or p != source_root[i]
+		in_prefix = false
+		relative_dir_parts += '..'
+	endif
+	i += 1
+endforeach
+i = 0
+in_prefix = true
+foreach p : source_root
+	if i >= build_root.length() or not in_prefix or build_root[i] != p
+		in_prefix = false
+		relative_dir_parts += p
+	endif
+	i += 1
+endforeach
+relative_dir = join_paths(relative_dir_parts) + '/'
+
+# Strip relative path prefixes from the code if possible, otherwise hide them.
+if cc.has_argument('-fmacro-prefix-map=/prefix/to/hide=')
+	add_project_arguments(
+		'-fmacro-prefix-map=@0@='.format(relative_dir),
+		language: 'c',
+	)
+else
+	add_project_arguments(
+		'-DWLR_REL_SRC_DIR="@0@"'.format(relative_dir),
+		language: 'c',
+	)
+endif
+
 conf_data = configuration_data()
 conf_data.set10('WLR_HAS_LIBCAP', false)
 conf_data.set10('WLR_HAS_SYSTEMD', false)
@@ -59,9 +95,6 @@ if cc.get_id() == 'clang'
 	add_project_arguments('-Wno-missing-field-initializers', language: 'c')
 	add_project_arguments('-Wno-missing-braces', language: 'c')
 endif
-
-# Avoid wl_buffer deprecation warnings
-add_project_arguments('-DWL_HIDE_DEPRECATED', language: 'c')
 
 wayland_server = dependency('wayland-server', version: '>=1.16')
 wayland_client = dependency('wayland-client')
@@ -93,6 +126,15 @@ endif
 if logind.found()
 	conf_data.set10('WLR_HAS_' + get_option('logind-provider').to_upper(), true)
 	wlr_deps += logind
+endif
+
+if libinput.found()
+	ver = libinput.version().split('.')
+	add_project_arguments([
+		'-DLIBINPUT_MAJOR=' + ver[0],
+		'-DLIBINPUT_MINOR=' + ver[1],
+		'-DLIBINPUT_PATCH=' + ver[2],
+	], language: 'c')
 endif
 
 subdir('protocol')
@@ -169,7 +211,6 @@ summary = [
 message('\n'.join(summary))
 
 subdir('examples')
-subdir('rootston')
 
 pkgconfig = import('pkgconfig')
 pkgconfig.generate(

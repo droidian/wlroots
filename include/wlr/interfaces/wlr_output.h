@@ -19,8 +19,6 @@ struct wlr_output_impl {
 	bool (*set_mode)(struct wlr_output *output, struct wlr_output_mode *mode);
 	bool (*set_custom_mode)(struct wlr_output *output, int32_t width,
 		int32_t height, int32_t refresh);
-	void (*transform)(struct wlr_output *output,
-		enum wl_output_transform transform);
 	bool (*set_cursor)(struct wlr_output *output, struct wlr_texture *texture,
 		int32_t scale, enum wl_output_transform transform,
 		int32_t hotspot_x, int32_t hotspot_y, bool update_texture);
@@ -34,6 +32,7 @@ struct wlr_output_impl {
 	bool (*export_dmabuf)(struct wlr_output *output,
 		struct wlr_dmabuf_attributes *attribs);
 	bool (*schedule_frame)(struct wlr_output *output);
+	bool (*attach_buffer)(struct wlr_output *output, struct wlr_buffer *buffer);
 };
 
 void wlr_output_init(struct wlr_output *output, struct wlr_backend *backend,

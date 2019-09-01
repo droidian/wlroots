@@ -9,6 +9,7 @@
 
 #include <wlr/interfaces/wlr_output.h>
 #include <wlr/interfaces/wlr_pointer.h>
+#include <wlr/interfaces/wlr_touch.h>
 #include <wlr/util/log.h>
 
 #include "backend/x11.h"
@@ -75,17 +76,12 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output,
 	return true;
 }
 
-static void output_transform(struct wlr_output *wlr_output,
-		enum wl_output_transform transform) {
-	struct wlr_x11_output *output = get_x11_output_from_output(wlr_output);
-	output->wlr_output.transform = transform;
-}
-
 static void output_destroy(struct wlr_output *wlr_output) {
 	struct wlr_x11_output *output = get_x11_output_from_output(wlr_output);
 	struct wlr_x11_backend *x11 = output->x11;
 
 	wlr_input_device_destroy(&output->pointer_dev);
+	wlr_input_device_destroy(&output->touch_dev);
 
 	wl_list_remove(&output->link);
 	wl_event_source_remove(output->frame_timer);
@@ -122,7 +118,6 @@ static bool output_commit(struct wlr_output *wlr_output) {
 
 static const struct wlr_output_impl output_impl = {
 	.set_custom_mode = output_set_custom_mode,
-	.transform = output_transform,
 	.destroy = output_destroy,
 	.attach_render = output_attach_render,
 	.commit = output_commit,
@@ -174,7 +169,10 @@ struct wlr_output *wlr_x11_output_create(struct wlr_backend *backend) {
 			XCB_INPUT_XI_EVENT_MASK_BUTTON_RELEASE |
 			XCB_INPUT_XI_EVENT_MASK_MOTION |
 			XCB_INPUT_XI_EVENT_MASK_ENTER |
-			XCB_INPUT_XI_EVENT_MASK_LEAVE,
+			XCB_INPUT_XI_EVENT_MASK_LEAVE |
+			XCB_INPUT_XI_EVENT_MASK_TOUCH_BEGIN |
+			XCB_INPUT_XI_EVENT_MASK_TOUCH_END |
+			XCB_INPUT_XI_EVENT_MASK_TOUCH_UPDATE,
 	};
 	xcb_input_xi_select_events(x11->xcb, output->win, 1, &xinput_mask.head);
 
@@ -208,8 +206,16 @@ struct wlr_output *wlr_x11_output_create(struct wlr_backend *backend) {
 	output->pointer_dev.pointer = &output->pointer;
 	output->pointer_dev.output_name = strdup(wlr_output->name);
 
+	wlr_input_device_init(&output->touch_dev, WLR_INPUT_DEVICE_TOUCH,
+		&input_device_impl, "X11 touch", 0, 0);
+	wlr_touch_init(&output->touch, &touch_impl);
+	output->touch_dev.touch = &output->touch;
+	output->touch_dev.output_name = strdup(wlr_output->name);
+	wl_list_init(&output->touchpoints);
+
 	wlr_signal_emit_safe(&x11->backend.events.new_output, wlr_output);
 	wlr_signal_emit_safe(&x11->backend.events.new_input, &output->pointer_dev);
+	wlr_signal_emit_safe(&x11->backend.events.new_input, &output->touch_dev);
 
 	return wlr_output;
 }

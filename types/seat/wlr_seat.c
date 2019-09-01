@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_primary_selection.h>
@@ -369,4 +369,53 @@ bool wlr_seat_validate_grab_serial(struct wlr_seat *seat, uint32_t serial) {
 	//return serial == seat->pointer_state.grab_serial ||
 	//	serial == seat->touch_state.grab_serial;
 	return true;
+}
+
+uint32_t wlr_seat_client_next_serial(struct wlr_seat_client *client) {
+	uint32_t serial = wl_display_next_serial(wl_client_get_display(client->client));
+	struct wlr_serial_ringset *set = &client->serials;
+
+	if (set->count == 0) {
+		set->data[0].min_incl = serial;
+		set->data[0].max_incl = serial;
+		set->count = 1;
+		set->end = 0;
+	} else if (set->data[set->end].max_incl + 1 != serial) {
+		if (set->count < WLR_SERIAL_RINGSET_SIZE) {
+			set->count++;
+		}
+		set->end = (set->end + 1) % WLR_SERIAL_RINGSET_SIZE;
+		set->data[set->end].min_incl = serial;
+		set->data[set->end].max_incl = serial;
+	} else {
+		set->data[set->end].max_incl = serial;
+	}
+
+	return serial;
+}
+
+bool wlr_seat_client_validate_event_serial(struct wlr_seat_client *client, uint32_t serial) {
+	uint32_t cur = wl_display_get_serial(wl_client_get_display(client->client));
+	struct wlr_serial_ringset *set = &client->serials;
+	uint32_t rev_dist = cur - serial;
+
+	if (rev_dist >= UINT32_MAX / 2) {
+		// serial is closer to being 'newer' instead of 'older' than
+		// the current serial, so it's either invalid or incredibly old
+		return false;
+	}
+
+	for (int i = 0; i < set->count; i++) {
+		int j = (set->end - i + WLR_SERIAL_RINGSET_SIZE) % WLR_SERIAL_RINGSET_SIZE;
+		if (rev_dist < cur - set->data[j].max_incl) {
+			return false;
+		}
+		if (rev_dist <= cur - set->data[j].min_incl) {
+			return true;
+		}
+	}
+
+	// Iff the set is full, then `rev_dist` is large enough that serial
+	// could already have been recycled out of the set.
+	return set->count == WLR_SERIAL_RINGSET_SIZE;
 }

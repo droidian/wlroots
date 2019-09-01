@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wlr/backend/session/interface.h>
 #include <wlr/config.h>
 #include <wlr/util/log.h>
@@ -136,7 +136,7 @@ static bool logind_change_vt(struct wlr_session *base, unsigned vt) {
 	sd_bus_error error = SD_BUS_ERROR_NULL;
 
 	ret = sd_bus_call_method(session->bus, "org.freedesktop.login1",
-		"/org/freedesktop/login1/seat/self", "org.freedesktop.login1.Seat", "SwitchTo",
+		"/org/freedesktop/login1/seat/seat0", "org.freedesktop.login1.Seat", "SwitchTo",
 		&error, &msg, "u", (uint32_t)vt);
 	if (ret < 0) {
 		wlr_log(WLR_ERROR, "Failed to change to vt '%d'", vt);
@@ -258,6 +258,7 @@ static struct wlr_device *find_device(struct wlr_session *session,
 	wlr_log(WLR_ERROR, "Tried to use dev_t %lu not opened by session",
 		(unsigned long)devnum);
 	assert(0);
+	return NULL;
 }
 
 static int pause_device(sd_bus_message *msg, void *userdata,
@@ -274,7 +275,7 @@ static int pause_device(sd_bus_message *msg, void *userdata,
 		goto error;
 	}
 
-	if (major == DRM_MAJOR) {
+	if (major == DRM_MAJOR && strcmp(type, "gone") != 0) {
 		assert(session->has_drm);
 		session->base.active = false;
 		wlr_signal_emit_safe(&session->base.session_signal, session);
@@ -538,14 +539,25 @@ static bool get_display_session(char **session_id) {
 	assert(session_id != NULL);
 	int ret;
 
+	char *type = NULL;
+	char *state = NULL;
+	char *xdg_session_id = getenv("XDG_SESSION_ID");
+
+	if (xdg_session_id) {
+		// This just checks whether the supplied session ID is valid
+		if (sd_session_is_active(xdg_session_id) < 0) {
+			wlr_log(WLR_ERROR, "Invalid XDG_SESSION_ID: '%s'", xdg_session_id);
+			goto error;
+		}
+		*session_id = strdup(xdg_session_id);
+		return true;
+	}
+
 	// If there's a session active for the current process then just use that
 	ret = sd_pid_get_session(getpid(), session_id);
 	if (ret == 0) {
 		return true;
 	}
-
-	char *type = NULL;
-	char *state = NULL;
 
 	// Find any active sessions for the user if the process isn't part of an
 	// active session itself

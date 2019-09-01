@@ -2,7 +2,7 @@
 #define TYPES_WLR_TABLET_V2_H
 
 #include "tablet-unstable-v2-protocol.h"
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wlr/types/wlr_tablet_v2.h>
 
 struct wlr_tablet_seat_v2 {
@@ -48,6 +48,7 @@ struct wlr_tablet_pad_client_v2 {
 	struct wl_client *client;
 	struct wl_resource *resource;
 	struct wlr_tablet_v2_tablet_pad *pad;
+	struct wlr_tablet_seat_client_v2 *seat;
 
 	size_t button_count;
 

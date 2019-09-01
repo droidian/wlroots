@@ -17,7 +17,7 @@ static bool legacy_crtc_pageflip(struct wlr_drm_backend *drm,
 		}
 	}
 
-	if (drmModePageFlip(drm->fd, crtc->id, fb_id, DRM_MODE_PAGE_FLIP_EVENT, conn)) {
+	if (drmModePageFlip(drm->fd, crtc->id, fb_id, DRM_MODE_PAGE_FLIP_EVENT, drm)) {
 		wlr_log_errno(WLR_ERROR, "%s: Failed to page flip", conn->output.name);
 		return false;
 	}
@@ -29,6 +29,12 @@ static bool legacy_conn_enable(struct wlr_drm_backend *drm,
 		struct wlr_drm_connector *conn, bool enable) {
 	int ret = drmModeConnectorSetProperty(drm->fd, conn->id, conn->props.dpms,
 		enable ? DRM_MODE_DPMS_ON : DRM_MODE_DPMS_OFF);
+
+	if (!enable) {
+		drmModeSetCrtc(drm->fd, conn->crtc->id, 0, 0, 0, NULL, 0,
+					   NULL);
+	}
+
 	return ret >= 0;
 }
 

@@ -10,10 +10,22 @@
 #define WLR_TYPES_WLR_SEAT_H
 
 #include <time.h>
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_surface.h>
+
+#define WLR_SERIAL_RINGSET_SIZE 128
+
+struct wlr_serial_range {
+	uint32_t min_incl;
+	uint32_t max_incl;
+};
+struct wlr_serial_ringset {
+	struct wlr_serial_range data[WLR_SERIAL_RINGSET_SIZE];
+	int end;
+	int count;
+};
 
 /**
  * Contains state for a single client's bound wl_seat resource and can be used
@@ -35,6 +47,10 @@ struct wlr_seat_client {
 	struct {
 		struct wl_signal destroy;
 	} events;
+
+	// set of serials which were sent to the client on this seat
+	// for use by wlr_seat_client_{next_serial,validate_event_serial}
+	struct wlr_serial_ringset serials;
 };
 
 struct wlr_touch_point {
@@ -131,6 +147,8 @@ struct wlr_seat_pointer_grab {
 	void *data;
 };
 
+#define WLR_POINTER_BUTTONS_CAP 16
+
 struct wlr_seat_pointer_state {
 	struct wlr_seat *seat;
 	struct wlr_seat_client *focused_client;
@@ -140,7 +158,8 @@ struct wlr_seat_pointer_state {
 	struct wlr_seat_pointer_grab *grab;
 	struct wlr_seat_pointer_grab *default_grab;
 
-	uint32_t button_count;
+	uint32_t buttons[WLR_POINTER_BUTTONS_CAP];
+	size_t button_count;
 	uint32_t grab_button;
 	uint32_t grab_serial;
 	uint32_t grab_time;
@@ -617,6 +636,27 @@ bool wlr_seat_validate_pointer_grab_serial(struct wlr_seat *seat,
 bool wlr_seat_validate_touch_grab_serial(struct wlr_seat *seat,
 	struct wlr_surface *origin, uint32_t serial,
 	struct wlr_touch_point **point_ptr);
+
+/**
+ * Return a new serial (from wl_display_serial_next()) for the client, and
+ * update the seat client's set of valid serials. Use this for all input
+ * events; otherwise wlr_seat_client_validate_event_serial() may fail when
+ * handed a correctly functioning client's request serials.
+ */
+uint32_t wlr_seat_client_next_serial(struct wlr_seat_client *client);
+
+/**
+ * Return true if the serial number could have been produced by
+ * wlr_seat_client_next_serial() and is "older" (by less than UINT32_MAX/2) than
+ * the current display serial value.
+ *
+ * This function should have no false negatives, and the only false positive
+ * responses allowed are for elements that are still "older" than the current
+ * display serial value and also older than all serial values remaining in
+ * the seat client's serial ring buffer, if that buffer is also full.
+ */
+bool wlr_seat_client_validate_event_serial(struct wlr_seat_client *client,
+	uint32_t serial);
 
 /**
  * Get a seat client from a seat resource. Returns NULL if inert.

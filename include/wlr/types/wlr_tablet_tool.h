@@ -10,7 +10,7 @@
 #define WLR_TYPES_TABLET_TOOL_H
 
 #include <stdint.h>
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_list.h>
 
@@ -19,14 +19,23 @@
  * tablet-unstable-v2 headers, so we can't include them
  */
 enum wlr_tablet_tool_type {
-	WLR_TABLET_TOOL_TYPE_PEN = 1,	/**< A generic pen */
-	WLR_TABLET_TOOL_TYPE_ERASER,	/**< Eraser */
-	WLR_TABLET_TOOL_TYPE_BRUSH,	/**< A paintbrush-like tool */
-	WLR_TABLET_TOOL_TYPE_PENCIL,	/**< Physical drawing tool, e.g.
-	                                     Wacom Inking Pen */
-	WLR_TABLET_TOOL_TYPE_AIRBRUSH,	/**< An airbrush-like tool */
-	WLR_TABLET_TOOL_TYPE_MOUSE,	/**< A mouse bound to the tablet */
-	WLR_TABLET_TOOL_TYPE_LENS,	/**< A mouse tool with a lens */
+	/** A generic pen */
+	WLR_TABLET_TOOL_TYPE_PEN = 1,
+	/** Eraser */
+	WLR_TABLET_TOOL_TYPE_ERASER,
+	/** A paintbrush-like tool */
+	WLR_TABLET_TOOL_TYPE_BRUSH,
+	/** Physical drawing tool, e.g. Wacom Inking Pen */
+	WLR_TABLET_TOOL_TYPE_PENCIL,
+	/** An airbrush-like tool */
+	WLR_TABLET_TOOL_TYPE_AIRBRUSH,
+	/** A mouse bound to the tablet */
+	WLR_TABLET_TOOL_TYPE_MOUSE,
+	/** A mouse tool with a lens */
+	WLR_TABLET_TOOL_TYPE_LENS,
+	/** A rotary device with positional and rotation data */
+	WLR_TABLET_TOOL_TYPE_TOTEM,
+
 };
 
 struct wlr_tablet_tool {
@@ -45,7 +54,7 @@ struct wlr_tablet_tool {
 	struct {
 		struct wl_signal destroy;
 	} events;
-	
+
 	void *data;
 };
 

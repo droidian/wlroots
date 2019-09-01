@@ -1,6 +1,6 @@
 #include <assert.h>
 #include <stdlib.h>
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wlr/render/interface.h>
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
@@ -828,10 +828,6 @@ static void subsurface_consider_map(struct wlr_subsurface *subsurface,
 	}
 
 	// Now we can map the subsurface
-	if (subsurface->mapped) {
-		return;
-	}
-
 	wlr_signal_emit_safe(&subsurface->events.map, subsurface);
 	subsurface->mapped = true;
 

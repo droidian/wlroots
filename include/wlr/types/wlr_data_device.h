@@ -9,7 +9,7 @@
 #ifndef WLR_TYPES_WLR_DATA_DEVICE_H
 #define WLR_TYPES_WLR_DATA_DEVICE_H
 
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wlr/types/wlr_seat.h>
 
 extern const struct wlr_pointer_grab_interface
@@ -168,10 +168,14 @@ struct wlr_data_device_manager *wlr_data_device_manager_create(
 void wlr_data_device_manager_destroy(struct wlr_data_device_manager *manager);
 
 /**
- * Requests a selection to be set for the seat.
+ * Requests a selection to be set for the seat. If the request comes from
+ * a client, then set `client` to be the matching seat client so that this
+ * function can verify that the serial provided was once sent to the client
+ * on this seat.
  */
 void wlr_seat_request_set_selection(struct wlr_seat *seat,
-	struct wlr_data_source *source, uint32_t serial);
+	struct wlr_seat_client *client, struct wlr_data_source *source,
+	uint32_t serial);
 
 /**
  * Sets the current selection for the seat. NULL can be provided to clear it.

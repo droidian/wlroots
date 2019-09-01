@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <wayland-server.h>
+#include <wayland-server-core.h>
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/util/log.h>
 #include "types/wlr_seat.h"
@@ -109,7 +109,10 @@ static void touch_point_handle_surface_destroy(struct wl_listener *listener,
 		void *data) {
 	struct wlr_touch_point *point =
 		wl_container_of(listener, point, surface_destroy);
-	touch_point_destroy(point);
+	// Touch point itself is destroyed on up event
+	point->surface = NULL;
+	wl_list_remove(&point->surface_destroy.link);
+	wl_list_init(&point->surface_destroy.link);
 }
 
 static struct wlr_touch_point *touch_point_create(
@@ -171,6 +174,11 @@ uint32_t wlr_seat_touch_notify_down(struct wlr_seat *seat,
 	}
 
 	uint32_t serial = grab->interface->down(grab, time, point);
+
+	if (!serial) {
+		touch_point_destroy(point);
+		return 0;
+	}
 
 	if (serial && wlr_seat_touch_num_points(seat) == 1) {
 		seat->touch_state.grab_serial = serial;
@@ -278,7 +286,7 @@ uint32_t wlr_seat_touch_send_down(struct wlr_seat *seat,
 		return 0;
 	}
 
-	uint32_t serial = wl_display_next_serial(seat->display);
+	uint32_t serial = wlr_seat_client_next_serial(point->client);
 	struct wl_resource *resource;
 	wl_resource_for_each(resource, &point->client->touches) {
 		if (seat_client_from_touch_resource(resource) == NULL) {
@@ -299,7 +307,7 @@ void wlr_seat_touch_send_up(struct wlr_seat *seat, uint32_t time, int32_t touch_
 		return;
 	}
 
-	uint32_t serial = wl_display_next_serial(seat->display);
+	uint32_t serial = wlr_seat_client_next_serial(point->client);
 	struct wl_resource *resource;
 	wl_resource_for_each(resource, &point->client->touches) {
 		if (seat_client_from_touch_resource(resource) == NULL) {

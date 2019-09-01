@@ -12,12 +12,12 @@
 #include <pixman.h>
 #include <stdbool.h>
 #include <time.h>
-#include <wayland-server.h>
+#include <wayland-server-protocol.h>
 #include <wayland-util.h>
 #include <wlr/render/dmabuf.h>
+#include <wlr/types/wlr_buffer.h>
 
 struct wlr_output_mode {
-	uint32_t flags; // enum wl_output_mode
 	int32_t width, height;
 	int32_t refresh; // mHz
 	bool preferred;
@@ -51,12 +51,21 @@ enum wlr_output_state_field {
 	WLR_OUTPUT_STATE_DAMAGE = 1 << 1,
 };
 
+enum wlr_output_state_buffer_type {
+	WLR_OUTPUT_STATE_BUFFER_RENDER,
+	WLR_OUTPUT_STATE_BUFFER_SCANOUT,
+};
+
 /**
  * Holds the double-buffered output state.
  */
 struct wlr_output_state {
 	uint32_t committed; // enum wlr_output_state_field
 	pixman_region32_t damage; // output-buffer-local coordinates
+
+	// only valid if WLR_OUTPUT_STATE_BUFFER
+	enum wlr_output_state_buffer_type buffer_type;
+	struct wlr_buffer *buffer; // if WLR_OUTPUT_STATE_BUFFER_SCANOUT
 };
 
 struct wlr_output_impl;
@@ -126,6 +135,8 @@ struct wlr_output {
 
 	struct wl_event_source *idle_frame;
 	struct wl_event_source *idle_done;
+
+	int attach_render_locks; // number of locks forcing rendering
 
 	struct wl_list cursors; // wlr_output_cursor::link
 	struct wlr_output_cursor *hardware_cursor;
@@ -224,6 +235,12 @@ void wlr_output_effective_resolution(struct wlr_output *output,
  */
 bool wlr_output_attach_render(struct wlr_output *output, int *buffer_age);
 /**
+ * Attach a buffer to the output. Compositors should call `wlr_output_commit`
+ * to submit the new frame.
+ */
+bool wlr_output_attach_buffer(struct wlr_output *output,
+	struct wlr_buffer *buffer);
+/**
  * Get the preferred format for reading pixels.
  * This function might change the current rendering context.
  */
@@ -271,6 +288,13 @@ bool wlr_output_set_gamma(struct wlr_output *output, size_t size,
 bool wlr_output_export_dmabuf(struct wlr_output *output,
 	struct wlr_dmabuf_attributes *attribs);
 struct wlr_output *wlr_output_from_resource(struct wl_resource *resource);
+/**
+ * Locks the output to only use rendering instead of direct scan-out. This is
+ * useful if direct scan-out needs to be temporarily disabled (e.g. during
+ * screen capture). There must be as many unlocks as there have been locks to
+ * restore the original state. There should never be an unlock before a lock.
+ */
+void wlr_output_lock_attach_render(struct wlr_output *output, bool lock);
 /**
  * Locks the output to only use software cursors instead of hardware cursors.
  * This is useful if hardware cursors need to be temporarily disabled (e.g.

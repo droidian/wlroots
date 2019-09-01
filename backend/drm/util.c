@@ -178,28 +178,41 @@ static void free_fb(struct gbm_bo *bo, void *data) {
 	}
 }
 
-uint32_t get_fb_for_bo(struct gbm_bo *bo, uint32_t drm_format) {
+uint32_t get_fb_for_bo(struct gbm_bo *bo, uint32_t drm_format,
+		bool with_modifiers) {
 	uint32_t id = (uintptr_t)gbm_bo_get_user_data(bo);
 	if (id) {
 		return id;
 	}
-
-	assert(gbm_bo_get_format(bo) == GBM_FORMAT_ARGB8888);
-	assert(drm_format == DRM_FORMAT_ARGB8888 ||
-		drm_format == DRM_FORMAT_XRGB8888);
 
 	struct gbm_device *gbm = gbm_bo_get_device(bo);
 
 	int fd = gbm_device_get_fd(gbm);
 	uint32_t width = gbm_bo_get_width(bo);
 	uint32_t height = gbm_bo_get_height(bo);
-	uint32_t handles[4] = {gbm_bo_get_handle(bo).u32};
-	uint32_t pitches[4] = {gbm_bo_get_stride(bo)};
-	uint32_t offsets[4] = {gbm_bo_get_offset(bo, 0)};
 
-	if (drmModeAddFB2(fd, width, height, drm_format,
-			handles, pitches, offsets, &id, 0)) {
-		wlr_log_errno(WLR_ERROR, "Unable to add DRM framebuffer");
+	uint32_t handles[4] = {0};
+	uint32_t strides[4] = {0};
+	uint32_t offsets[4] = {0};
+	uint64_t modifiers[4] = {0};
+	for (int i = 0; i < gbm_bo_get_plane_count(bo); i++) {
+		handles[i] = gbm_bo_get_handle_for_plane(bo, i).u32;
+		strides[i] = gbm_bo_get_stride_for_plane(bo, i);
+		offsets[i] = gbm_bo_get_offset(bo, i);
+		// KMS requires all BO planes to have the same modifier
+		modifiers[i] = gbm_bo_get_modifier(bo);
+	}
+
+	if (with_modifiers && gbm_bo_get_modifier(bo) != DRM_FORMAT_MOD_INVALID) {
+		if (drmModeAddFB2WithModifiers(fd, width, height, drm_format, handles,
+				strides, offsets, modifiers, &id, DRM_MODE_FB_MODIFIERS)) {
+			wlr_log_errno(WLR_ERROR, "Unable to add DRM framebuffer");
+		}
+	} else {
+		if (drmModeAddFB2(fd, width, height, drm_format, handles, strides,
+				offsets, &id, 0)) {
+			wlr_log_errno(WLR_ERROR, "Unable to add DRM framebuffer");
+		}
 	}
 
 	gbm_bo_set_user_data(bo, (void *)(uintptr_t)id, free_fb);
