@@ -10,6 +10,7 @@ Build-Depends:
  libgles2-mesa-dev,
  libinput-dev,
  libpixman-1-dev,
+ libpng-dev,
  libsystemd-dev,
  libwayland-dev,
  libxcb1-dev,
