@@ -1,7 +1,7 @@
 Source: wlroots
 Priority: optional
 Maintainer: Sway and related packages team <team+swaywm@tracker.debian.org>
-Uploaders: Guido Günther <agx@sigxcpu.org>
+Uploaders: Guido Günther <agx@sigxcpu.org>, Birger Schacht <birger@rantanplan.org>
 Build-Depends:
  debhelper (>= 10),
  libcap-dev,
