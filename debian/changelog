@@ -1,3 +1,21 @@
+wlroots (0.7.0-1) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * New upstream version 0.7.0 (Closes: #936081)
+  * [a62850e] Update examples
+    rootston and screenshot got dropped, there's screencopy now
+
+  [ Birger Schacht ]
+  * [caf3a84] d/copyright: Update since files got dropped
+  * [be3aa96] d/control: add libpng-dev to build-depends (for
+    examples/screencopy.c)
+  * [f972935] d/control: Set maintainer to team address and move Guido to
+    uploaders
+  * [1f69b85] d/control: Bump Standards-Version: no changes required
+  * [ea9aae9] d/control: add myself to uploaders
+
+ -- Birger Schacht <birger@rantanplan.org>  Wed, 11 Sep 2019 21:38:51 +0200
+
 wlroots (0.6.0-1) experimental; urgency=medium
 
   * New upstream version 0.6.0
