@@ -3,6 +3,9 @@ wlroots (0.7.0-2) experimental; urgency=medium
   [ Birger Schacht ]
   * [b6376e4] d/libwlroots3.shlibs: Bump version
 
+  [ Guido Günther ]
+  * [85d31e8] mark autopkgtest as superficial
+
  -- Birger Schacht <birger@rantanplan.org>  Wed, 18 Sep 2019 12:25:24 +0200
 
 wlroots (0.7.0-1) experimental; urgency=medium
