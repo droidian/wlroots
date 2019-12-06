@@ -19,6 +19,7 @@
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "pointer-gestures-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
+#include "tablet-unstable-v2-client-protocol.h"
 
 struct wlr_wl_backend *get_wl_backend_from_backend(struct wlr_backend *backend) {
 	assert(wlr_backend_is_wl(backend));
@@ -81,6 +82,9 @@ static void registry_global(void *data, struct wl_registry *registry,
 	} else if (strcmp(iface, zwp_pointer_gestures_v1_interface.name) == 0) {
 		wl->zwp_pointer_gestures_v1 = wl_registry_bind(registry, name,
 			&zwp_pointer_gestures_v1_interface, 1);
+	} else if (strcmp(iface, zwp_tablet_manager_v2_interface.name) == 0) {
+		wl->tablet_manager = wl_registry_bind(registry, name,
+			&zwp_tablet_manager_v2_interface, 1);
 	}
 }
 
@@ -107,6 +111,11 @@ static bool backend_start(struct wlr_backend *backend) {
 
 	if (wl->keyboard) {
 		create_wl_keyboard(wl->keyboard, wl);
+	}
+
+	if (wl->tablet_manager && wl->seat) {
+		wl_add_tablet_seat(wl->tablet_manager,
+			wl->seat, wl);
 	}
 
 	for (size_t i = 0; i < wl->requested_outputs; ++i) {
