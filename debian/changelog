@@ -1,3 +1,16 @@
+wlroots (0.8.1-1) experimental; urgency=medium
+
+  * Bump shlibs version
+  * d/control: Remove trailing whitespace
+  * d/control: Remove trailing whitespace
+  * Update standards version to 4.4.1, no changes needed.
+  * Bump debhelper from old 10 to 12.
+  * Set debhelper-compat version in Build-Depends.
+  * Set upstream metadata fields: Repository, Repository-Browse.
+  * New upstream version 0.8.1
+
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 06 Dec 2019 12:37:11 +0100
+
 wlroots (0.7.0-2) experimental; urgency=medium
 
   [ Birger Schacht ]
