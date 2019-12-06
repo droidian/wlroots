@@ -3,7 +3,7 @@ Priority: optional
 Maintainer: Sway and related packages team <team+swaywm@tracker.debian.org>
 Uploaders: Guido Günther <agx@sigxcpu.org>, Birger Schacht <birger@rantanplan.org>
 Build-Depends:
- debhelper (>= 10),
+ debhelper (>= 12~),
  libcap-dev,
  libdrm-dev,
  libegl1-mesa-dev,
