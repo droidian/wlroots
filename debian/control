@@ -24,7 +24,7 @@ Build-Depends:
  meson (>= 0.43.0),
  pkg-config,
  wayland-protocols,
-Standards-Version: 4.4.0
+Standards-Version: 4.4.1
 Section: libs
 Homepage: https://github.com/swaywm/wlroots
 Vcs-Git: https://salsa.debian.org/swaywm-team/wlroots.git
