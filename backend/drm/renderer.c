@@ -11,7 +11,6 @@
 #include <wlr/types/wlr_matrix.h>
 #include <wlr/util/log.h>
 #include "backend/drm/drm.h"
-#include "glapi.h"
 
 bool init_drm_renderer(struct wlr_drm_backend *drm,
 		struct wlr_drm_renderer *renderer, wlr_renderer_create_func_t create_renderer_func) {
@@ -62,7 +61,7 @@ void finish_drm_renderer(struct wlr_drm_renderer *renderer) {
 
 bool init_drm_surface(struct wlr_drm_surface *surf,
 		struct wlr_drm_renderer *renderer, uint32_t width, uint32_t height,
-		uint32_t format, uint32_t flags) {
+		uint32_t format, struct wlr_drm_format_set *set, uint32_t flags) {
 	if (surf->width == width && surf->height == height) {
 		return true;
 	}
@@ -81,11 +80,23 @@ bool init_drm_surface(struct wlr_drm_surface *surf,
 			surf->back = NULL;
 		}
 		gbm_surface_destroy(surf->gbm);
+		surf->gbm = NULL;
 	}
 	wlr_egl_destroy_surface(&surf->renderer->egl, surf->egl);
 
-	surf->gbm = gbm_surface_create(renderer->gbm, width, height,
-		format, GBM_BO_USE_RENDERING | flags);
+	if (!(flags & GBM_BO_USE_LINEAR) && set != NULL) {
+		const struct wlr_drm_format *drm_format =
+			wlr_drm_format_set_get(set, format);
+		if (drm_format != NULL) {
+			surf->gbm = gbm_surface_create_with_modifiers(renderer->gbm,
+				width, height, format, drm_format->modifiers, drm_format->len);
+		}
+	}
+
+	if (surf->gbm == NULL) {
+		surf->gbm = gbm_surface_create(renderer->gbm, width, height,
+			format, GBM_BO_USE_RENDERING | flags);
+	}
 	if (!surf->gbm) {
 		wlr_log_errno(WLR_ERROR, "Failed to create GBM surface");
 		goto error_zero;
@@ -276,19 +287,22 @@ struct gbm_bo *copy_drm_surface_mgpu(struct wlr_drm_surface *dest,
 
 bool init_drm_plane_surfaces(struct wlr_drm_plane *plane,
 		struct wlr_drm_backend *drm, int32_t width, uint32_t height,
-		uint32_t format) {
+		uint32_t format, bool with_modifiers) {
+	struct wlr_drm_format_set *format_set =
+		with_modifiers ? &plane->formats : NULL;
+
 	if (!drm->parent) {
 		return init_drm_surface(&plane->surf, &drm->renderer, width, height,
-			format, GBM_BO_USE_SCANOUT);
+			format, format_set, GBM_BO_USE_SCANOUT);
 	}
 
 	if (!init_drm_surface(&plane->surf, &drm->parent->renderer,
-			width, height, format, GBM_BO_USE_LINEAR)) {
+			width, height, format, NULL, GBM_BO_USE_LINEAR)) {
 		return false;
 	}
 
 	if (!init_drm_surface(&plane->mgpu_surf, &drm->renderer,
-			width, height, format, GBM_BO_USE_SCANOUT)) {
+			width, height, format, format_set, GBM_BO_USE_SCANOUT)) {
 		finish_drm_surface(&plane->surf);
 		return false;
 	}

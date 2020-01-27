@@ -82,6 +82,7 @@ struct wlr_drm_backend {
 	struct wl_event_source *drm_event;
 
 	struct wl_listener display_destroy;
+	struct wl_listener session_destroy;
 	struct wl_listener session_signal;
 	struct wl_listener drm_invalidated;
 
@@ -131,8 +132,10 @@ struct wlr_drm_connector {
 	struct wlr_dmabuf_attributes pending_dmabuf;
 	// Buffer submitted to the kernel but not yet displayed
 	struct wlr_buffer *pending_buffer;
+	struct gbm_bo *pending_bo;
 	// Buffer currently being displayed
 	struct wlr_buffer *current_buffer;
+	struct gbm_bo *current_bo;
 };
 
 struct wlr_drm_backend *get_drm_backend_from_backend(
@@ -148,5 +151,10 @@ bool set_drm_connector_gamma(struct wlr_output *output, size_t size,
 	const uint16_t *r, const uint16_t *g, const uint16_t *b);
 bool drm_connector_set_mode(struct wlr_output *output,
 	struct wlr_output_mode *mode);
+
+bool legacy_crtc_set_cursor(struct wlr_drm_backend *drm,
+	struct wlr_drm_crtc *crtc, struct gbm_bo *bo);
+bool legacy_crtc_move_cursor(struct wlr_drm_backend *drm,
+	struct wlr_drm_crtc *crtc, int x, int y);
 
 #endif

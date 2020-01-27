@@ -16,6 +16,8 @@
 
 #include "backend/wayland.h"
 #include "util/signal.h"
+#include "linux-dmabuf-unstable-v1-client-protocol.h"
+#include "presentation-time-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -24,8 +26,6 @@ static struct wlr_wl_output *get_wl_output_from_output(
 	assert(wlr_output_is_wl(wlr_output));
 	return (struct wlr_wl_output *)wlr_output;
 }
-
-static struct wl_callback_listener frame_listener;
 
 static void surface_frame_callback(void *data, struct wl_callback *cb,
 		uint32_t time) {
@@ -37,8 +37,58 @@ static void surface_frame_callback(void *data, struct wl_callback *cb,
 	wlr_output_send_frame(&output->wlr_output);
 }
 
-static struct wl_callback_listener frame_listener = {
+static const struct wl_callback_listener frame_listener = {
 	.done = surface_frame_callback
+};
+
+static void presentation_feedback_destroy(
+		struct wlr_wl_presentation_feedback *feedback) {
+	wl_list_remove(&feedback->link);
+	wp_presentation_feedback_destroy(feedback->feedback);
+	free(feedback);
+}
+
+static void presentation_feedback_handle_sync_output(void *data,
+		struct wp_presentation_feedback *feedback, struct wl_output *output) {
+	// This space is intentionally left blank
+}
+
+static void presentation_feedback_handle_presented(void *data,
+		struct wp_presentation_feedback *wp_feedback, uint32_t tv_sec_hi,
+		uint32_t tv_sec_lo, uint32_t tv_nsec, uint32_t refresh_ns,
+		uint32_t seq_hi, uint32_t seq_lo, uint32_t flags) {
+	struct wlr_wl_presentation_feedback *feedback = data;
+
+	struct timespec t = {
+		.tv_sec = ((uint64_t)tv_sec_hi << 32) | tv_sec_lo,
+		.tv_nsec = tv_nsec,
+	};
+	struct wlr_output_event_present event = {
+		.commit_seq = feedback->commit_seq,
+		.when = &t,
+		.seq = ((uint64_t)seq_hi << 32) | seq_lo,
+		.refresh = refresh_ns,
+		.flags = flags,
+	};
+	wlr_output_send_present(&feedback->output->wlr_output, &event);
+
+	presentation_feedback_destroy(feedback);
+}
+
+static void presentation_feedback_handle_discarded(void *data,
+		struct wp_presentation_feedback *wp_feedback) {
+	struct wlr_wl_presentation_feedback *feedback = data;
+
+	wlr_output_send_present(&feedback->output->wlr_output, NULL);
+
+	presentation_feedback_destroy(feedback);
+}
+
+static const struct wp_presentation_feedback_listener
+		presentation_feedback_listener = {
+	.sync_output = presentation_feedback_handle_sync_output,
+	.presented = presentation_feedback_handle_presented,
+	.discarded = presentation_feedback_handle_discarded,
 };
 
 static bool output_set_custom_mode(struct wlr_output *wlr_output,
@@ -59,30 +109,183 @@ static bool output_attach_render(struct wlr_output *wlr_output,
 		buffer_age);
 }
 
+static void destroy_wl_buffer(struct wlr_wl_buffer *buffer) {
+	if (buffer == NULL) {
+		return;
+	}
+	wl_buffer_destroy(buffer->wl_buffer);
+	wlr_buffer_unref(buffer->buffer);
+	free(buffer);
+}
+
+static void buffer_handle_release(void *data, struct wl_buffer *wl_buffer) {
+	struct wlr_wl_buffer *buffer = data;
+	destroy_wl_buffer(buffer);
+}
+
+static const struct wl_buffer_listener buffer_listener = {
+	.release = buffer_handle_release,
+};
+
+static struct wlr_wl_buffer *create_wl_buffer(struct wlr_wl_backend *wl,
+		struct wlr_buffer *wlr_buffer,
+		int required_width, int required_height) {
+	struct wlr_dmabuf_attributes attribs;
+	if (!wlr_buffer_get_dmabuf(wlr_buffer, &attribs)) {
+		return NULL;
+	}
+
+	if (attribs.width != required_width || attribs.height != required_height) {
+		return NULL;
+	}
+
+	if (!wlr_drm_format_set_has(&wl->linux_dmabuf_v1_formats,
+			attribs.format, attribs.modifier)) {
+		return NULL;
+	}
+
+	uint32_t modifier_hi = attribs.modifier >> 32;
+	uint32_t modifier_lo = (uint32_t)attribs.modifier;
+	struct zwp_linux_buffer_params_v1 *params =
+		zwp_linux_dmabuf_v1_create_params(wl->zwp_linux_dmabuf_v1);
+	for (int i = 0; i < attribs.n_planes; i++) {
+		zwp_linux_buffer_params_v1_add(params, attribs.fd[i], i,
+			attribs.offset[i], attribs.stride[i], modifier_hi, modifier_lo);
+	}
+
+	uint32_t flags = 0;
+	if (attribs.flags & WLR_DMABUF_ATTRIBUTES_FLAGS_Y_INVERT) {
+		flags |= ZWP_LINUX_BUFFER_PARAMS_V1_FLAGS_Y_INVERT;
+	}
+	if (attribs.flags & WLR_DMABUF_ATTRIBUTES_FLAGS_INTERLACED) {
+		flags |= ZWP_LINUX_BUFFER_PARAMS_V1_FLAGS_INTERLACED;
+	}
+	if (attribs.flags & WLR_DMABUF_ATTRIBUTES_FLAGS_BOTTOM_FIRST) {
+		flags |= ZWP_LINUX_BUFFER_PARAMS_V1_FLAGS_BOTTOM_FIRST;
+	}
+	struct wl_buffer *wl_buffer = zwp_linux_buffer_params_v1_create_immed(
+		params, attribs.width, attribs.height, attribs.format, flags);
+	// TODO: handle create() errors
+
+	struct wlr_wl_buffer *buffer = calloc(1, sizeof(struct wlr_wl_buffer));
+	if (buffer == NULL) {
+		wl_buffer_destroy(wl_buffer);
+		return NULL;
+	}
+	buffer->wl_buffer = wl_buffer;
+	buffer->buffer = wlr_buffer_ref(wlr_buffer);
+
+	wl_buffer_add_listener(wl_buffer, &buffer_listener, buffer);
+
+	return buffer;
+}
+
+static bool output_attach_buffer(struct wlr_output *wlr_output,
+		struct wlr_buffer *wlr_buffer) {
+	struct wlr_wl_output *output =
+		get_wl_output_from_output(wlr_output);
+	struct wlr_wl_backend *wl = output->backend;
+
+	struct wlr_wl_buffer *buffer = create_wl_buffer(wl, wlr_buffer,
+		wlr_output->width, wlr_output->height);
+	if (buffer == NULL) {
+		return false;
+	}
+
+	destroy_wl_buffer(output->pending_buffer);
+	output->pending_buffer = buffer;
+	return true;
+}
+
 static bool output_commit(struct wlr_output *wlr_output) {
 	struct wlr_wl_output *output =
 		get_wl_output_from_output(wlr_output);
 
-	if (output->frame_callback != NULL) {
-		wlr_log(WLR_ERROR, "Skipping buffer swap");
+	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_ENABLED) {
+		wlr_log(WLR_DEBUG, "Cannot disable a Wayland output");
 		return false;
 	}
 
-	output->frame_callback = wl_surface_frame(output->surface);
-	wl_callback_add_listener(output->frame_callback, &frame_listener, output);
-
-	pixman_region32_t *damage = NULL;
-	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_DAMAGE) {
-		damage = &wlr_output->pending.damage;
+	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_MODE) {
+		assert(wlr_output->pending.mode_type == WLR_OUTPUT_STATE_MODE_CUSTOM);
+		if (!output_set_custom_mode(wlr_output,
+				wlr_output->pending.custom_mode.width,
+				wlr_output->pending.custom_mode.height,
+				wlr_output->pending.custom_mode.refresh)) {
+			return false;
+		}
 	}
 
-	if (!wlr_egl_swap_buffers(&output->backend->egl,
-			output->egl_surface, damage)) {
-		return false;
+	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_BUFFER) {
+		struct wp_presentation_feedback *wp_feedback = NULL;
+		if (output->backend->presentation != NULL) {
+			wp_feedback = wp_presentation_feedback(output->backend->presentation,
+				output->surface);
+		}
+
+		pixman_region32_t *damage = NULL;
+		if (wlr_output->pending.committed & WLR_OUTPUT_STATE_DAMAGE) {
+			damage = &wlr_output->pending.damage;
+		}
+
+		if (output->frame_callback != NULL) {
+			wlr_log(WLR_ERROR, "Skipping buffer swap");
+			return false;
+		}
+
+		output->frame_callback = wl_surface_frame(output->surface);
+		wl_callback_add_listener(output->frame_callback, &frame_listener, output);
+
+		switch (wlr_output->pending.buffer_type) {
+		case WLR_OUTPUT_STATE_BUFFER_RENDER:
+			if (!wlr_egl_swap_buffers(&output->backend->egl,
+					output->egl_surface, damage)) {
+				return false;
+			}
+			break;
+		case WLR_OUTPUT_STATE_BUFFER_SCANOUT:
+			assert(output->pending_buffer != NULL);
+			wl_surface_attach(output->surface,
+				output->pending_buffer->wl_buffer, 0, 0);
+
+			if (damage == NULL) {
+				wl_surface_damage_buffer(output->surface,
+					0, 0, INT32_MAX, INT32_MAX);
+			} else {
+				int rects_len;
+				pixman_box32_t *rects =
+					pixman_region32_rectangles(damage, &rects_len);
+				for (int i = 0; i < rects_len; i++) {
+					pixman_box32_t *r = &rects[i];
+					wl_surface_damage_buffer(output->surface, r->x1, r->y1,
+						r->x2 - r->x1, r->y2 - r->y1);
+				}
+			}
+			wl_surface_commit(output->surface);
+
+			output->pending_buffer = NULL;
+			break;
+		}
+
+		if (wp_feedback != NULL) {
+			struct wlr_wl_presentation_feedback *feedback =
+				calloc(1, sizeof(*feedback));
+			if (feedback == NULL) {
+				wp_presentation_feedback_destroy(wp_feedback);
+				return false;
+			}
+			feedback->output = output;
+			feedback->feedback = wp_feedback;
+			feedback->commit_seq = output->wlr_output.commit_seq + 1;
+			wl_list_insert(&output->presentation_feedbacks, &feedback->link);
+
+			wp_presentation_feedback_add_listener(wp_feedback,
+				&presentation_feedback_listener, feedback);
+		} else {
+			wlr_output_send_present(wlr_output, NULL);
+		}
 	}
 
-	// TODO: if available, use the presentation-time protocol
-	wlr_output_send_present(wlr_output, NULL);
 	return true;
 }
 
@@ -180,6 +383,14 @@ static void output_destroy(struct wlr_output *wlr_output) {
 		wl_callback_destroy(output->frame_callback);
 	}
 
+	struct wlr_wl_presentation_feedback *feedback, *feedback_tmp;
+	wl_list_for_each_safe(feedback, feedback_tmp,
+			&output->presentation_feedbacks, link) {
+		presentation_feedback_destroy(feedback);
+	}
+
+	destroy_wl_buffer(output->pending_buffer);
+
 	wlr_egl_destroy_surface(&output->backend->egl, output->egl_surface);
 	wl_egl_window_destroy(output->egl_window);
 	if (output->zxdg_toplevel_decoration_v1) {
@@ -219,9 +430,9 @@ static bool output_schedule_frame(struct wlr_output *wlr_output) {
 }
 
 static const struct wlr_output_impl output_impl = {
-	.set_custom_mode = output_set_custom_mode,
 	.destroy = output_destroy,
 	.attach_render = output_attach_render,
+	.attach_buffer  = output_attach_buffer,
 	.commit = output_commit,
 	.set_cursor = output_set_cursor,
 	.move_cursor = output_move_cursor,
@@ -294,7 +505,13 @@ struct wlr_output *wlr_wl_output_create(struct wlr_backend *wlr_backend) {
 	snprintf(wlr_output->name, sizeof(wlr_output->name), "WL-%zd",
 		++backend->last_output_num);
 
+	char description[128];
+	snprintf(description, sizeof(description),
+		"Wayland output %zd", backend->last_output_num);
+	wlr_output_set_description(wlr_output, description);
+
 	output->backend = backend;
+	wl_list_init(&output->presentation_feedbacks);
 
 	output->surface = wl_compositor_create_surface(backend->compositor);
 	if (!output->surface) {
@@ -389,4 +606,9 @@ void wlr_wl_output_set_title(struct wlr_output *output, const char *title) {
 	}
 
 	xdg_toplevel_set_title(wl_output->xdg_toplevel, title);
+}
+
+struct wl_surface *wlr_wl_output_get_surface(struct wlr_output *output) {
+	struct wlr_wl_output *wl_output = get_wl_output_from_output(output);
+	return wl_output->surface;
 }

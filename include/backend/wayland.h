@@ -12,6 +12,7 @@
 #include <wlr/render/egl.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_box.h>
+#include <wlr/render/drm_format_set.h>
 
 struct wlr_wl_backend {
 	struct wlr_backend backend;
@@ -34,12 +35,28 @@ struct wlr_wl_backend {
 	struct xdg_wm_base *xdg_wm_base;
 	struct zxdg_decoration_manager_v1 *zxdg_decoration_manager_v1;
 	struct zwp_pointer_gestures_v1 *zwp_pointer_gestures_v1;
+	struct wp_presentation *presentation;
+	struct zwp_linux_dmabuf_v1 *zwp_linux_dmabuf_v1;
+	struct zwp_relative_pointer_manager_v1 *zwp_relative_pointer_manager_v1;
 	struct wl_seat *seat;
 	struct wl_pointer *pointer;
 	struct wl_keyboard *keyboard;
 	struct wlr_wl_pointer *current_pointer;
 	struct zwp_tablet_manager_v2 *tablet_manager;
 	char *seat_name;
+	struct wlr_drm_format_set linux_dmabuf_v1_formats;
+};
+
+struct wlr_wl_buffer {
+	struct wlr_buffer *buffer;
+	struct wl_buffer *wl_buffer;
+};
+
+struct wlr_wl_presentation_feedback {
+	struct wlr_wl_output *output;
+	struct wl_list link;
+	struct wp_presentation_feedback *feedback;
+	uint32_t commit_seq;
 };
 
 struct wlr_wl_output {
@@ -55,6 +72,8 @@ struct wlr_wl_output {
 	struct zxdg_toplevel_decoration_v1 *zxdg_toplevel_decoration_v1;
 	struct wl_egl_window *egl_window;
 	EGLSurface egl_surface;
+	struct wlr_wl_buffer *pending_buffer;
+	struct wl_list presentation_feedbacks;
 
 	uint32_t enter_serial;
 
@@ -81,6 +100,7 @@ struct wlr_wl_pointer {
 	struct wl_pointer *wl_pointer;
 	struct zwp_pointer_gesture_swipe_v1 *gesture_swipe;
 	struct zwp_pointer_gesture_pinch_v1 *gesture_pinch;
+	struct zwp_relative_pointer_v1 *relative_pointer;
 	enum wlr_axis_source axis_source;
 	int32_t axis_discrete;
 	struct wlr_wl_output *output;

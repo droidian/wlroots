@@ -15,7 +15,6 @@
 
 struct wlr_screencopy_manager_v1 {
 	struct wl_global *global;
-	struct wl_list resources; // wl_resource
 	struct wl_list frames; // wlr_screencopy_frame_v1::link
 
 	struct wl_listener display_destroy;
@@ -27,9 +26,15 @@ struct wlr_screencopy_manager_v1 {
 	void *data;
 };
 
+struct wlr_screencopy_v1_client {
+	int ref;
+	struct wlr_screencopy_manager_v1 *manager;
+	struct wl_list damages;
+};
+
 struct wlr_screencopy_frame_v1 {
 	struct wl_resource *resource;
-	struct wlr_screencopy_manager_v1 *manager;
+	struct wlr_screencopy_v1_client *client;
 	struct wl_list link;
 
 	enum wl_shm_format format;
@@ -37,6 +42,8 @@ struct wlr_screencopy_frame_v1 {
 	int stride;
 
 	bool overlay_cursor, cursor_locked;
+
+	bool with_damage;
 
 	struct wl_shm_buffer *buffer;
 	struct wl_listener buffer_destroy;
@@ -51,7 +58,5 @@ struct wlr_screencopy_frame_v1 {
 
 struct wlr_screencopy_manager_v1 *wlr_screencopy_manager_v1_create(
 	struct wl_display *display);
-void wlr_screencopy_manager_v1_destroy(
-	struct wlr_screencopy_manager_v1 *screencopy);
 
 #endif

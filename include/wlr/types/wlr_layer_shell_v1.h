@@ -29,7 +29,6 @@
  */
 struct wlr_layer_shell_v1 {
 	struct wl_global *global;
-	struct wl_list resources; // wl_resource
 	struct wl_list surfaces; // wl_layer_surface
 
 	struct wl_listener display_destroy;
@@ -54,6 +53,7 @@ struct wlr_layer_surface_v1_state {
 	bool keyboard_interactive;
 	uint32_t desired_width, desired_height;
 	uint32_t actual_width, actual_height;
+	enum zwlr_layer_shell_v1_layer layer;
 };
 
 struct wlr_layer_surface_v1_configure {
@@ -71,7 +71,6 @@ struct wlr_layer_surface_v1 {
 	struct wl_list popups; // wlr_xdg_popup::link
 
 	char *namespace;
-	enum zwlr_layer_shell_v1_layer layer;
 
 	bool added, configured, mapped, closed;
 	uint32_t configure_serial;
@@ -97,7 +96,6 @@ struct wlr_layer_surface_v1 {
 };
 
 struct wlr_layer_shell_v1 *wlr_layer_shell_v1_create(struct wl_display *display);
-void wlr_layer_shell_v1_destroy(struct wlr_layer_shell_v1 *layer_shell);
 
 /**
  * Notifies the layer surface to configure itself with this width/height. The

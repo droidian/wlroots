@@ -1,85 +1,101 @@
 threads = dependency('threads')
 wayland_cursor = dependency('wayland-cursor')
-libpng = dependency('libpng', required: false)
+libpng = dependency('libpng', required: false, disabler: true)
 # These versions correspond to ffmpeg 4.0
-libavutil = dependency('libavutil', version: '>=56.14.100', required: false)
-libavcodec = dependency('libavcodec', version: '>=58.18.100', required: false)
-libavformat = dependency('libavformat', version: '>=58.12.100', required: false)
+libavutil = dependency('libavutil', version: '>=56.14.100', required: false, disabler: true)
+libavcodec = dependency('libavcodec', version: '>=58.18.100', required: false, disabler: true)
+libavformat = dependency('libavformat', version: '>=58.12.100', required: false, disabler: true)
 
 # epoll is a separate library in FreeBSD
 if host_machine.system() == 'freebsd'
-	libepoll = [dependency('epoll-shim')]
+	libepoll = dependency('epoll-shim')
 else
-	libepoll = []
+	libepoll = dependency('', required: false)
 endif
 
-# Small hack until https://github.com/mesonbuild/meson/pull/3386/ is merged
-foreach dep : ['libpng', 'libavutil', 'libavcodec', 'libavformat']
-	if not get_variable(dep).found()
-		set_variable(dep, disabler())
-	endif
-endforeach
-
-if not cc.has_header('libavutil/hwcontext_drm.h', dependencies: libavutil)
+# Check if libavutil is found because of https://github.com/mesonbuild/meson/issues/6010
+if libavutil.found() and not cc.has_header('libavutil/hwcontext_drm.h', dependencies: libavutil)
 	libavutil = disabler()
 endif
 
-examples = {
+compositors = {
 	'simple': {
 		'src': 'simple.c',
-		'dep': [wlroots],
 	},
 	'pointer': {
 		'src': 'pointer.c',
-		'dep': [wlroots],
 	},
 	'touch': {
 		'src': ['touch.c', 'cat.c'],
-		'dep': [wlroots],
 	},
 	'tablet': {
 		'src': 'tablet.c',
-		'dep': [wlroots],
 	},
 	'rotation': {
 		'src': ['rotation.c', 'cat.c'],
-		'dep': [wlroots],
 	},
 	'multi-pointer': {
 		'src': 'multi-pointer.c',
-		'dep': [wlroots],
 	},
 	'output-layout': {
 		'src': ['output-layout.c', 'cat.c'],
-		'dep': [wlroots],
 	},
+	'fullscreen-shell': {
+		'src': 'fullscreen-shell.c',
+	},
+}
+
+clients = {
 	'idle': {
 		'src': 'idle.c',
-		'dep': [wayland_client, wlr_protos, threads],
+		'dep': threads,
+		'proto': ['kde-idle'],
 	},
 	'idle-inhibit': {
 		'src': 'idle-inhibit.c',
-		'dep': [wayland_client, wlr_protos, wlroots],
+		'dep': wlroots,
+		'proto': [
+			'idle-inhibit-unstable-v1',
+			'xdg-shell',
+		],
 	},
 	'layer-shell': {
 		'src': 'layer-shell.c',
-		'dep': [wayland_client, wayland_cursor, wlr_protos, wlroots],
+		'dep': [wayland_cursor, wlroots],
+		'proto': [
+			'wlr-layer-shell-unstable-v1',
+			'xdg-shell',
+		],
 	},
 	'input-inhibitor': {
 		'src': 'input-inhibitor.c',
-		'dep': [wayland_client, wayland_cursor, wlr_protos, wlroots],
+		'dep': [wayland_cursor, wlroots],
+		'proto': [
+			'wlr-input-inhibitor-unstable-v1',
+			'xdg-shell',
+		],
 	},
 	'gamma-control': {
 		'src': 'gamma-control.c',
-		'dep': [wayland_client, wayland_cursor, wlr_protos, math],
+		'dep': [wayland_cursor, math],
+		'proto': ['wlr-gamma-control-unstable-v1'],
 	},
 	'pointer-constraints': {
 		'src': 'pointer-constraints.c',
-		'dep': [wayland_client, wlr_protos, wlroots],
+		'dep': wlroots,
+		'proto': [
+			'pointer-constraints-unstable-v1',
+			'xdg-shell',
+		],
 	},
 	'relative-pointer': {
 		'src': 'relative-pointer-unstable-v1.c',
-		'dep': [wayland_client, wlr_protos, wlroots],
+		'dep': wlroots,
+		'proto': [
+			'pointer-constraints-unstable-v1',
+			'relative-pointer-unstable-v1',
+			'xdg-shell',
+		],
 	},
 	'dmabuf-capture': {
 		'src': 'dmabuf-capture.c',
@@ -89,49 +105,72 @@ examples = {
 			libavutil,
 			drm.partial_dependency(compile_args: true), # <drm_fourcc.h>
 			threads,
-			wayland_client,
-			wlr_protos,
 		],
+		'proto': ['wlr-export-dmabuf-unstable-v1'],
 	},
 	'screencopy': {
 		'src': 'screencopy.c',
-		'dep': [libpng, wayland_client, wlr_protos, rt],
+		'dep': [libpng, rt],
+		'proto': ['wlr-screencopy-unstable-v1'],
 	},
 	'toplevel-decoration': {
 		'src': 'toplevel-decoration.c',
-		'dep': [wayland_client, wlr_protos, wlroots],
+		'dep': wlroots,
+		'proto': [
+			'xdg-decoration-unstable-v1',
+			'xdg-shell',
+		],
 	},
 	'input-method': {
 		'src': 'input-method.c',
-		'dep': [wayland_client, wlr_protos] + libepoll,
+		'dep': libepoll,
+		'proto': [
+			'input-method-unstable-v2',
+			'text-input-unstable-v3',
+			'xdg-shell',
+		],
 	},
 	'text-input': {
 		'src': 'text-input.c',
-		'dep': [wayland_cursor, wayland_client, wlr_protos, wlroots],
+		'dep': [wayland_cursor, wlroots],
+		'proto': [
+			'text-input-unstable-v3',
+			'xdg-shell',
+		],
 	},
 	'foreign-toplevel': {
 		'src': 'foreign-toplevel.c',
-		'dep': [wayland_client, wlr_protos, wlroots],
+		'dep': [wlroots],
+		'proto': ['wlr-foreign-toplevel-management-unstable-v1'],
 	},
-	'fullscreen-shell': {
-		'src': 'fullscreen-shell.c',
-		'dep': [wlr_protos, wlroots],
+	'virtual-pointer': {
+		'src': 'virtual-pointer.c',
+		'dep': wlroots,
+		'proto': ['wlr-virtual-pointer-unstable-v1'],
 	},
 }
 
-foreach name, info : examples
-	all_dep_found = true
-	foreach d : info.get('dep')
-		all_dep_found = all_dep_found and d.found()
+foreach name, info : compositors
+	executable(
+		name,
+		info.get('src'),
+		dependencies: wlroots,
+		include_directories: [wlr_inc, proto_inc],
+		build_by_default: get_option('examples'),
+	)
+endforeach
+
+foreach name, info : clients
+	extra_src = []
+	foreach p : info.get('proto')
+		extra_src += get_variable(p.underscorify() + '_c')
+		extra_src += get_variable(p.underscorify() + '_h')
 	endforeach
-	if all_dep_found
-		executable(
-			name,
-			info.get('src'),
-			dependencies: info.get('dep'),
-			build_by_default: get_option('examples'),
-		)
-	else
-		warning('Dependencies not satisfied for ' + name)
-	endif
+
+	executable(
+		name,
+		[info.get('src'), extra_src],
+		dependencies: [wayland_client, info.get('dep')],
+		build_by_default: get_option('examples'),
+	)
 endforeach

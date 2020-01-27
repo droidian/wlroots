@@ -871,6 +871,7 @@ static void xwm_handle_configure_request(struct wlr_xwm *xwm,
 		.y = mask & XCB_CONFIG_WINDOW_Y ? ev->y : surface->y,
 		.width = mask & XCB_CONFIG_WINDOW_WIDTH ? ev->width : surface->width,
 		.height = mask & XCB_CONFIG_WINDOW_HEIGHT ? ev->height : surface->height,
+		.mask = mask,
 	};
 	wlr_log(WLR_DEBUG, "XCB_CONFIGURE_REQUEST (%u) [%ux%u+%d,%d]", ev->window,
 		wlr_event.width, wlr_event.height, wlr_event.x, wlr_event.y);
@@ -1233,8 +1234,17 @@ static void xwm_handle_focus_in(struct wlr_xwm *xwm,
 
 	// Do not let X clients change the focus behind the compositor's
 	// back. Reset the focus to the old one if it changed.
-	if (!xwm->focus_surface || ev->event != xwm->focus_surface->window_id) {
+	//
+	// Note: Some applications rely on being able to change focus, for ex. Steam:
+	// https://github.com/swaywm/sway/issues/1865
+	// Because of that, we allow changing focus between surfaces belonging to the
+	// same application.
+	struct wlr_xwayland_surface *requested_focus = lookup_surface(xwm, ev->event);
+	if (!xwm->focus_surface || !requested_focus ||
+			requested_focus->pid != xwm->focus_surface->pid) {
 		xwm_send_focus_window(xwm, xwm->focus_surface);
+	} else {
+		xwm->focus_surface = requested_focus;
 	}
 }
 

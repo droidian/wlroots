@@ -21,9 +21,6 @@
 #if WLR_HAS_X11_BACKEND
 #include <wlr/backend/x11.h>
 #endif
-#if WLR_HAS_RDP_BACKEND
-#include <wlr/backend/rdp.h>
-#endif
 
 void wlr_backend_init(struct wlr_backend *backend,
 		const struct wlr_backend_impl *impl) {
@@ -137,38 +134,6 @@ static struct wlr_backend *attempt_headless_backend(
 	return backend;
 }
 
-#if WLR_HAS_RDP_BACKEND
-static struct wlr_backend *attempt_rdp_backend(struct wl_display *display,
-		wlr_renderer_create_func_t create_renderer_func) {
-	const char *cert_path = getenv("WLR_RDP_TLS_CERT_PATH");
-	const char *key_path = getenv("WLR_RDP_TLS_KEY_PATH");
-	if (!cert_path || !key_path) {
-		wlr_log(WLR_ERROR, "The RDP backend requires WLR_RDP_TLS_CERT_PATH "
-				"and WLR_RDP_TLS_KEY_PATH to be set.");
-		return NULL;
-	}
-	struct wlr_backend *backend = wlr_rdp_backend_create(
-			display, create_renderer_func, cert_path, key_path);
-	const char *address = getenv("WLR_RDP_ADDRESS");
-	if (address) {
-		wlr_rdp_backend_set_address(backend, address);
-	}
-	const char *_port = getenv("WLR_RDP_PORT");
-	if (_port) {
-		char *endptr;
-		int port = strtol(_port, &endptr, 10);
-		if (*endptr || port <= 0 || port >= 1024) {
-			wlr_log(WLR_ERROR, "Expected WLR_RDP_PORT to be a "
-					"positive integer less than 1024");
-			wlr_backend_destroy(backend);
-			return NULL;
-		}
-		wlr_rdp_backend_set_port(backend, port);
-	}
-	return backend;
-}
-#endif
-
 static struct wlr_backend *attempt_noop_backend(struct wl_display *display) {
 	struct wlr_backend *backend = wlr_noop_backend_create(display);
 	if (backend == NULL) {
@@ -220,10 +185,6 @@ static struct wlr_backend *attempt_backend_by_name(struct wl_display *display,
 #endif
 	} else if (strcmp(name, "headless") == 0) {
 		return attempt_headless_backend(display, create_renderer_func);
-#if WLR_HAS_RDP_BACKEND
-	} else if (strcmp(name, "rdp") == 0) {
-		return attempt_rdp_backend(display, create_renderer_func);
-#endif
 	} else if (strcmp(name, "noop") == 0) {
 		return attempt_noop_backend(display);
 	} else if (strcmp(name, "drm") == 0 || strcmp(name, "libinput") == 0) {
@@ -297,10 +258,12 @@ struct wlr_backend *wlr_backend_autocreate(struct wl_display *display,
 			getenv("WAYLAND_SOCKET")) {
 		struct wlr_backend *wl_backend = attempt_wl_backend(display,
 			create_renderer_func);
-		if (wl_backend) {
-			wlr_multi_backend_add(backend, wl_backend);
-			return backend;
+		if (!wl_backend) {
+			goto error;
 		}
+
+		wlr_multi_backend_add(backend, wl_backend);
+		return backend;
 	}
 
 #if WLR_HAS_X11_BACKEND
@@ -308,10 +271,12 @@ struct wlr_backend *wlr_backend_autocreate(struct wl_display *display,
 	if (x11_display) {
 		struct wlr_backend *x11_backend =
 			attempt_x11_backend(display, x11_display, create_renderer_func);
-		if (x11_backend) {
-			wlr_multi_backend_add(backend, x11_backend);
-			return backend;
+		if (!x11_backend) {
+			goto error;
 		}
+
+		wlr_multi_backend_add(backend, x11_backend);
+		return backend;
 	}
 #endif
 
@@ -344,4 +309,8 @@ struct wlr_backend *wlr_backend_autocreate(struct wl_display *display,
 	}
 
 	return backend;
+
+error:
+	wlr_backend_destroy(backend);
+	return NULL;
 }

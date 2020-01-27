@@ -686,6 +686,9 @@ static void head_send_state(struct wlr_output_head_v1 *head,
 	}
 
 	if (state & HEAD_STATE_MODE) {
+		assert(head->state.mode != NULL ||
+			wl_list_empty(&head->state.output->modes));
+
 		bool found = false;
 		struct wl_resource *mode_resource;
 		wl_resource_for_each(mode_resource, &head->mode_resources) {
@@ -749,11 +752,8 @@ static void manager_send_head(struct wlr_output_manager_v1 *manager,
 	zwlr_output_manager_v1_send_head(manager_resource, head_resource);
 
 	zwlr_output_head_v1_send_name(head_resource, output->name);
-
-	char description[128];
-	snprintf(description, sizeof(description), "%s %s %s (%s)",
-		output->make, output->model, output->serial, output->name);
-	zwlr_output_head_v1_send_description(head_resource, description);
+	zwlr_output_head_v1_send_description(head_resource,
+		output->description ? output->description : "Unknown");
 
 	if (output->phys_width > 0 && output->phys_height > 0) {
 		zwlr_output_head_v1_send_physical_size(head_resource,

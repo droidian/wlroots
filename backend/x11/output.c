@@ -103,21 +103,38 @@ static bool output_commit(struct wlr_output *wlr_output) {
 	struct wlr_x11_output *output = get_x11_output_from_output(wlr_output);
 	struct wlr_x11_backend *x11 = output->x11;
 
-	pixman_region32_t *damage = NULL;
-	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_DAMAGE) {
-		damage = &wlr_output->pending.damage;
-	}
-
-	if (!wlr_egl_swap_buffers(&x11->egl, output->surf, damage)) {
+	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_ENABLED) {
+		wlr_log(WLR_DEBUG, "Cannot disable an X11 output");
 		return false;
 	}
 
-	wlr_output_send_present(wlr_output, NULL);
+	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_MODE) {
+		assert(wlr_output->pending.mode_type == WLR_OUTPUT_STATE_MODE_CUSTOM);
+		if (!output_set_custom_mode(wlr_output,
+				wlr_output->pending.custom_mode.width,
+				wlr_output->pending.custom_mode.height,
+				wlr_output->pending.custom_mode.refresh)) {
+			return false;
+		}
+	}
+
+	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_BUFFER) {
+		pixman_region32_t *damage = NULL;
+		if (wlr_output->pending.committed & WLR_OUTPUT_STATE_DAMAGE) {
+			damage = &wlr_output->pending.damage;
+		}
+
+		if (!wlr_egl_swap_buffers(&x11->egl, output->surf, damage)) {
+			return false;
+		}
+
+		wlr_output_send_present(wlr_output, NULL);
+	}
+
 	return true;
 }
 
 static const struct wlr_output_impl output_impl = {
-	.set_custom_mode = output_set_custom_mode,
 	.destroy = output_destroy,
 	.attach_render = output_attach_render,
 	.commit = output_commit,
@@ -148,6 +165,11 @@ struct wlr_output *wlr_x11_output_create(struct wlr_backend *backend) {
 	snprintf(wlr_output->name, sizeof(wlr_output->name), "X11-%zd",
 		++x11->last_output_num);
 	parse_xcb_setup(wlr_output, x11->xcb);
+
+	char description[128];
+	snprintf(description, sizeof(description),
+		"X11 output %zd", x11->last_output_num);
+	wlr_output_set_description(wlr_output, description);
 
 	uint32_t mask = XCB_CW_EVENT_MASK;
 	uint32_t values[] = {

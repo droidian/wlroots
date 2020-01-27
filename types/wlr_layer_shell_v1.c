@@ -173,6 +173,22 @@ static void layer_surface_handle_get_popup(struct wl_client *client,
 	wlr_signal_emit_safe(&parent->events.new_popup, popup);
 }
 
+static void layer_surface_set_layer(struct wl_client *client,
+		struct wl_resource *surface_resource, uint32_t layer) {
+	struct wlr_layer_surface_v1 *surface =
+			layer_surface_from_resource(surface_resource);
+	if (!surface) {
+		return;
+	}
+	if (layer > ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY) {
+		wl_resource_post_error(surface->resource,
+				ZWLR_LAYER_SHELL_V1_ERROR_INVALID_LAYER,
+				"Invalid layer %d", layer);
+		return;
+	}
+	surface->client_pending.layer = layer;
+}
+
 static const struct zwlr_layer_surface_v1_interface layer_surface_implementation = {
 	.destroy = resource_handle_destroy,
 	.ack_configure = layer_surface_handle_ack_configure,
@@ -182,6 +198,7 @@ static const struct zwlr_layer_surface_v1_interface layer_surface_implementation
 	.set_margin = layer_surface_handle_set_margin,
 	.set_keyboard_interactivity = layer_surface_handle_set_keyboard_interactivity,
 	.get_popup = layer_surface_handle_get_popup,
+	.set_layer = layer_surface_set_layer,
 };
 
 static void layer_surface_unmap(struct wlr_layer_surface_v1 *surface) {
@@ -315,6 +332,7 @@ static void layer_surface_role_commit(struct wlr_surface *wlr_surface) {
 		surface->client_pending.keyboard_interactive;
 	surface->current.desired_width = surface->client_pending.desired_width;
 	surface->current.desired_height = surface->client_pending.desired_height;
+	surface->current.layer = surface->client_pending.layer;
 
 	if (!surface->added) {
 		surface->added = true;
@@ -375,7 +393,7 @@ static void layer_shell_handle_get_layer_surface(struct wl_client *wl_client,
 	if (output_resource) {
 		surface->output = wlr_output_from_resource(output_resource);
 	}
-	surface->layer = layer;
+	surface->current.layer = surface->client_pending.layer = layer;
 	if (layer > ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY) {
 		free(surface);
 		wl_resource_post_error(client_resource,
@@ -423,18 +441,6 @@ static const struct zwlr_layer_shell_v1_interface layer_shell_implementation = {
 	.get_layer_surface = layer_shell_handle_get_layer_surface,
 };
 
-static void client_handle_destroy(struct wl_resource *resource) {
-	struct wl_client *client = wl_resource_get_client(resource);
-	struct wlr_layer_shell_v1 *shell = layer_shell_from_resource(resource);
-	struct wlr_layer_surface_v1 *surface, *tmp = NULL;
-	wl_list_for_each_safe(surface, tmp, &shell->surfaces, link) {
-		if (wl_resource_get_client(surface->resource) == client) {
-			layer_surface_destroy(surface);
-		}
-	}
-	wl_list_remove(wl_resource_get_link(resource));
-}
-
 static void layer_shell_bind(struct wl_client *wl_client, void *data,
 		uint32_t version, uint32_t id) {
 	struct wlr_layer_shell_v1 *layer_shell = data;
@@ -447,14 +453,16 @@ static void layer_shell_bind(struct wl_client *wl_client, void *data,
 		return;
 	}
 	wl_resource_set_implementation(resource,
-			&layer_shell_implementation, layer_shell, client_handle_destroy);
-	wl_list_insert(&layer_shell->resources, wl_resource_get_link(resource));
+			&layer_shell_implementation, layer_shell, NULL);
 }
 
 static void handle_display_destroy(struct wl_listener *listener, void *data) {
 	struct wlr_layer_shell_v1 *layer_shell =
 		wl_container_of(listener, layer_shell, display_destroy);
-	wlr_layer_shell_v1_destroy(layer_shell);
+	wlr_signal_emit_safe(&layer_shell->events.destroy, layer_shell);
+	wl_list_remove(&layer_shell->display_destroy.link);
+	wl_global_destroy(layer_shell->global);
+	free(layer_shell);
 }
 
 struct wlr_layer_shell_v1 *wlr_layer_shell_v1_create(struct wl_display *display) {
@@ -464,11 +472,10 @@ struct wlr_layer_shell_v1 *wlr_layer_shell_v1_create(struct wl_display *display)
 		return NULL;
 	}
 
-	wl_list_init(&layer_shell->resources);
 	wl_list_init(&layer_shell->surfaces);
 
 	struct wl_global *global = wl_global_create(display,
-		&zwlr_layer_shell_v1_interface, 1, layer_shell, layer_shell_bind);
+		&zwlr_layer_shell_v1_interface, 2, layer_shell, layer_shell_bind);
 	if (!global) {
 		free(layer_shell);
 		return NULL;
@@ -482,20 +489,6 @@ struct wlr_layer_shell_v1 *wlr_layer_shell_v1_create(struct wl_display *display)
 	wl_display_add_destroy_listener(display, &layer_shell->display_destroy);
 
 	return layer_shell;
-}
-
-void wlr_layer_shell_v1_destroy(struct wlr_layer_shell_v1 *layer_shell) {
-	if (!layer_shell) {
-		return;
-	}
-	struct wl_resource *resource, *tmp;
-	wl_resource_for_each_safe(resource, tmp, &layer_shell->resources) {
-		wl_resource_destroy(resource);
-	}
-	wlr_signal_emit_safe(&layer_shell->events.destroy, layer_shell);
-	wl_list_remove(&layer_shell->display_destroy.link);
-	wl_global_destroy(layer_shell->global);
-	free(layer_shell);
 }
 
 struct layer_surface_iterator_data {

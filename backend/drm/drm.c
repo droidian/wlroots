@@ -23,6 +23,7 @@
 #include <wlr/util/log.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
+#include "backend/drm/cvt.h"
 #include "backend/drm/drm.h"
 #include "backend/drm/iface.h"
 #include "backend/drm/util.h"
@@ -200,7 +201,7 @@ static bool init_planes(struct wlr_drm_backend *drm) {
 		 * logic. Primary and cursor planes should only work on a
 		 * single CRTC, and this should be perfectly adequate, but
 		 * overlay planes can potentially work with multiple CRTCs,
-		 * meaning this could return inefficent/skewed results.
+		 * meaning this could return inefficient/skewed results.
 		 *
 		 * However, we don't really care about overlay planes, as we
 		 * don't support them yet. We only bother to keep basic
@@ -333,12 +334,9 @@ static bool drm_connector_attach_render(struct wlr_output *output,
 	return make_drm_surface_current(&conn->crtc->primary->surf, buffer_age);
 }
 
-static bool drm_connector_commit(struct wlr_output *output) {
+static bool drm_connector_commit_buffer(struct wlr_output *output) {
 	struct wlr_drm_connector *conn = get_drm_connector_from_output(output);
 	struct wlr_drm_backend *drm = get_drm_backend_from_backend(output->backend);
-	if (!drm->session->active) {
-		return false;
-	}
 
 	struct wlr_drm_crtc *crtc = conn->crtc;
 	if (!crtc) {
@@ -382,6 +380,11 @@ static bool drm_connector_commit(struct wlr_output *output) {
 			return false;
 		}
 
+		if (conn->pending_bo != NULL) {
+			gbm_bo_destroy(conn->pending_bo);
+		}
+		conn->pending_bo = bo;
+
 		fb_id = get_fb_for_bo(bo, gbm_bo_get_format(bo), drm->addfb2_modifiers);
 		if (fb_id == 0) {
 			wlr_log(WLR_ERROR, "get_fb_for_bo failed");
@@ -406,6 +409,51 @@ static bool drm_connector_commit(struct wlr_output *output) {
 	}
 
 	wlr_output_update_enabled(output, true);
+	return true;
+}
+
+static bool drm_connector_set_custom_mode(struct wlr_output *output,
+	int32_t width, int32_t height, int32_t refresh);
+
+static bool drm_connector_commit(struct wlr_output *output) {
+	struct wlr_drm_backend *drm = get_drm_backend_from_backend(output->backend);
+
+	if (!drm->session->active) {
+		return false;
+	}
+
+	if (output->pending.committed & WLR_OUTPUT_STATE_MODE) {
+		switch (output->pending.mode_type) {
+		case WLR_OUTPUT_STATE_MODE_FIXED:
+			if (!drm_connector_set_mode(output, output->pending.mode)) {
+				return false;
+			}
+			break;
+		case WLR_OUTPUT_STATE_MODE_CUSTOM:
+			if (!drm_connector_set_custom_mode(output,
+					output->pending.custom_mode.width,
+					output->pending.custom_mode.height,
+					output->pending.custom_mode.refresh)) {
+				return false;
+			}
+			break;
+		}
+	}
+
+	if (output->pending.committed & WLR_OUTPUT_STATE_ENABLED) {
+		if (!enable_drm_connector(output, output->pending.enabled)) {
+			return false;
+		}
+	}
+
+	// TODO: support modesetting with a buffer
+	if (output->pending.committed & WLR_OUTPUT_STATE_BUFFER &&
+			!(output->pending.committed & WLR_OUTPUT_STATE_MODE)) {
+		if (!drm_connector_commit_buffer(output)) {
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -495,6 +543,24 @@ static bool drm_connector_export_dmabuf(struct wlr_output *output,
 	return export_drm_bo(surf->back, attribs);
 }
 
+static bool drm_connector_pageflip_renderer(struct wlr_drm_connector *conn,
+		struct wlr_drm_mode *mode) {
+	struct wlr_drm_backend *drm =
+		get_drm_backend_from_backend(conn->output.backend);
+	struct wlr_drm_crtc *crtc = conn->crtc;
+	if (!crtc) {
+		wlr_log(WLR_ERROR, "Page-flip failed on connector '%s': no CRTC",
+			conn->output.name);
+		return false;
+	}
+	struct wlr_drm_plane *plane = crtc->primary;
+
+	struct gbm_bo *bo = get_drm_surface_front(
+		drm->parent ? &plane->mgpu_surf : &plane->surf);
+	uint32_t fb_id = get_fb_for_bo(bo, plane->drm_format, drm->addfb2_modifiers);
+	return drm->iface->crtc_pageflip(drm, conn, crtc, fb_id, &mode->drm_mode);
+}
+
 static void drm_connector_start_renderer(struct wlr_drm_connector *conn) {
 	if (conn->state != WLR_DRM_CONN_CONNECTED) {
 		return;
@@ -502,26 +568,61 @@ static void drm_connector_start_renderer(struct wlr_drm_connector *conn) {
 
 	wlr_log(WLR_DEBUG, "Starting renderer on output '%s'", conn->output.name);
 
-	struct wlr_drm_backend *drm =
-		get_drm_backend_from_backend(conn->output.backend);
-	struct wlr_drm_crtc *crtc = conn->crtc;
-	if (!crtc) {
-		return;
-	}
-	struct wlr_drm_plane *plane = crtc->primary;
-
-	struct gbm_bo *bo = get_drm_surface_front(
-		drm->parent ? &plane->mgpu_surf : &plane->surf);
-	uint32_t fb_id = get_fb_for_bo(bo, plane->drm_format, drm->addfb2_modifiers);
-
 	struct wlr_drm_mode *mode = (struct wlr_drm_mode *)conn->output.current_mode;
-	if (drm->iface->crtc_pageflip(drm, conn, crtc, fb_id, &mode->drm_mode)) {
+	if (drm_connector_pageflip_renderer(conn, mode)) {
 		conn->pageflip_pending = true;
 		wlr_output_update_enabled(&conn->output, true);
 	} else {
 		wl_event_source_timer_update(conn->retry_pageflip,
 			1000000.0f / conn->output.current_mode->refresh);
 	}
+}
+
+static bool drm_connector_init_renderer(struct wlr_drm_connector *conn,
+		struct wlr_drm_mode *mode) {
+	struct wlr_drm_backend *drm =
+		get_drm_backend_from_backend(conn->output.backend);
+
+	if (conn->state != WLR_DRM_CONN_CONNECTED &&
+			conn->state != WLR_DRM_CONN_NEEDS_MODESET) {
+		return false;
+	}
+
+	wlr_log(WLR_DEBUG, "Initializing renderer on connector '%s'",
+		conn->output.name);
+
+	struct wlr_drm_crtc *crtc = conn->crtc;
+	if (!crtc) {
+		wlr_log(WLR_ERROR, "Failed to initialize renderer on connector '%s': "
+			"no CRTC", conn->output.name);
+		return false;
+	}
+	struct wlr_drm_plane *plane = crtc->primary;
+
+	int width = mode->wlr_mode.width;
+	int height = mode->wlr_mode.height;
+	uint32_t format = drm->renderer.gbm_format;
+
+	if (!init_drm_plane_surfaces(plane, drm, width, height, format, true) ||
+			!drm_connector_pageflip_renderer(conn, mode)) {
+		// If page-flipping with modifiers enabled doesn't work, retry without
+		// modifiers
+		wlr_log(WLR_INFO, "Page-flip failed with primary FB modifiers enabled, "
+			"retrying without modifiers");
+		finish_drm_surface(&plane->surf);
+		finish_drm_surface(&plane->mgpu_surf);
+		if (!init_drm_plane_surfaces(plane, drm, width, height, format, false)) {
+			return false;
+		}
+		if (!drm_connector_pageflip_renderer(conn, mode)) {
+			wlr_log(WLR_ERROR, "Failed to initialize renderer "
+				"on connector '%s': initial page-flip failed",
+				conn->output.name);
+			return false;
+		}
+	}
+
+	return true;
 }
 
 static void realloc_crtcs(struct wlr_drm_backend *drm);
@@ -576,7 +677,7 @@ bool enable_drm_connector(struct wlr_output *output, bool enable) {
 static void drm_connector_cleanup(struct wlr_drm_connector *conn);
 
 bool drm_connector_set_mode(struct wlr_output *output,
-		struct wlr_output_mode *mode) {
+		struct wlr_output_mode *wlr_mode) {
 	struct wlr_drm_connector *conn = get_drm_connector_from_output(output);
 	struct wlr_drm_backend *drm = get_drm_backend_from_backend(output->backend);
 	if (conn->crtc == NULL) {
@@ -587,26 +688,25 @@ bool drm_connector_set_mode(struct wlr_output *output,
 		wlr_log(WLR_ERROR, "Cannot modeset '%s': no CRTC for this connector",
 			conn->output.name);
 		// Save the desired mode for later, when we'll get a proper CRTC
-		conn->desired_mode = mode;
+		conn->desired_mode = wlr_mode;
 		return false;
 	}
 
 	wlr_log(WLR_INFO, "Modesetting '%s' with '%ux%u@%u mHz'",
-		conn->output.name, mode->width, mode->height, mode->refresh);
+		conn->output.name, wlr_mode->width, wlr_mode->height,
+		wlr_mode->refresh);
 
-	if (!init_drm_plane_surfaces(conn->crtc->primary, drm,
-			mode->width, mode->height, drm->renderer.gbm_format)) {
+	struct wlr_drm_mode *mode = (struct wlr_drm_mode *)wlr_mode;
+	if (!drm_connector_init_renderer(conn, mode)) {
 		wlr_log(WLR_ERROR, "Failed to initialize renderer for plane");
 		return false;
 	}
 
 	conn->state = WLR_DRM_CONN_CONNECTED;
 	conn->desired_mode = NULL;
-	wlr_output_update_mode(&conn->output, mode);
+	wlr_output_update_mode(&conn->output, wlr_mode);
 	wlr_output_update_enabled(&conn->output, true);
 	conn->desired_enabled = true;
-
-	drm_connector_start_renderer(conn);
 
 	// When switching VTs, the mode is not updated but the buffers become
 	// invalid, so we need to manually damage the output here
@@ -615,25 +715,39 @@ bool drm_connector_set_mode(struct wlr_output *output,
 	return true;
 }
 
-bool wlr_drm_connector_add_mode(struct wlr_output *output,
+static bool drm_connector_set_custom_mode(struct wlr_output *output,
+		int32_t width, int32_t height, int32_t refresh) {
+	drmModeModeInfo mode = {0};
+	generate_cvt_mode(&mode, width, height, (float)refresh / 1000, false, false);
+	mode.type = DRM_MODE_TYPE_USERDEF;
+
+	struct wlr_output_mode *wlr_mode = wlr_drm_connector_add_mode(output, &mode);
+	if (wlr_mode == NULL) {
+		return false;
+	}
+
+	return drm_connector_set_mode(output, wlr_mode);
+}
+
+struct wlr_output_mode *wlr_drm_connector_add_mode(struct wlr_output *output,
 		const drmModeModeInfo *modeinfo) {
 	struct wlr_drm_connector *conn = get_drm_connector_from_output(output);
 
 	if (modeinfo->type != DRM_MODE_TYPE_USERDEF) {
-		return false;
+		return NULL;
 	}
 
 	struct wlr_output_mode *wlr_mode;
 	wl_list_for_each(wlr_mode, &conn->output.modes, link) {
 		struct wlr_drm_mode *mode = (struct wlr_drm_mode *)wlr_mode;
 		if (memcmp(&mode->drm_mode, modeinfo, sizeof(*modeinfo)) == 0) {
-			return true;
+			return wlr_mode;
 		}
 	}
 
 	struct wlr_drm_mode *mode = calloc(1, sizeof(*mode));
 	if (!mode) {
-		return false;
+		return NULL;
 	}
 	memcpy(&mode->drm_mode, modeinfo, sizeof(*modeinfo));
 
@@ -646,7 +760,8 @@ bool wlr_drm_connector_add_mode(struct wlr_output *output,
 			mode->wlr_mode.width, mode->wlr_mode.height,
 			mode->wlr_mode.refresh);
 	wl_list_insert(&conn->output.modes, &mode->wlr_mode.link);
-	return true;
+
+	return &mode->wlr_mode;
 }
 
 static bool drm_connector_set_cursor(struct wlr_output *output,
@@ -680,22 +795,24 @@ static bool drm_connector_set_cursor(struct wlr_output *output,
 		ret = drmGetCap(drm->fd, DRM_CAP_CURSOR_HEIGHT, &h);
 		h = ret ? 64 : h;
 
-
 		if (!drm->parent) {
 			if (!init_drm_surface(&plane->surf, &drm->renderer, w, h,
-					drm->renderer.gbm_format, GBM_BO_USE_LINEAR | GBM_BO_USE_SCANOUT)) {
+					drm->renderer.gbm_format, NULL,
+					GBM_BO_USE_LINEAR | GBM_BO_USE_SCANOUT)) {
 				wlr_log(WLR_ERROR, "Cannot allocate cursor resources");
 				return false;
 			}
 		} else {
 			if (!init_drm_surface(&plane->surf, &drm->parent->renderer, w, h,
-					drm->parent->renderer.gbm_format, GBM_BO_USE_LINEAR)) {
+					drm->parent->renderer.gbm_format, NULL,
+					GBM_BO_USE_LINEAR)) {
 				wlr_log(WLR_ERROR, "Cannot allocate cursor resources");
 				return false;
 			}
 
 			if (!init_drm_surface(&plane->mgpu_surf, &drm->renderer, w, h,
-					drm->renderer.gbm_format, GBM_BO_USE_LINEAR | GBM_BO_USE_SCANOUT)) {
+					drm->renderer.gbm_format, NULL,
+					GBM_BO_USE_LINEAR | GBM_BO_USE_SCANOUT)) {
 				wlr_log(WLR_ERROR, "Cannot allocate cursor resources");
 				return false;
 			}
@@ -927,8 +1044,6 @@ static void drm_connector_destroy(struct wlr_output *output) {
 }
 
 static const struct wlr_output_impl output_impl = {
-	.enable = enable_drm_connector,
-	.set_mode = drm_connector_set_mode,
 	.set_cursor = drm_connector_set_cursor,
 	.move_cursor = drm_connector_move_cursor,
 	.destroy = drm_connector_destroy,
@@ -1095,16 +1210,14 @@ static void realloc_crtcs(struct wlr_drm_backend *drm) {
 			continue;
 		}
 
-		struct wlr_output_mode *mode = conn->output.current_mode;
-
-		if (!init_drm_plane_surfaces(conn->crtc->primary, drm,
-				mode->width, mode->height, drm->renderer.gbm_format)) {
-			wlr_log(WLR_ERROR, "Failed to initialize renderer for plane");
-			drm_connector_cleanup(conn);
-			break;
+		struct wlr_drm_mode *mode =
+			(struct wlr_drm_mode *)conn->output.current_mode;
+		if (!drm_connector_init_renderer(conn, mode)) {
+			wlr_log(WLR_ERROR, "Failed to initialize renderer on output %s",
+				conn->output.name);
+			wlr_output_update_enabled(&conn->output, false);
+			continue;
 		}
-
-		drm_connector_start_renderer(conn);
 
 		wlr_output_damage_whole(&conn->output);
 	}
@@ -1275,6 +1388,12 @@ void scan_drm_connectors(struct wlr_drm_backend *drm) {
 			parse_edid(&wlr_conn->output, edid_len, edid);
 			free(edid);
 
+			struct wlr_output *output = &wlr_conn->output;
+			char description[128];
+			snprintf(description, sizeof(description), "%s %s %s (%s)",
+				output->make, output->model, output->serial, output->name);
+			wlr_output_set_description(output, description);
+
 			wlr_log(WLR_INFO, "Detected modes:");
 
 			for (int i = 0; i < drm_conn->count_modes; ++i) {
@@ -1297,9 +1416,10 @@ void scan_drm_connectors(struct wlr_drm_backend *drm) {
 					mode->wlr_mode.preferred = true;
 				}
 
-				wlr_log(WLR_INFO, "  %"PRId32"x%"PRId32"@%"PRId32,
+				wlr_log(WLR_INFO, "  %"PRId32"x%"PRId32"@%"PRId32" %s",
 					mode->wlr_mode.width, mode->wlr_mode.height,
-					mode->wlr_mode.refresh);
+					mode->wlr_mode.refresh,
+					mode->wlr_mode.preferred ? "(preferred)" : "");
 
 				wl_list_insert(&wlr_conn->output.modes, &mode->wlr_mode.link);
 			}
@@ -1320,6 +1440,8 @@ void scan_drm_connectors(struct wlr_drm_backend *drm) {
 					wlr_conn->output.name);
 			}
 
+			// TODO: this results in connectors being enabled without a mode
+			// set
 			wlr_output_update_enabled(&wlr_conn->output, wlr_conn->crtc != NULL);
 			wlr_conn->desired_enabled = true;
 
@@ -1402,6 +1524,12 @@ static void page_flip_handler(int fd, unsigned seq,
 	conn->current_buffer = conn->pending_buffer;
 	conn->pending_buffer = NULL;
 
+	if (conn->current_bo != NULL) {
+		gbm_bo_destroy(conn->current_bo);
+	}
+	conn->current_bo = conn->pending_bo;
+	conn->pending_bo = NULL;
+
 	uint32_t present_flags = WLR_OUTPUT_PRESENT_VSYNC |
 		WLR_OUTPUT_PRESENT_HW_CLOCK | WLR_OUTPUT_PRESENT_HW_COMPLETION;
 	if (conn->current_buffer != NULL) {
@@ -1418,6 +1546,9 @@ static void page_flip_handler(int fd, unsigned seq,
 		.tv_nsec = tv_usec * 1000,
 	};
 	struct wlr_output_event_present present_event = {
+		/* The DRM backend guarantees that the presentation event will be for
+		 * the last submitted frame. */
+		.commit_seq = conn->output.commit_seq,
 		.when = &present_time,
 		.seq = seq,
 		.refresh = mhz_to_nsec(conn->output.refresh),

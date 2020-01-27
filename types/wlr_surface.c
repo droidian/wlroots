@@ -296,15 +296,13 @@ static void surface_apply_damage(struct wlr_surface *surface) {
 		}
 	}
 
-	wlr_buffer_unref(surface->buffer);
-	surface->buffer = NULL;
-
 	struct wlr_buffer *buffer = wlr_buffer_create(surface->renderer, resource);
 	if (buffer == NULL) {
 		wlr_log(WLR_ERROR, "Failed to upload buffer");
 		return;
 	}
 
+	wlr_buffer_unref(surface->buffer);
 	surface->buffer = buffer;
 }
 
@@ -1016,8 +1014,12 @@ struct wlr_surface *wlr_surface_surface_at(struct wlr_surface *surface,
 	}
 
 	if (wlr_surface_point_accepts_input(surface, sx, sy)) {
-		*sub_x = sx;
-		*sub_y = sy;
+		if (sub_x) {
+			*sub_x = sx;
+		}
+		if (sub_y) {
+			*sub_y = sy;
+		}
 		return surface;
 	}
 

@@ -58,8 +58,26 @@ static bool output_attach_render(struct wlr_output *wlr_output,
 }
 
 static bool output_commit(struct wlr_output *wlr_output) {
-	// Nothing needs to be done for pbuffers
-	wlr_output_send_present(wlr_output, NULL);
+	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_ENABLED) {
+		wlr_log(WLR_DEBUG, "Cannot disable a headless output");
+		return false;
+	}
+
+	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_MODE) {
+		assert(wlr_output->pending.mode_type == WLR_OUTPUT_STATE_MODE_CUSTOM);
+		if (!output_set_custom_mode(wlr_output,
+				wlr_output->pending.custom_mode.width,
+				wlr_output->pending.custom_mode.height,
+				wlr_output->pending.custom_mode.refresh)) {
+			return false;
+		}
+	}
+
+	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_BUFFER) {
+		// Nothing needs to be done for pbuffers
+		wlr_output_send_present(wlr_output, NULL);
+	}
+
 	return true;
 }
 
@@ -76,7 +94,6 @@ static void output_destroy(struct wlr_output *wlr_output) {
 }
 
 static const struct wlr_output_impl output_impl = {
-	.set_custom_mode = output_set_custom_mode,
 	.destroy = output_destroy,
 	.attach_render = output_attach_render,
 	.commit = output_commit,
@@ -120,6 +137,11 @@ struct wlr_output *wlr_headless_add_output(struct wlr_backend *wlr_backend,
 	strncpy(wlr_output->model, "headless", sizeof(wlr_output->model));
 	snprintf(wlr_output->name, sizeof(wlr_output->name), "HEADLESS-%zd",
 		++backend->last_output_num);
+
+	char description[128];
+	snprintf(description, sizeof(description),
+		"Headless output %zd", backend->last_output_num);
+	wlr_output_set_description(wlr_output, description);
 
 	if (!wlr_egl_make_current(&output->backend->egl, output->egl_surface,
 			NULL)) {
