@@ -1,3 +1,15 @@
+wlroots (0.10.0-1) unstable; urgency=medium
+
+  [ Jonas Meurer ]
+  * [dfb8ec6] d/gbp.conf: set 'pristine-tar = True'
+
+  [ Guido Günther ]
+  * Upload to unstable (Closes: #947851)
+  * [4c3f687] Add watch file
+  * [88745ae] Switch to so version 5
+
+ -- Guido Günther <agx@sigxcpu.org>  Mon, 27 Jan 2020 11:51:37 +0100
+
 wlroots (0.8.1-1) experimental; urgency=medium
 
   * Bump shlibs version
