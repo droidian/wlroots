@@ -1,3 +1,11 @@
+wlroots (0.10.0-2) unstable; urgency=medium
+
+  [ Birger Schacht ]
+  * Add libx11-xcb-dev and libxcb-xinput-dev to Dependencies
+    of libwlroots-dev (Closes: #951109)
+
+ -- Birger Schacht <birger@rantanplan.org>  Sun, 16 Feb 2020 20:03:45 +0100
+
 wlroots (0.10.0-1) unstable; urgency=medium
 
   [ Jonas Meurer ]
