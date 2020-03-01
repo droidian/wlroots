@@ -1,3 +1,10 @@
+wlroots (0.10.0-3) unstable; urgency=medium
+
+  * [0cc2c1d] Backport wlr-output-power-management.
+    These are straight cherry-picks from upstream master
+
+ -- Guido Günther <agx@sigxcpu.org>  Sun, 01 Mar 2020 13:40:32 +0100
+
 wlroots (0.10.0-2) unstable; urgency=medium
 
   [ Birger Schacht ]
