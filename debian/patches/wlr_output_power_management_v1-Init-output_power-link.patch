@@ -1,0 +1,26 @@
+From: =?utf-8?q?Guido_G=C3=BCnther?= <agx@sigxcpu.org>
+Date: Thu, 27 Feb 2020 13:48:38 +0100
+Subject: wlr_output_power_management_v1: Init output_power->link
+
+This makes sure the `wl_list_remove(&output_power->link)` in
+`output_power_destroy()` does not crash even when the output_power never
+got added to a list. This can e.g. happen in the `mgmt->output ==
+output` error path of `output_power_manager_get_output_power`.
+
+(cherry picked from commit c9859f187f91c664da458e803d186ebef219618e)
+---
+ types/wlr_output_power_management_v1.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/types/wlr_output_power_management_v1.c b/types/wlr_output_power_management_v1.c
+index 1b18230..115c74f 100644
+--- a/types/wlr_output_power_management_v1.c
++++ b/types/wlr_output_power_management_v1.c
+@@ -123,6 +123,7 @@ static void output_power_manager_get_output_power(struct wl_client *client,
+ 	}
+ 	output_power->output = output;
+ 	output_power->manager = manager;
++	wl_list_init(&output_power->link);
+ 
+ 	uint32_t version = wl_resource_get_version(manager_resource);
+ 	output_power->resource = wl_resource_create(client,

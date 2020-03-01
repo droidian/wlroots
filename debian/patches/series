@@ -1,0 +1,4 @@
+Add-wlr-output-power-management.patch
+Implement-wlr-output-power-management-v1.patch
+examples-add-output-power-management-example-client.patch
+wlr_output_power_management_v1-Init-output_power-link.patch
