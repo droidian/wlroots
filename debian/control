@@ -29,6 +29,7 @@ Section: libs
 Homepage: https://github.com/swaywm/wlroots
 Vcs-Git: https://salsa.debian.org/swaywm-team/wlroots.git
 Vcs-Browser: https://salsa.debian.org/swaywm-team/wlroots
+Rules-Requires-Root: no
 
 Package: libwlroots-dev
 Section: libdevel
