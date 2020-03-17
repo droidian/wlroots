@@ -5,15 +5,15 @@ Uploaders: Guido Günther <agx@sigxcpu.org>, Birger Schacht <birger@rantanplan.o
 Build-Depends:
  debhelper-compat (= 12),
  libcap-dev,
- libdrm-dev,
+ libdrm-dev (>= 2.4.95),
  libegl1-mesa-dev,
- libgbm-dev,
+ libgbm-dev (>= 17.1.0),
  libgles2-mesa-dev,
- libinput-dev,
+ libinput-dev (>= 1.9.0),
  libpixman-1-dev,
  libpng-dev,
  libsystemd-dev,
- libwayland-dev,
+ libwayland-dev (>= 1.16),
  libxcb1-dev,
  libxcb-composite0-dev,
  libxcb-icccm4-dev,
@@ -23,7 +23,7 @@ Build-Depends:
  libxkbcommon-dev,
  meson (>= 0.51.2),
  pkg-config,
- wayland-protocols,
+ wayland-protocols (>= 1.17),
 Standards-Version: 4.4.1
 Section: libs
 Homepage: https://github.com/swaywm/wlroots
