@@ -10,7 +10,7 @@ Subject: Add wlr-output-power-management
  create mode 100644 protocol/wlr-output-power-management-unstable-v1.xml
 
 diff --git a/protocol/meson.build b/protocol/meson.build
-index b9aa49c..960a616 100644
+index 1f295df..f46b3d3 100644
 --- a/protocol/meson.build
 +++ b/protocol/meson.build
 @@ -40,6 +40,7 @@ protocols = {

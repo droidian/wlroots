@@ -10,10 +10,10 @@ Subject: examples: add output-power-management example client
  create mode 100644 examples/output-power-management.c
 
 diff --git a/examples/meson.build b/examples/meson.build
-index 90ac761..53f860f 100644
+index c52ef57..b7b33ff 100644
 --- a/examples/meson.build
 +++ b/examples/meson.build
-@@ -80,6 +80,11 @@ clients = {
+@@ -81,6 +81,11 @@ clients = {
  		'dep': [wayland_cursor, math],
  		'proto': ['wlr-gamma-control-unstable-v1'],
  	},
