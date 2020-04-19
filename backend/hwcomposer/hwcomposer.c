@@ -80,6 +80,7 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 	hw_device_t *hwcDevice = &hwcDevicePtr->common;
 
 	uint32_t hwc_version = hwc->hwcVersion = interpreted_version(hwcDevice);
+	wlr_log(WLR_INFO, "hwc_version=%x\n", hwc_version);
 
 #ifdef HWC_DEVICE_API_VERSION_1_4
 	if (hwc_version == HWC_DEVICE_API_VERSION_1_4) {
@@ -123,7 +124,7 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 
 	const hwc_rect_t rect = { 0, 0, attr_values[0], attr_values[1] };
 	init_hwcomposer_layer(&list->hwLayers[0], &rect, HWC_FRAMEBUFFER);
-    init_hwcomposer_layer(&list->hwLayers[1], &rect, HWC_FRAMEBUFFER_TARGET);
+        init_hwcomposer_layer(&list->hwLayers[1], &rect, HWC_FRAMEBUFFER_TARGET);
 
 	list->retireFenceFd = -1;
 	list->flags = HWC_GEOMETRY_CHANGED;

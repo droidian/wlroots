@@ -42,6 +42,17 @@ add_project_arguments(cc.get_supported_arguments([
 	'-Wno-unused-parameter',
 ]), language: 'c')
 
+add_project_link_arguments(
+       [
+               '-lhardware',
+               '-lsync',
+               '-lhybris-hwcomposerwindow',
+               '-L/opt/hybris/lib',
+       ],
+       language: 'c',
+)
+
+
 # Compute the relative path used by compiler invocations.
 source_root = meson.current_source_dir().split('/')
 build_root = meson.build_root().split('/')
@@ -137,6 +148,8 @@ add_project_arguments([
 	'-DLIBINPUT_MAJOR=' + libinput_ver[0],
 	'-DLIBINPUT_MINOR=' + libinput_ver[1],
 	'-DLIBINPUT_PATCH=' + libinput_ver[2],
+        '-I/home/nick/src/libhybris/hybris/headers',
+        '-I/opt/hybris/include/hybris',
 ], language: 'c')
 
 subdir('protocol')

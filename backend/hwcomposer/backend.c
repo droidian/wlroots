@@ -5,7 +5,6 @@
 #include <wlr/render/gles2.h>
 #include <wlr/util/log.h>
 #include "backend/hwcomposer.h"
-#include "glapi.h"
 
 static bool backend_start(struct wlr_backend *wlr_backend) {
 	struct wlr_hwcomposer_backend *backend =

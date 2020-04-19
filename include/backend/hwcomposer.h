@@ -39,6 +39,7 @@ struct wlr_hwcomposer_output {
 	struct wlr_hwcomposer_backend *backend;
 	struct wl_list link;
 
+	struct ANativeWindow *egl_window;
 	void *egl_display;
 	void *egl_surface;
 	struct wl_event_source *frame_timer;

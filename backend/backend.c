@@ -158,7 +158,7 @@ static struct wlr_backend *attempt_hwcomposer_backend(
 
 	size_t outputs = parse_outputs_env("WLR_HWC_OUTPUTS");
 	for (size_t i = 0; i < outputs; ++i) {
-		wlr_hwcomposer_add_output(backend, 1080, 2160);
+		wlr_hwcomposer_add_output(backend, 1440, 2560);
 	}
 
 	return backend;
@@ -218,6 +218,8 @@ static struct wlr_backend *attempt_backend_by_name(struct wl_display *display,
 		} else {
 			return attempt_drm_backend(display, backend, *session, create_renderer_func);
 		}
+	} else if (strcmp(name, "hwcomposer") == 0) {
+		return attempt_hwcomposer_backend(display, create_renderer_func);
 	}
 
 	wlr_log(WLR_ERROR, "unrecognized backend '%s'", name);
