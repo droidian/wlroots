@@ -56,8 +56,8 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 
 	wlr_egl_destroy_surface(&backend->egl, output->egl_surface);
 
-	output->egl_surface = eglCreateWindowSurface(backend->egl.display, backend->egl.config,
-		(EGLNativeWindowType)output->egl_window, NULL);
+	output->egl_surface = eglCreateWindowSurface(backend->egl.display,
+		backend->egl.config, (EGLNativeWindowType)output->egl_window, NULL);
 	if (output->egl_surface == EGL_NO_SURFACE) {
 		wlr_log(WLR_ERROR, "Failed to recreate EGL surface");
 		wlr_output_destroy(wlr_output);
@@ -148,12 +148,9 @@ static int signal_frame(void *data) {
 	return 0;
 }
 
-struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
-		unsigned int width, unsigned int height) {
+struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend) {
 	struct wlr_hwcomposer_backend *backend =
 		(struct wlr_hwcomposer_backend *)wlr_backend;
-
-	wlr_log(WLR_INFO, "wlr_hwcomposer_add_output width=%d height=%d", width, height);
 
 	struct wlr_hwcomposer_output *output =
 		calloc(1, sizeof(struct wlr_hwcomposer_output));
@@ -166,13 +163,15 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
 		backend->display);
 	struct wlr_output *wlr_output = &output->wlr_output;
 
-	output->egl_window = HWCNativeWindowCreate(width, height,
-			HAL_PIXEL_FORMAT_RGBA_8888, output_present, backend);
+	output->egl_window = HWCNativeWindowCreate(
+		backend->hwcWidth, backend->hwcHeight,
+		HAL_PIXEL_FORMAT_RGBA_8888, output_present, backend);
 
 	output->egl_display = eglGetDisplay(NULL);
 	backend->egl.display = output->egl_display;
 
-	output_set_custom_mode(wlr_output, width, height, 0);
+	output_set_custom_mode(wlr_output, backend->hwcWidth,
+		backend->hwcHeight, 0);
 	strncpy(wlr_output->make, "hwcomposer", sizeof(wlr_output->make));
 	strncpy(wlr_output->model, "hwcomposer", sizeof(wlr_output->model));
 	snprintf(wlr_output->name, sizeof(wlr_output->name), "HWCOMPOSER-%d",

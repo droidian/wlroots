@@ -158,7 +158,7 @@ static struct wlr_backend *attempt_hwcomposer_backend(
 
 	size_t outputs = parse_outputs_env("WLR_HWC_OUTPUTS");
 	for (size_t i = 0; i < outputs; ++i) {
-		wlr_hwcomposer_add_output(backend, 1440, 2560);
+		wlr_hwcomposer_add_output(backend);
 	}
 
 	return backend;

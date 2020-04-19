@@ -15,8 +15,7 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
  * read pixels from this framebuffer via wlr_renderer_read_pixels but it is
  * otherwise not displayed.
  */
-struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *backend,
-	unsigned int width, unsigned int height);
+struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *backend);
 
 bool wlr_backend_is_hwcomposer(struct wlr_backend *backend);
 bool wlr_output_is_hwcomposer(struct wlr_output *output);
