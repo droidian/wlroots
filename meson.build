@@ -7,7 +7,7 @@ project(
 	default_options: [
 		'c_std=c11',
 		'warning_level=2',
-		'werror=true',
+		'werror=false',
 	],
 )
 
@@ -47,7 +47,7 @@ add_project_link_arguments(
                '-lhardware',
                '-lsync',
                '-lhybris-hwcomposerwindow',
-               '-L/opt/hybris/lib',
+               '-lhwc2',
        ],
        language: 'c',
 )
@@ -148,8 +148,7 @@ add_project_arguments([
 	'-DLIBINPUT_MAJOR=' + libinput_ver[0],
 	'-DLIBINPUT_MINOR=' + libinput_ver[1],
 	'-DLIBINPUT_PATCH=' + libinput_ver[2],
-        '-I/home/nick/src/libhybris/hybris/headers',
-        '-I/opt/hybris/include/hybris',
+	'-I/usr/include/android-9.0',
 ], language: 'c')
 
 subdir('protocol')

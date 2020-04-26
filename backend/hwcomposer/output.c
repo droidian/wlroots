@@ -4,8 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <sys/cdefs.h> // for __BEGIN_DECLS/__END_DECLS found in sync.h
 #include <sync/sync.h>
-#include <hwcomposerwindow/hwcomposer.h>
+#include <hybris/hwcomposerwindow/hwcomposer.h>
 
 #include <wlr/interfaces/wlr_output.h>
 #include <wlr/render/wlr_renderer.h>
@@ -163,9 +164,16 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend) {
 		backend->display);
 	struct wlr_output *wlr_output = &output->wlr_output;
 
-	output->egl_window = HWCNativeWindowCreate(
-		backend->hwcWidth, backend->hwcHeight,
-		HAL_PIXEL_FORMAT_RGBA_8888, output_present, backend);
+#ifdef HWC_DEVICE_API_VERSION_2_0
+	if (backend->hwcVersion == HWC_DEVICE_API_VERSION_2_0)
+		output->egl_window = HWCNativeWindowCreate(
+			backend->hwcWidth, backend->hwcHeight,
+			HAL_PIXEL_FORMAT_RGBA_8888, hwc_present_hwcomposer2, backend);
+	else
+#endif
+		output->egl_window = HWCNativeWindowCreate(
+			backend->hwcWidth, backend->hwcHeight,
+			HAL_PIXEL_FORMAT_RGBA_8888, output_present, backend);
 
 	output->egl_display = eglGetDisplay(NULL);
 	backend->egl.display = output->egl_display;

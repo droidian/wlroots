@@ -7,6 +7,10 @@
 #include <hardware/hardware.h>
 #include <hardware/hwcomposer.h>
 
+#ifdef HWC_DEVICE_API_VERSION_2_0
+#include <hybris/hwc2/hwc2_compatibility_layer.h>
+#endif
+
 #define HWCOMPOSER_DEFAULT_REFRESH (60 * 1000) // 60 Hz
 
 struct wlr_hwcomposer_backend {
@@ -29,6 +33,12 @@ struct wlr_hwcomposer_backend {
 	int hwcWidth;
 	int hwcHeight;
 
+#ifdef HWC_DEVICE_API_VERSION_2_0
+	hwc2_compat_device_t* hwc2Device;
+	hwc2_compat_display_t* hwc2_primary_display;
+	hwc2_compat_layer_t* hwc2_primary_layer;
+#endif
+
 	struct light_device_t *lightsDevice;
 	int screenBrightness;
 };
@@ -47,5 +57,18 @@ struct wlr_hwcomposer_output {
 };
 
 bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc);
+#ifdef HWC_DEVICE_API_VERSION_2_0
+bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc);
+void hwc2_callback_vsync(HWC2EventListener* listener, int32_t sequenceId,
+                         hwc2_display_t display, int64_t timestamp);
+void hwc2_callback_hotplug(HWC2EventListener* listener, int32_t sequenceId,
+                           hwc2_display_t display, bool connected,
+                           bool primaryDisplay);
+void hwc2_callback_refresh(HWC2EventListener* listener, int32_t sequenceId,
+                           hwc2_display_t display);
+void hwc_hwcomposer2_close(struct wlr_hwcomposer_backend *hwc);
+void hwc_present_hwcomposer2(void *user_data, struct ANativeWindow *window,
+								struct ANativeWindowBuffer *buffer);
+#endif
 
 #endif
