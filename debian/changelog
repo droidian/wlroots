@@ -1,3 +1,11 @@
+wlroots (0.10.1-2) unstable; urgency=medium
+
+  [ Vincent Bernat ]
+  * [4e52cb5] d/control: add build-dependencies to enable X11 backend
+    (Closes: #962748)
+
+ -- Guido Günther <agx@sigxcpu.org>  Thu, 25 Jun 2020 13:51:18 +0200
+
 wlroots (0.10.1-1) unstable; urgency=medium
 
   * New upstream version 0.10.1
