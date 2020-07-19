@@ -50,11 +50,12 @@ struct tinywl_server {
 	struct wlr_seat *seat;
 	struct wl_listener new_input;
 	struct wl_listener request_cursor;
+	struct wl_listener request_set_selection;
 	struct wl_list keyboards;
 	enum tinywl_cursor_mode cursor_mode;
 	struct tinywl_view *grabbed_view;
 	double grab_x, grab_y;
-	int grab_width, grab_height;
+	struct wlr_box grab_geobox;
 	uint32_t resize_edges;
 
 	struct wlr_output_layout *output_layout;
@@ -297,6 +298,17 @@ static void seat_request_cursor(struct wl_listener *listener, void *data) {
 	}
 }
 
+static void seat_request_set_selection(struct wl_listener *listener, void *data) {
+	/* This event is raised by the seat when a client wants to set the selection,
+	 * usually when the user copies something. wlroots allows compositors to
+	 * ignore such requests if they so choose, but in tinywl we always honor
+	 */
+	struct tinywl_server *server = wl_container_of(
+			listener, server, request_set_selection);
+	struct wlr_seat_request_set_selection_event *event = data;
+	wlr_seat_set_selection(server->seat, event->source, event->serial);
+}
+
 static bool view_at(struct tinywl_view *view,
 		double lx, double ly, struct wlr_surface **surface,
 		double *sx, double *sy) {
@@ -309,8 +321,6 @@ static bool view_at(struct tinywl_view *view,
 	 */
 	double view_sx = lx - view->x;
 	double view_sy = ly - view->y;
-
-	struct wlr_surface_state *state = &view->xdg_surface->surface->current;
 
 	double _sx, _sy;
 	struct wlr_surface *_surface = NULL;
@@ -359,33 +369,44 @@ static void process_cursor_resize(struct tinywl_server *server, uint32_t time) {
 	 * commit any movement that was prepared.
 	 */
 	struct tinywl_view *view = server->grabbed_view;
-	double dx = server->cursor->x - server->grab_x;
-	double dy = server->cursor->y - server->grab_y;
-	double x = view->x;
-	double y = view->y;
-	int width = server->grab_width;
-	int height = server->grab_height;
+	double border_x = server->cursor->x - server->grab_x;
+	double border_y = server->cursor->y - server->grab_y;
+	int new_left = server->grab_geobox.x;
+	int new_right = server->grab_geobox.x + server->grab_geobox.width;
+	int new_top = server->grab_geobox.y;
+	int new_bottom = server->grab_geobox.y + server->grab_geobox.height; 
+
 	if (server->resize_edges & WLR_EDGE_TOP) {
-		y = server->grab_y + dy;
-		height -= dy;
-		if (height < 1) {
-			y += height;
+		new_top = border_y;
+		if (new_top >= new_bottom) {
+			new_top = new_bottom - 1;
 		}
 	} else if (server->resize_edges & WLR_EDGE_BOTTOM) {
-		height += dy;
+		new_bottom = border_y;
+		if (new_bottom <= new_top) {
+			new_bottom = new_top + 1;
+		}
 	}
 	if (server->resize_edges & WLR_EDGE_LEFT) {
-		x = server->grab_x + dx;
-		width -= dx;
-		if (width < 1) {
-			x += width;
+		new_left = border_x;
+		if (new_left >= new_right) {
+			new_left = new_right - 1;
 		}
 	} else if (server->resize_edges & WLR_EDGE_RIGHT) {
-		width += dx;
+		new_right = border_x;
+		if (new_right <= new_left) {
+			new_right = new_left + 1;
+		}
 	}
-	view->x = x;
-	view->y = y;
-	wlr_xdg_toplevel_set_size(view->xdg_surface, width, height);
+
+	struct wlr_box geo_box;
+	wlr_xdg_surface_get_geometry(view->xdg_surface, &geo_box);
+	view->x = new_left - geo_box.x;
+	view->y = new_top - geo_box.y;
+
+	int new_width = new_right - new_left;
+	int new_height = new_bottom - new_top;
+	wlr_xdg_toplevel_set_size(view->xdg_surface, new_width, new_height);
 }
 
 static void process_cursor_motion(struct tinywl_server *server, uint32_t time) {
@@ -475,7 +496,6 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
 	wlr_seat_pointer_notify_button(server->seat,
 			event->time_msec, event->button, event->state);
 	double sx, sy;
-	struct wlr_seat *seat = server->seat;
 	struct wlr_surface *surface;
 	struct tinywl_view *view = desktop_view_at(server,
 			server->cursor->x, server->cursor->y, &surface, &sx, &sy);
@@ -672,13 +692,13 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 	/* Adds this to the output layout. The add_auto function arranges outputs
 	 * from left-to-right in the order they appear. A more sophisticated
 	 * compositor would let the user configure the arrangement of outputs in the
-	 * layout. */
+	 * layout.
+	 *
+	 * The output layout utility automatically adds a wl_output global to the
+	 * display, which Wayland clients can see to find out information about the
+	 * output (such as DPI, scale factor, manufacturer, etc).
+	 */
 	wlr_output_layout_add_auto(server->output_layout, wlr_output);
-
-	/* Creating the global adds a wl_output global to the display, which Wayland
-	 * clients can see to find out information about the output (such as
-	 * DPI, scale factor, manufacturer, etc). */
-	wlr_output_create_global(wlr_output);
 }
 
 static void xdg_surface_map(struct wl_listener *listener, void *data) {
@@ -715,18 +735,25 @@ static void begin_interactive(struct tinywl_view *view,
 	}
 	server->grabbed_view = view;
 	server->cursor_mode = mode;
-	struct wlr_box geo_box;
-	wlr_xdg_surface_get_geometry(view->xdg_surface, &geo_box);
+
 	if (mode == TINYWL_CURSOR_MOVE) {
 		server->grab_x = server->cursor->x - view->x;
 		server->grab_y = server->cursor->y - view->y;
 	} else {
-		server->grab_x = server->cursor->x + geo_box.x;
-		server->grab_y = server->cursor->y + geo_box.y;
+		struct wlr_box geo_box;
+		wlr_xdg_surface_get_geometry(view->xdg_surface, &geo_box);
+
+		double border_x = (view->x + geo_box.x) + ((edges & WLR_EDGE_RIGHT) ? geo_box.width : 0);
+		double border_y = (view->y + geo_box.y) + ((edges & WLR_EDGE_BOTTOM) ? geo_box.height : 0);
+		server->grab_x = server->cursor->x - border_x;
+		server->grab_y = server->cursor->y - border_y;
+
+		server->grab_geobox = geo_box;
+		server->grab_geobox.x += view->x;
+		server->grab_geobox.y += view->y;
+
+		server->resize_edges = edges;
 	}
-	server->grab_width = geo_box.width;
-	server->grab_height = geo_box.height;
-	server->resize_edges = edges;
 }
 
 static void xdg_toplevel_request_move(
@@ -830,7 +857,9 @@ int main(int argc, char *argv[]) {
 	/* This creates some hands-off wlroots interfaces. The compositor is
 	 * necessary for clients to allocate surfaces and the data device manager
 	 * handles the clipboard. Each of these wlroots interfaces has room for you
-	 * to dig your fingers in and play with their behavior if you want. */
+	 * to dig your fingers in and play with their behavior if you want. Note that
+	 * the clients cannot set the selection directly without compositor approval,
+	 * see the handling of the request_set_selection event below.*/
 	wlr_compositor_create(server.wl_display, server.renderer);
 	wlr_data_device_manager_create(server.wl_display);
 
@@ -907,6 +936,9 @@ int main(int argc, char *argv[]) {
 	server.request_cursor.notify = seat_request_cursor;
 	wl_signal_add(&server.seat->events.request_set_cursor,
 			&server.request_cursor);
+	server.request_set_selection.notify = seat_request_set_selection;
+	wl_signal_add(&server.seat->events.request_set_selection,
+			&server.request_set_selection);
 
 	/* Add a Unix socket to the Wayland display. */
 	const char *socket = wl_display_add_socket_auto(server.wl_display);

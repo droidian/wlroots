@@ -1,9 +1,9 @@
 project(
 	'wlroots',
 	'c',
-	version: '0.10.1',
+	version: '0.11.0',
 	license: 'MIT',
-	meson_version: '>=0.51.2',
+	meson_version: '>=0.54.0',
 	default_options: [
 		'c_std=c11',
 		'warning_level=2',
@@ -11,10 +11,11 @@ project(
 	],
 )
 
-# Format of so_version is CURRENT, REVISION, AGE.
-# See: https://autotools.io/libtool/version.html
-# for a reference about clean library versioning.
-so_version = ['5', '9', '1']
+# When doing a major or minor release, *always* increase soversion. This isn't
+# necessary for bugfix releases. Increasing soversion is required because
+# wlroots never guarantees ABI stability -- only API stability is guaranteed
+# between minor releases.
+soversion = 6
 
 add_project_arguments([
 	'-DWLR_USE_UNSTABLE',
@@ -79,13 +80,13 @@ else
 endif
 
 conf_data = configuration_data()
-conf_data.set10('WLR_HAS_LIBCAP', false)
 conf_data.set10('WLR_HAS_SYSTEMD', false)
 conf_data.set10('WLR_HAS_ELOGIND', false)
 conf_data.set10('WLR_HAS_X11_BACKEND', false)
 conf_data.set10('WLR_HAS_XWAYLAND', false)
 conf_data.set10('WLR_HAS_XCB_ERRORS', false)
 conf_data.set10('WLR_HAS_XCB_ICCCM', false)
+conf_data.set10('WLR_HAS_EGLMESAEXT_H', false)
 
 # Clang complains about some zeroed initializer lists (= {0}), even though they
 # are valid
@@ -94,7 +95,7 @@ if cc.get_id() == 'clang'
 	add_project_arguments('-Wno-missing-braces', language: 'c')
 endif
 
-wayland_server = dependency('wayland-server', version: '>=1.16')
+wayland_server = dependency('wayland-server', version: '>=1.18')
 wayland_client = dependency('wayland-client')
 wayland_egl = dependency('wayland-egl')
 wayland_protos = dependency('wayland-protocols', version: '>=1.17')
@@ -108,6 +109,10 @@ udev = dependency('libudev')
 pixman = dependency('pixman-1')
 math = cc.find_library('m')
 rt = cc.find_library('rt')
+
+if cc.has_header('EGL/eglmesaext.h', dependencies: egl)
+	conf_data.set10('WLR_HAS_EGLMESAEXT_H', true)
+endif
 
 wlr_files = []
 wlr_deps = [
@@ -152,7 +157,7 @@ symbols_file = 'wlroots.syms'
 symbols_flag = '-Wl,--version-script,@0@/@1@'.format(meson.current_source_dir(), symbols_file)
 lib_wlr = library(
 	meson.project_name(), wlr_files,
-	version: '.'.join(so_version),
+	soversion: soversion,
 	dependencies: wlr_deps,
 	include_directories: [wlr_inc, proto_inc],
 	install: true,
@@ -166,22 +171,16 @@ wlroots = declare_dependency(
 	include_directories: wlr_inc,
 )
 
-summary = [
-	'',
-	'----------------',
-	'wlroots @0@'.format(meson.project_version()),
-	'',
-	'      libcap: @0@'.format(conf_data.get('WLR_HAS_LIBCAP', false)),
-	'     systemd: @0@'.format(conf_data.get('WLR_HAS_SYSTEMD', false)),
-	'     elogind: @0@'.format(conf_data.get('WLR_HAS_ELOGIND', false)),
-	'    xwayland: @0@'.format(conf_data.get('WLR_HAS_XWAYLAND', false)),
-	' x11_backend: @0@'.format(conf_data.get('WLR_HAS_X11_BACKEND', false)),
-	'   xcb-icccm: @0@'.format(conf_data.get('WLR_HAS_XCB_ICCCM', false)),
-	'  xcb-errors: @0@'.format(conf_data.get('WLR_HAS_XCB_ERRORS', false)),
-	'----------------',
-	''
-]
-message('\n'.join(summary))
+meson.override_dependency('wlroots', wlroots)
+
+summary({
+	'systemd': conf_data.get('WLR_HAS_SYSTEMD', 0),
+	'elogind': conf_data.get('WLR_HAS_ELOGIND', 0),
+	'xwayland': conf_data.get('WLR_HAS_XWAYLAND', 0),
+	'x11_backend': conf_data.get('WLR_HAS_X11_BACKEND', 0),
+	'xcb-icccm': conf_data.get('WLR_HAS_XCB_ICCCM', 0),
+	'xcb-errors': conf_data.get('WLR_HAS_XCB_ERRORS', 0),
+})
 
 if get_option('examples')
 	subdir('examples')

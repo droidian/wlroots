@@ -13,6 +13,7 @@
 #include <wlr/interfaces/wlr_input_device.h>
 
 #include "util/signal.h"
+#include "util/time.h"
 #include "wlr/util/log.h"
 #include "tablet-unstable-v2-client-protocol.h"
 
@@ -28,6 +29,7 @@ struct wlr_wl_tablet_tool {
 	struct wlr_tablet_tool wlr_tool;
 
 	/* semi-static */
+	struct wlr_wl_output *output;
 	struct wlr_wl_input_device *tablet;
 	double pre_x, pre_y;
 
@@ -82,12 +84,6 @@ struct wlr_wl_tablet_pad_group {
 	struct wl_list rings; // wlr_wl_tablet_pad_ring::link
 	struct wl_list strips; // wlr_wl_tablet_pad_strips::link
 };
-
-static uint32_t get_current_time_msec(void) {
-	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	return now.tv_nsec / (1000 * 1000) + now.tv_sec * 1000;
-}
 
 static void handle_tablet_pad_ring_source(void *data,
 		struct zwp_tablet_pad_ring_v2 *zwp_tablet_pad_ring_v2,
@@ -230,7 +226,7 @@ static void handle_tablet_pad_group_ring(void *data,
 	}
 	tablet_ring->index = group->pad->ring_count++;
 	tablet_ring->group = group;
-	zwp_tablet_pad_ring_v2_add_listener(ring, &tablet_pad_ring_listener, 
+	zwp_tablet_pad_ring_v2_add_listener(ring, &tablet_pad_ring_listener,
 		tablet_ring);
 
 	group->group.rings = realloc(group->group.rings,
@@ -251,7 +247,7 @@ static void handle_tablet_pad_group_strip(void *data,
 	}
 	tablet_strip->index = group->pad->strip_count++;
 	tablet_strip->group = group;
-	zwp_tablet_pad_strip_v2_add_listener(strip, &tablet_pad_strip_listener, 
+	zwp_tablet_pad_strip_v2_add_listener(strip, &tablet_pad_strip_listener,
 		tablet_strip);
 
 	group->group.strips = realloc(group->group.strips,
@@ -466,7 +462,6 @@ static void handle_tablet_tool_done(void *data,
 }
 
 static enum wlr_tablet_tool_type tablet_type_to_wlr_type(enum zwp_tablet_tool_v2_type type) {
-
 	switch (type) {
 	case ZWP_TABLET_TOOL_V2_TYPE_PEN:
 		return WLR_TABLET_TOOL_TYPE_PEN;
@@ -482,11 +477,12 @@ static enum wlr_tablet_tool_type tablet_type_to_wlr_type(enum zwp_tablet_tool_v2
 		return WLR_TABLET_TOOL_TYPE_MOUSE;
 	case ZWP_TABLET_TOOL_V2_TYPE_LENS:
 		return WLR_TABLET_TOOL_TYPE_LENS;
-	default:
-		break;
+	case ZWP_TABLET_TOOL_V2_TYPE_FINGER:
+		// unused, see:
+		// https://gitlab.freedesktop.org/wayland/wayland-protocols/-/issues/18
+		abort();
 	}
-
-	assert(false && "Unreachable");
+	abort(); // unreachable
 }
 
 static void handle_tablet_tool_type(void *data,
@@ -521,7 +517,7 @@ static void handle_tablet_tool_capability(void *data,
 	struct wlr_wl_tablet_tool *tool = data;
 
 	enum zwp_tablet_tool_v2_capability cap = capability;
-	
+
 	switch (cap) {
 	case ZWP_TABLET_TOOL_V2_CAPABILITY_TILT:
 		tool->wlr_tool.tilt = true;
@@ -551,12 +547,14 @@ static void handle_tablet_tool_proximity_in(void *data,
 	struct wlr_wl_tablet_tool *tool = data;
 	tool->is_in = true;
 	tool->tablet = zwp_tablet_v2_get_user_data(tablet_id);
+	tool->output = wl_surface_get_user_data(surface);
 }
 
 static void handle_tablet_tool_proximity_out(void *data,
 		struct zwp_tablet_tool_v2 *id) {
 	struct wlr_wl_tablet_tool *tool = data;
 	tool->is_out = true;
+	tool->output = NULL;
 }
 
 static void handle_tablet_tool_down(void *data,
@@ -576,8 +574,11 @@ static void handle_tablet_tool_motion(void *data,
 		struct zwp_tablet_tool_v2 *id,
 		wl_fixed_t x, wl_fixed_t y) {
 	struct wlr_wl_tablet_tool *tool = data;
-	tool->x = wl_fixed_to_double(x);
-	tool->y = wl_fixed_to_double(y);
+	struct wlr_wl_output *output = tool->output;
+	assert(output);
+
+	tool->x = wl_fixed_to_double(x) / output->wlr_output.width;
+	tool->y = wl_fixed_to_double(y) / output->wlr_output.height;
 }
 
 static void handle_tablet_tool_pressure(void *data,
@@ -674,7 +675,7 @@ static void handle_tablet_tool_frame(void *data,
 			.y = tool->y,
 			.state = WLR_TABLET_TOOL_PROXIMITY_IN,
 		};
-	
+
 		wlr_signal_emit_safe(&tablet->events.proximity, &evt);
 	}
 
@@ -732,7 +733,7 @@ static void handle_tablet_tool_frame(void *data,
 		}
 
 		if (evt.updated_axes) {
-			wlr_signal_emit_safe(&tablet->events.proximity, &evt);
+			wlr_signal_emit_safe(&tablet->events.axis, &evt);
 		}
 	}
 
@@ -750,7 +751,7 @@ static void handle_tablet_tool_frame(void *data,
 			.y = tool->y,
 			.state = WLR_TABLET_TOOL_TIP_DOWN,
 		};
-	
+
 		wlr_signal_emit_safe(&tablet->events.tip, &evt);
 	}
 
@@ -763,7 +764,7 @@ static void handle_tablet_tool_frame(void *data,
 			.y = tool->y,
 			.state = WLR_TABLET_TOOL_TIP_UP,
 		};
-	
+
 		wlr_signal_emit_safe(&tablet->events.tip, &evt);
 	}
 
@@ -776,7 +777,7 @@ static void handle_tablet_tool_frame(void *data,
 			.y = tool->y,
 			.state = WLR_TABLET_TOOL_PROXIMITY_OUT,
 		};
-	
+
 		wlr_signal_emit_safe(&tablet->events.proximity, &evt);
 	}
 

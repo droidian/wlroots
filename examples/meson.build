@@ -60,6 +60,14 @@ clients = {
 			'xdg-shell',
 		],
 	},
+	'keyboard-shortcuts-inhibit': {
+		'src': 'keyboard-shortcuts-inhibit.c',
+		'dep': [wayland_cursor, wlroots],
+		'proto': [
+			'keyboard-shortcuts-inhibit-unstable-v1',
+			'xdg-shell',
+		],
+	},
 	'layer-shell': {
 		'src': 'layer-shell.c',
 		'dep': [wayland_cursor, wlroots],
@@ -80,6 +88,11 @@ clients = {
 		'src': 'gamma-control.c',
 		'dep': [wayland_cursor, math],
 		'proto': ['wlr-gamma-control-unstable-v1'],
+	},
+	'output-power-management': {
+		'src': 'output-power-management.c',
+		'dep': [wayland_client, wlroots],
+		'proto': ['wlr-output-power-management-unstable-v1'],
 	},
 	'pointer-constraints': {
 		'src': 'pointer-constraints.c',
@@ -113,6 +126,14 @@ clients = {
 		'src': 'screencopy.c',
 		'dep': [libpng, rt],
 		'proto': ['wlr-screencopy-unstable-v1'],
+	},
+	'screencopy-dmabuf': {
+		'src': 'screencopy-dmabuf.c',
+		'dep': [libpng, rt, gbm, drm],
+		'proto': [
+			'wlr-screencopy-unstable-v1',
+			'linux-dmabuf-unstable-v1',
+		],
 	},
 	'toplevel-decoration': {
 		'src': 'toplevel-decoration.c',
@@ -149,12 +170,19 @@ clients = {
 		'dep': wlroots,
 		'proto': ['wlr-virtual-pointer-unstable-v1'],
 	},
+	'input-method-keyboard-grab': {
+		'src': 'input-method-keyboard-grab.c',
+		'dep': xkbcommon,
+		'proto': [
+			'input-method-unstable-v2',
+		],
+	},
 }
 
 foreach name, info : compositors
 	extra_src = []
 	foreach p : info.get('proto', [])
-		extra_src += get_variable(p.underscorify() + '_server_h')
+		extra_src += protocols_server_header[p]
 	endforeach
 
 	executable(
@@ -169,8 +197,8 @@ endforeach
 foreach name, info : clients
 	extra_src = []
 	foreach p : info.get('proto')
-		extra_src += get_variable(p.underscorify() + '_c')
-		extra_src += get_variable(p.underscorify() + '_client_h')
+		extra_src += protocols_code[p]
+		extra_src += protocols_client_header[p]
 	endforeach
 
 	executable(

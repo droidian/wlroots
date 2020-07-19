@@ -15,6 +15,10 @@ static void default_pointer_enter(struct wlr_seat_pointer_grab *grab,
 	wlr_seat_pointer_enter(grab->seat, surface, sx, sy);
 }
 
+static void default_pointer_clear_focus(struct wlr_seat_pointer_grab *grab) {
+	wlr_seat_pointer_clear_focus(grab->seat);
+}
+
 static void default_pointer_motion(struct wlr_seat_pointer_grab *grab,
 		uint32_t time, double sx, double sy) {
 	wlr_seat_pointer_send_motion(grab->seat, time, sx, sy);
@@ -42,6 +46,7 @@ static void default_pointer_cancel(struct wlr_seat_pointer_grab *grab) {
 
 const struct wlr_pointer_grab_interface default_pointer_grab_impl = {
 	.enter = default_pointer_enter,
+	.clear_focus = default_pointer_clear_focus,
 	.motion = default_pointer_motion,
 	.button = default_pointer_button,
 	.axis = default_pointer_axis,
@@ -129,6 +134,20 @@ static void seat_pointer_handle_surface_destroy(struct wl_listener *listener,
 	wlr_seat_pointer_clear_focus(state->seat);
 }
 
+void seat_client_send_pointer_leave_raw(struct wlr_seat_client *seat_client,
+		struct wlr_surface *surface) {
+	uint32_t serial = wlr_seat_client_next_serial(seat_client);
+	struct wl_resource *resource;
+	wl_resource_for_each(resource, &seat_client->pointers) {
+		if (wlr_seat_client_from_pointer_resource(resource) == NULL) {
+			continue;
+		}
+
+		wl_pointer_send_leave(resource, serial, surface->resource);
+		pointer_send_frame(resource);
+	}
+}
+
 void wlr_seat_pointer_enter(struct wlr_seat *wlr_seat,
 		struct wlr_surface *surface, double sx, double sy) {
 	if (wlr_seat->pointer_state.focused_surface == surface) {
@@ -149,16 +168,7 @@ void wlr_seat_pointer_enter(struct wlr_seat *wlr_seat,
 
 	// leave the previously entered surface
 	if (focused_client != NULL && focused_surface != NULL) {
-		uint32_t serial = wlr_seat_client_next_serial(focused_client);
-		struct wl_resource *resource;
-		wl_resource_for_each(resource, &focused_client->pointers) {
-			if (wlr_seat_client_from_pointer_resource(resource) == NULL) {
-				continue;
-			}
-
-			wl_pointer_send_leave(resource, serial, focused_surface->resource);
-			pointer_send_frame(resource);
-		}
+		seat_client_send_pointer_leave_raw(focused_client, focused_surface);
 	}
 
 	// enter the current surface
@@ -189,11 +199,9 @@ void wlr_seat_pointer_enter(struct wlr_seat *wlr_seat,
 	wlr_seat->pointer_state.focused_client = client;
 	wlr_seat->pointer_state.focused_surface = surface;
 	if (surface != NULL) {
-		wlr_seat->pointer_state.sx = sx;
-		wlr_seat->pointer_state.sy = sy;
+		wlr_seat_pointer_warp(wlr_seat, sx, sy);
 	} else {
-		wlr_seat->pointer_state.sx = NAN;
-		wlr_seat->pointer_state.sy = NAN;
+		wlr_seat_pointer_warp(wlr_seat, NAN, NAN);
 	}
 
 	struct wlr_seat_pointer_focus_change_event event = {
@@ -208,6 +216,11 @@ void wlr_seat_pointer_enter(struct wlr_seat *wlr_seat,
 
 void wlr_seat_pointer_clear_focus(struct wlr_seat *wlr_seat) {
 	wlr_seat_pointer_enter(wlr_seat, NULL, 0, 0);
+}
+
+void wlr_seat_pointer_warp(struct wlr_seat *wlr_seat, double sx, double sy) {
+	wlr_seat->pointer_state.sx = sx;
+	wlr_seat->pointer_state.sy = sy;
 }
 
 void wlr_seat_pointer_send_motion(struct wlr_seat *wlr_seat, uint32_t time,
@@ -231,8 +244,7 @@ void wlr_seat_pointer_send_motion(struct wlr_seat *wlr_seat, uint32_t time,
 			wl_fixed_from_double(sy));
 	}
 
-	wlr_seat->pointer_state.sx = sx;
-	wlr_seat->pointer_state.sy = sy;
+	wlr_seat_pointer_warp(wlr_seat, sx, sy);
 }
 
 uint32_t wlr_seat_pointer_send_button(struct wlr_seat *wlr_seat, uint32_t time,
@@ -326,8 +338,16 @@ void wlr_seat_pointer_end_grab(struct wlr_seat *wlr_seat) {
 
 void wlr_seat_pointer_notify_enter(struct wlr_seat *wlr_seat,
 		struct wlr_surface *surface, double sx, double sy) {
+	// NULL surfaces are prohibited in the grab-compatible API. Use
+	// wlr_seat_pointer_notify_clear_focus() instead.
+	assert(surface);
 	struct wlr_seat_pointer_grab *grab = wlr_seat->pointer_state.grab;
 	grab->interface->enter(grab, surface, sx, sy);
+}
+
+void wlr_seat_pointer_notify_clear_focus(struct wlr_seat *wlr_seat) {
+	struct wlr_seat_pointer_grab *grab = wlr_seat->pointer_state.grab;
+	grab->interface->clear_focus(grab);
 }
 
 void wlr_seat_pointer_notify_motion(struct wlr_seat *wlr_seat, uint32_t time,
@@ -404,6 +424,36 @@ void seat_client_create_pointer(struct wlr_seat_client *seat_client,
 	wl_resource_set_implementation(resource, &pointer_impl, seat_client,
 		&pointer_handle_resource_destroy);
 	wl_list_insert(&seat_client->pointers, wl_resource_get_link(resource));
+
+	if ((seat_client->seat->capabilities & WL_SEAT_CAPABILITY_POINTER) == 0) {
+		wl_resource_set_user_data(resource, NULL);
+		return;
+	}
+
+	struct wlr_seat_client *focused_client =
+		seat_client->seat->pointer_state.focused_client;
+	struct wlr_surface *focused_surface =
+		seat_client->seat->pointer_state.focused_surface;
+
+	// Send an enter event if there is a focused client/surface stored
+	if (focused_client != NULL && focused_surface != NULL) {
+		double sx = seat_client->seat->pointer_state.sx;
+		double sy = seat_client->seat->pointer_state.sy;
+
+		uint32_t serial = wlr_seat_client_next_serial(focused_client);
+		struct wl_resource *resource;
+		wl_resource_for_each(resource, &focused_client->pointers) {
+			if (wl_resource_get_id(resource) == id) {
+				if (wlr_seat_client_from_pointer_resource(resource) == NULL) {
+					continue;
+				}
+
+				wl_pointer_send_enter(resource, serial, focused_surface->resource,
+					wl_fixed_from_double(sx), wl_fixed_from_double(sy));
+				pointer_send_frame(resource);
+			}
+		}
+	}
 }
 
 void seat_client_destroy_pointer(struct wl_resource *resource) {

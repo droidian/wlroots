@@ -105,12 +105,15 @@ static void gamma_control_handle_set_gamma(struct wl_client *client,
 	uint16_t *g = table + ramp_size;
 	uint16_t *b = table + 2 * ramp_size;
 
-	bool ok = wlr_output_set_gamma(gamma_control->output, ramp_size, r, g, b);
-	if (!ok) {
+	wlr_output_set_gamma(gamma_control->output, ramp_size, r, g, b);
+	if (!wlr_output_test(gamma_control->output)) {
 		gamma_control_send_failed(gamma_control);
 		goto error_table;
 	}
 	free(table);
+
+	// Gamma LUT will be applied on next output commit
+	wlr_output_schedule_frame(gamma_control->output);
 
 	return;
 
@@ -161,6 +164,13 @@ static void gamma_control_manager_get_gamma_control(struct wl_client *client,
 	wl_resource_set_implementation(gamma_control->resource, &gamma_control_impl,
 		gamma_control, gamma_control_handle_resource_destroy);
 
+	if (output == NULL) {
+		wl_resource_set_user_data(gamma_control->resource, NULL);
+		zwlr_gamma_control_v1_send_failed(gamma_control->resource);
+		free(gamma_control);
+		return;
+	}
+
 	wl_signal_add(&output->events.destroy,
 		&gamma_control->output_destroy_listener);
 	gamma_control->output_destroy_listener.notify =
@@ -168,7 +178,8 @@ static void gamma_control_manager_get_gamma_control(struct wl_client *client,
 
 	wl_list_init(&gamma_control->link);
 
-	if (!output->impl->set_gamma) {
+	size_t gamma_size = wlr_output_get_gamma_size(output);
+	if (gamma_size == 0) {
 		zwlr_gamma_control_v1_send_failed(gamma_control->resource);
 		gamma_control_destroy(gamma_control);
 		return;
@@ -185,8 +196,7 @@ static void gamma_control_manager_get_gamma_control(struct wl_client *client,
 
 	wl_list_remove(&gamma_control->link);
 	wl_list_insert(&manager->controls, &gamma_control->link);
-	zwlr_gamma_control_v1_send_gamma_size(gamma_control->resource,
-		wlr_output_get_gamma_size(output));
+	zwlr_gamma_control_v1_send_gamma_size(gamma_control->resource, gamma_size);
 }
 
 static void gamma_control_manager_destroy(struct wl_client *client,

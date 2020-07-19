@@ -14,9 +14,11 @@ protocols = {
 	# Stable upstream protocols
 	'xdg-shell': wl_protocol_dir / 'stable/xdg-shell/xdg-shell.xml',
 	'presentation-time': wl_protocol_dir / 'stable/presentation-time/presentation-time.xml',
+	'viewporter': wl_protocol_dir / 'stable/viewporter/viewporter.xml',
 	# Unstable upstream protocols
 	'fullscreen-shell-unstable-v1': wl_protocol_dir / 'unstable/fullscreen-shell/fullscreen-shell-unstable-v1.xml',
 	'idle-inhibit-unstable-v1': wl_protocol_dir / 'unstable/idle-inhibit/idle-inhibit-unstable-v1.xml',
+	'keyboard-shortcuts-inhibit-unstable-v1': wl_protocol_dir / 'unstable/keyboard-shortcuts-inhibit/keyboard-shortcuts-inhibit-unstable-v1.xml',
 	'linux-dmabuf-unstable-v1': wl_protocol_dir / 'unstable/linux-dmabuf/linux-dmabuf-unstable-v1.xml',
 	'pointer-constraints-unstable-v1': wl_protocol_dir / 'unstable/pointer-constraints/pointer-constraints-unstable-v1.xml',
 	'pointer-gestures-unstable-v1': wl_protocol_dir / 'unstable/pointer-gestures/pointer-gestures-unstable-v1.xml',
@@ -40,10 +42,14 @@ protocols = {
 	'wlr-input-inhibitor-unstable-v1': 'wlr-input-inhibitor-unstable-v1.xml',
 	'wlr-layer-shell-unstable-v1': 'wlr-layer-shell-unstable-v1.xml',
 	'wlr-output-management-unstable-v1': 'wlr-output-management-unstable-v1.xml',
+	'wlr-output-power-management-unstable-v1': 'wlr-output-power-management-unstable-v1.xml',
 	'wlr-screencopy-unstable-v1': 'wlr-screencopy-unstable-v1.xml',
 	'wlr-virtual-pointer-unstable-v1': 'wlr-virtual-pointer-unstable-v1.xml',
 }
 
+protocols_code = {}
+protocols_server_header = {}
+protocols_client_header = {}
 foreach name, path : protocols
 	code = custom_target(
 		name.underscorify() + '_c',
@@ -69,7 +75,7 @@ foreach name, path : protocols
 		build_by_default: false,
 	)
 
-	set_variable(name.underscorify() + '_c', code)
-	set_variable(name.underscorify() + '_server_h', server_header)
-	set_variable(name.underscorify() + '_client_h', client_header)
+	protocols_code += { name: code }
+	protocols_server_header += { name: server_header }
+	protocols_client_header += { name: client_header }
 endforeach

@@ -20,6 +20,7 @@ struct wlr_gles2_procs {
 	PFNGLDEBUGMESSAGECONTROLKHRPROC glDebugMessageControlKHR;
 	PFNGLPOPDEBUGGROUPKHRPROC glPopDebugGroupKHR;
 	PFNGLPUSHDEBUGGROUPKHRPROC glPushDebugGroupKHR;
+	PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGEOESPROC glEGLImageTargetRenderbufferStorageOES;
 };
 
 extern struct wlr_gles2_procs gles2_procs;
@@ -37,6 +38,8 @@ struct wlr_gles2_tex_shader {
 	GLint invert_y;
 	GLint tex;
 	GLint alpha;
+	GLint pos_attrib;
+	GLint tex_attrib;
 };
 
 struct wlr_gles2_renderer {
@@ -44,10 +47,12 @@ struct wlr_gles2_renderer {
 
 	struct wlr_egl *egl;
 
+	const char *exts_str;
 	struct {
 		bool read_format_bgra_ext;
 		bool debug_khr;
 		bool egl_image_external_oes;
+		bool egl_image_oes;
 	} exts;
 
 	struct {
@@ -55,11 +60,14 @@ struct wlr_gles2_renderer {
 			GLuint program;
 			GLint proj;
 			GLint color;
+			GLint pos_attrib;
 		} quad;
 		struct {
 			GLuint program;
 			GLint proj;
 			GLint color;
+			GLint pos_attrib;
+			GLint tex_attrib;
 		} ellipse;
 		struct wlr_gles2_tex_shader tex_rgba;
 		struct wlr_gles2_tex_shader tex_rgbx;
@@ -81,7 +89,6 @@ struct wlr_gles2_texture {
 
 	EGLImageKHR image;
 
-	int width, height;
 	bool inverted_y;
 	bool has_alpha;
 

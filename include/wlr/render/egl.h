@@ -9,26 +9,33 @@
 #ifndef WLR_RENDER_EGL_H
 #define WLR_RENDER_EGL_H
 
-#include <wlr/config.h>
-
-#if !WLR_HAS_X11_BACKEND && !WLR_HAS_XWAYLAND
 #ifndef MESA_EGL_NO_X11_HEADERS
 #define MESA_EGL_NO_X11_HEADERS
 #endif
 #ifndef EGL_NO_X11
 #define EGL_NO_X11
 #endif
-#endif
+
+#include <wlr/config.h>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#if WLR_HAS_EGLMESAEXT_H
 // TODO: remove eglmesaext.h
 #include <EGL/eglmesaext.h>
+#endif
 #include <pixman.h>
 #include <stdbool.h>
 #include <wayland-server-core.h>
 #include <wlr/render/dmabuf.h>
 #include <wlr/render/drm_format_set.h>
+
+struct wlr_egl_context {
+	EGLDisplay display;
+	EGLContext context;
+	EGLSurface draw_surface;
+	EGLSurface read_surface;
+};
 
 struct wlr_egl {
 	EGLenum platform;
@@ -65,6 +72,7 @@ struct wlr_egl {
 	struct wl_display *wl_display;
 
 	struct wlr_drm_format_set dmabuf_formats;
+	EGLBoolean **external_only_dmabuf_formats;
 };
 
 // TODO: Allocate and return a wlr_egl
@@ -73,7 +81,7 @@ struct wlr_egl {
  * Will attempt to load all possibly required api functions.
  */
 bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform, void *remote_display,
-	EGLint *config_attribs, EGLint visual_id);
+	const EGLint *config_attribs, EGLint visual_id);
 
 /**
  * Frees all related EGL resources, makes the context not-current and
@@ -106,7 +114,7 @@ EGLImageKHR wlr_egl_create_image_from_wl_drm(struct wlr_egl *egl,
  * of the dmabuf with wlr_egl_check_import_dmabuf once first.
  */
 EGLImageKHR wlr_egl_create_image_from_dmabuf(struct wlr_egl *egl,
-	struct wlr_dmabuf_attributes *attributes);
+	struct wlr_dmabuf_attributes *attributes, bool *external_only);
 
 /**
  * Get the available dmabuf formats
@@ -122,10 +130,31 @@ bool wlr_egl_export_image_to_dmabuf(struct wlr_egl *egl, EGLImageKHR image,
  */
 bool wlr_egl_destroy_image(struct wlr_egl *egl, EGLImageKHR image);
 
+/**
+ * Make the EGL context current. The provided surface will be made current
+ * unless EGL_NO_SURFACE.
+ *
+ * Callers are expected to clear the current context when they are done by
+ * calling wlr_egl_unset_current.
+ */
 bool wlr_egl_make_current(struct wlr_egl *egl, EGLSurface surface,
 	int *buffer_age);
 
+bool wlr_egl_unset_current(struct wlr_egl *egl);
+
 bool wlr_egl_is_current(struct wlr_egl *egl);
+
+/**
+ * Save the current EGL context to the structure provided in the argument.
+ *
+ * This includes display, context, draw surface and read surface.
+ */
+void wlr_egl_save_context(struct wlr_egl_context *context);
+
+/**
+ * Restore EGL context that was previously saved using wlr_egl_save_current().
+ */
+bool wlr_egl_restore_context(struct wlr_egl_context *context);
 
 bool wlr_egl_swap_buffers(struct wlr_egl *egl, EGLSurface surface,
 	pixman_region32_t *damage);

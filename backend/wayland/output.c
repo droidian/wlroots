@@ -94,10 +94,8 @@ static const struct wp_presentation_feedback_listener
 static bool output_set_custom_mode(struct wlr_output *wlr_output,
 		int32_t width, int32_t height, int32_t refresh) {
 	struct wlr_wl_output *output = get_wl_output_from_output(wlr_output);
-	wlr_egl_swap_buffers(&output->backend->egl, output->egl_surface, NULL);
 	wl_egl_window_resize(output->egl_window, width, height, 0, 0);
 	wlr_output_update_custom_mode(&output->wlr_output, width, height, 0);
-
 	return true;
 }
 
@@ -114,7 +112,7 @@ static void destroy_wl_buffer(struct wlr_wl_buffer *buffer) {
 		return;
 	}
 	wl_buffer_destroy(buffer->wl_buffer);
-	wlr_buffer_unref(buffer->buffer);
+	wlr_buffer_unlock(buffer->buffer);
 	free(buffer);
 }
 
@@ -127,20 +125,29 @@ static const struct wl_buffer_listener buffer_listener = {
 	.release = buffer_handle_release,
 };
 
-static struct wlr_wl_buffer *create_wl_buffer(struct wlr_wl_backend *wl,
-		struct wlr_buffer *wlr_buffer,
-		int required_width, int required_height) {
+static bool test_buffer(struct wlr_wl_backend *wl,
+		struct wlr_buffer *wlr_buffer) {
 	struct wlr_dmabuf_attributes attribs;
 	if (!wlr_buffer_get_dmabuf(wlr_buffer, &attribs)) {
-		return NULL;
-	}
-
-	if (attribs.width != required_width || attribs.height != required_height) {
-		return NULL;
+		return false;
 	}
 
 	if (!wlr_drm_format_set_has(&wl->linux_dmabuf_v1_formats,
 			attribs.format, attribs.modifier)) {
+		return false;
+	}
+
+	return true;
+}
+
+static struct wlr_wl_buffer *create_wl_buffer(struct wlr_wl_backend *wl,
+		struct wlr_buffer *wlr_buffer) {
+	if (!test_buffer(wl, wlr_buffer)) {
+		return NULL;
+	}
+
+	struct wlr_dmabuf_attributes attribs;
+	if (!wlr_buffer_get_dmabuf(wlr_buffer, &attribs)) {
 		return NULL;
 	}
 
@@ -173,31 +180,14 @@ static struct wlr_wl_buffer *create_wl_buffer(struct wlr_wl_backend *wl,
 		return NULL;
 	}
 	buffer->wl_buffer = wl_buffer;
-	buffer->buffer = wlr_buffer_ref(wlr_buffer);
+	buffer->buffer = wlr_buffer_lock(wlr_buffer);
 
 	wl_buffer_add_listener(wl_buffer, &buffer_listener, buffer);
 
 	return buffer;
 }
 
-static bool output_attach_buffer(struct wlr_output *wlr_output,
-		struct wlr_buffer *wlr_buffer) {
-	struct wlr_wl_output *output =
-		get_wl_output_from_output(wlr_output);
-	struct wlr_wl_backend *wl = output->backend;
-
-	struct wlr_wl_buffer *buffer = create_wl_buffer(wl, wlr_buffer,
-		wlr_output->width, wlr_output->height);
-	if (buffer == NULL) {
-		return false;
-	}
-
-	destroy_wl_buffer(output->pending_buffer);
-	output->pending_buffer = buffer;
-	return true;
-}
-
-static bool output_commit(struct wlr_output *wlr_output) {
+static bool output_test(struct wlr_output *wlr_output) {
 	struct wlr_wl_output *output =
 		get_wl_output_from_output(wlr_output);
 
@@ -208,6 +198,26 @@ static bool output_commit(struct wlr_output *wlr_output) {
 
 	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_MODE) {
 		assert(wlr_output->pending.mode_type == WLR_OUTPUT_STATE_MODE_CUSTOM);
+	}
+
+	if ((wlr_output->pending.committed & WLR_OUTPUT_STATE_BUFFER) &&
+			wlr_output->pending.buffer_type == WLR_OUTPUT_STATE_BUFFER_SCANOUT &&
+			!test_buffer(output->backend, wlr_output->pending.buffer)) {
+		return false;
+	}
+
+	return true;
+}
+
+static bool output_commit(struct wlr_output *wlr_output) {
+	struct wlr_wl_output *output =
+		get_wl_output_from_output(wlr_output);
+
+	if (!output_test(wlr_output)) {
+		return false;
+	}
+
+	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_MODE) {
 		if (!output_set_custom_mode(wlr_output,
 				wlr_output->pending.custom_mode.width,
 				wlr_output->pending.custom_mode.height,
@@ -243,10 +253,14 @@ static bool output_commit(struct wlr_output *wlr_output) {
 				return false;
 			}
 			break;
-		case WLR_OUTPUT_STATE_BUFFER_SCANOUT:
-			assert(output->pending_buffer != NULL);
-			wl_surface_attach(output->surface,
-				output->pending_buffer->wl_buffer, 0, 0);
+		case WLR_OUTPUT_STATE_BUFFER_SCANOUT:;
+			struct wlr_wl_buffer *buffer =
+				create_wl_buffer(output->backend, wlr_output->pending.buffer);
+			if (buffer == NULL) {
+				return false;
+			}
+
+			wl_surface_attach(output->surface, buffer->wl_buffer, 0, 0);
 
 			if (damage == NULL) {
 				wl_surface_damage_buffer(output->surface,
@@ -262,8 +276,6 @@ static bool output_commit(struct wlr_output *wlr_output) {
 				}
 			}
 			wl_surface_commit(output->surface);
-
-			output->pending_buffer = NULL;
 			break;
 		}
 
@@ -289,8 +301,14 @@ static bool output_commit(struct wlr_output *wlr_output) {
 	return true;
 }
 
+static void output_rollback_render(struct wlr_output *wlr_output) {
+	struct wlr_wl_output *output =
+		get_wl_output_from_output(wlr_output);
+	wlr_egl_unset_current(&output->backend->egl);
+}
+
 static bool output_set_cursor(struct wlr_output *wlr_output,
-		struct wlr_texture *texture, int32_t scale,
+		struct wlr_texture *texture, float scale,
 		enum wl_output_transform transform,
 		int32_t hotspot_x, int32_t hotspot_y, bool update_texture) {
 	struct wlr_wl_output *output = get_wl_output_from_output(wlr_output);
@@ -389,8 +407,6 @@ static void output_destroy(struct wlr_output *wlr_output) {
 		presentation_feedback_destroy(feedback);
 	}
 
-	destroy_wl_buffer(output->pending_buffer);
-
 	wlr_egl_destroy_surface(&output->backend->egl, output->egl_surface);
 	wl_egl_window_destroy(output->egl_window);
 	if (output->zxdg_toplevel_decoration_v1) {
@@ -415,28 +431,14 @@ static bool output_move_cursor(struct wlr_output *_output, int x, int y) {
 	return true;
 }
 
-static bool output_schedule_frame(struct wlr_output *wlr_output) {
-	struct wlr_wl_output *output = get_wl_output_from_output(wlr_output);
-
-	if (output->frame_callback != NULL) {
-		wlr_log(WLR_ERROR, "Skipping frame scheduling");
-		return true;
-	}
-
-	output->frame_callback = wl_surface_frame(output->surface);
-	wl_callback_add_listener(output->frame_callback, &frame_listener, output);
-	wl_surface_commit(output->surface);
-	return true;
-}
-
 static const struct wlr_output_impl output_impl = {
 	.destroy = output_destroy,
 	.attach_render = output_attach_render,
-	.attach_buffer  = output_attach_buffer,
+	.test = output_test,
 	.commit = output_commit,
+	.rollback_render = output_rollback_render,
 	.set_cursor = output_set_cursor,
 	.move_cursor = output_move_cursor,
-	.schedule_frame = output_schedule_frame,
 };
 
 bool wlr_output_is_wl(struct wlr_output *wlr_output) {

@@ -25,6 +25,10 @@ static void xdg_pointer_grab_enter(struct wlr_seat_pointer_grab *grab,
 	}
 }
 
+static void xdg_pointer_grab_clear_focus(struct wlr_seat_pointer_grab *grab) {
+	wlr_seat_pointer_clear_focus(grab->seat);
+}
+
 static void xdg_pointer_grab_motion(struct wlr_seat_pointer_grab *grab,
 		uint32_t time, double sx, double sy) {
 	wlr_seat_pointer_send_motion(grab->seat, time, sx, sy);
@@ -59,6 +63,7 @@ static void xdg_pointer_grab_cancel(struct wlr_seat_pointer_grab *grab) {
 
 static const struct wlr_pointer_grab_interface xdg_pointer_grab_impl = {
 	.enter = xdg_pointer_grab_enter,
+	.clear_focus = xdg_pointer_grab_clear_focus,
 	.motion = xdg_pointer_grab_motion,
 	.button = xdg_pointer_grab_button,
 	.cancel = xdg_pointer_grab_cancel,
@@ -69,6 +74,10 @@ static const struct wlr_pointer_grab_interface xdg_pointer_grab_impl = {
 static void xdg_keyboard_grab_enter(struct wlr_seat_keyboard_grab *grab,
 		struct wlr_surface *surface, uint32_t keycodes[], size_t num_keycodes,
 		struct wlr_keyboard_modifiers *modifiers) {
+	// keyboard focus should remain on the popup
+}
+
+static void xdg_keyboard_grab_clear_focus(struct wlr_seat_keyboard_grab *grab) {
 	// keyboard focus should remain on the popup
 }
 
@@ -88,6 +97,7 @@ static void xdg_keyboard_grab_cancel(struct wlr_seat_keyboard_grab *grab) {
 
 static const struct wlr_keyboard_grab_interface xdg_keyboard_grab_impl = {
 	.enter = xdg_keyboard_grab_enter,
+	.clear_focus = xdg_keyboard_grab_clear_focus,
 	.key = xdg_keyboard_grab_key,
 	.modifiers = xdg_keyboard_grab_modifiers,
 	.cancel = xdg_keyboard_grab_cancel,
@@ -278,15 +288,15 @@ void create_xdg_popup(struct wlr_xdg_surface *xdg_surface,
 		return;
 	}
 
-	if (!wlr_surface_set_role(xdg_surface->surface, &xdg_popup_surface_role,
-			xdg_surface, xdg_surface->resource, XDG_WM_BASE_ERROR_ROLE)) {
-		return;
-	}
-
 	if (xdg_surface->role != WLR_XDG_SURFACE_ROLE_NONE) {
 		wl_resource_post_error(xdg_surface->resource,
 			XDG_SURFACE_ERROR_ALREADY_CONSTRUCTED,
 			"xdg-surface has already been constructed");
+		return;
+	}
+
+	if (!wlr_surface_set_role(xdg_surface->surface, &xdg_popup_surface_role,
+			xdg_surface, xdg_surface->resource, XDG_WM_BASE_ERROR_ROLE)) {
 		return;
 	}
 

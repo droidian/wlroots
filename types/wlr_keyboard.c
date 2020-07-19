@@ -6,9 +6,10 @@
 #include <wlr/interfaces/wlr_keyboard.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/util/log.h>
+#include "types/wlr_keyboard.h"
 #include "util/signal.h"
 
-static void keyboard_led_update(struct wlr_keyboard *keyboard) {
+void keyboard_led_update(struct wlr_keyboard *keyboard) {
 	if (keyboard->xkb_state == NULL) {
 		return;
 	}
@@ -27,7 +28,7 @@ static void keyboard_led_update(struct wlr_keyboard *keyboard) {
  * Update the modifier state of the wlr-keyboard. Returns true if the modifier
  * state changed.
  */
-static bool keyboard_modifier_update(struct wlr_keyboard *keyboard) {
+bool keyboard_modifier_update(struct wlr_keyboard *keyboard) {
 	if (keyboard->xkb_state == NULL) {
 		return false;
 	}
@@ -55,7 +56,7 @@ static bool keyboard_modifier_update(struct wlr_keyboard *keyboard) {
 	return true;
 }
 
-static void keyboard_key_update(struct wlr_keyboard *keyboard,
+void keyboard_key_update(struct wlr_keyboard *keyboard,
 		struct wlr_event_keyboard_key *event) {
 	if (event->state == WLR_KEY_PRESSED) {
 		set_add(keyboard->keycodes, &keyboard->num_keycodes,
@@ -145,7 +146,7 @@ void wlr_keyboard_led_update(struct wlr_keyboard *kb, uint32_t leds) {
 	}
 }
 
-void wlr_keyboard_set_keymap(struct wlr_keyboard *kb,
+bool wlr_keyboard_set_keymap(struct wlr_keyboard *kb,
 		struct xkb_keymap *keymap) {
 	xkb_keymap_unref(kb->keymap);
 	kb->keymap = xkb_keymap_ref(keymap);
@@ -199,7 +200,7 @@ void wlr_keyboard_set_keymap(struct wlr_keyboard *kb,
 	keyboard_modifier_update(kb);
 
 	wlr_signal_emit_safe(&kb->events.keymap, kb);
-	return;
+	return true;
 
 err:
 	xkb_state_unref(kb->xkb_state);
@@ -208,6 +209,7 @@ err:
 	kb->keymap = NULL;
 	free(kb->keymap_string);
 	kb->keymap_string = NULL;
+	return false;
 }
 
 void wlr_keyboard_set_repeat_info(struct wlr_keyboard *kb, int32_t rate,
@@ -230,4 +232,20 @@ uint32_t wlr_keyboard_get_modifiers(struct wlr_keyboard *kb) {
 		}
 	}
 	return modifiers;
+}
+
+bool wlr_keyboard_keymaps_match(struct xkb_keymap *km1,
+		struct xkb_keymap *km2) {
+	if (!km1 && !km2) {
+		return true;
+	}
+	if (!km1 || !km2) {
+		return false;
+	}
+	char *km1_str = xkb_keymap_get_as_string(km1, XKB_KEYMAP_FORMAT_TEXT_V1);
+	char *km2_str = xkb_keymap_get_as_string(km2, XKB_KEYMAP_FORMAT_TEXT_V1);
+	bool result = strcmp(km1_str, km2_str) == 0;
+	free(km1_str);
+	free(km2_str);
+	return result;
 }

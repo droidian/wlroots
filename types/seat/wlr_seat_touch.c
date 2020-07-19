@@ -366,6 +366,10 @@ void seat_client_create_touch(struct wlr_seat_client *seat_client,
 	wl_resource_set_implementation(resource, &touch_impl, seat_client,
 		&touch_handle_resource_destroy);
 	wl_list_insert(&seat_client->touches, wl_resource_get_link(resource));
+
+	if ((seat_client->seat->capabilities & WL_SEAT_CAPABILITY_TOUCH) == 0) {
+		wl_resource_set_user_data(resource, NULL);
+	}
 }
 
 void seat_client_destroy_touch(struct wl_resource *resource) {
@@ -402,4 +406,13 @@ bool wlr_seat_validate_touch_grab_serial(struct wlr_seat *seat,
 	wlr_log(WLR_DEBUG, "Touch grab serial validation failed: "
 		"invalid origin surface");
 	return false;
+}
+
+bool wlr_surface_accepts_touch(struct wlr_seat *wlr_seat, struct wlr_surface *surface) {
+	struct wl_client *client = wl_resource_get_client(surface->resource);
+	struct wlr_seat_client *seat_client = wlr_seat_client_for_wl_client(wlr_seat, client);
+	if (!seat_client) {
+		return false;
+	}
+	return !wl_list_empty(&seat_client->touches);
 }

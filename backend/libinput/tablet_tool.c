@@ -118,8 +118,7 @@ static enum wlr_tablet_tool_type wlr_type_from_libinput_type(
 		return WLR_TABLET_TOOL_TYPE_TOTEM;
 #endif
 	}
-
-	assert(false && "UNREACHABLE");
+	abort(); // unreachable
 }
 
 static struct wlr_libinput_tablet_tool *get_wlr_tablet_tool(
@@ -269,6 +268,9 @@ void handle_tablet_tool_proximity(struct libinput_event *event,
 	wlr_event.device = wlr_dev;
 	wlr_event.time_msec =
 		usec_to_msec(libinput_event_tablet_tool_get_time_usec(tevent));
+	wlr_event.x = libinput_event_tablet_tool_get_x_transformed(tevent, 1);
+	wlr_event.y = libinput_event_tablet_tool_get_y_transformed(tevent, 1);
+
 	switch (libinput_event_tablet_tool_get_proximity_state(tevent)) {
 	case LIBINPUT_TABLET_TOOL_PROXIMITY_STATE_OUT:
 		wlr_event.state = WLR_TABLET_TOOL_PROXIMITY_OUT;
@@ -330,6 +332,9 @@ void handle_tablet_tool_tip(struct libinput_event *event,
 	wlr_event.tool = &tool->wlr_tool;
 	wlr_event.time_msec =
 		usec_to_msec(libinput_event_tablet_tool_get_time_usec(tevent));
+	wlr_event.x = libinput_event_tablet_tool_get_x_transformed(tevent, 1);
+	wlr_event.y = libinput_event_tablet_tool_get_y_transformed(tevent, 1);
+
 	switch (libinput_event_tablet_tool_get_tip_state(tevent)) {
 	case LIBINPUT_TABLET_TOOL_TIP_UP:
 		wlr_event.state = WLR_TABLET_TOOL_TIP_UP;

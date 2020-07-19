@@ -37,15 +37,14 @@ enum atom_name {
 	NET_WM_WINDOW_TYPE,
 	WM_TAKE_FOCUS,
 	WINDOW,
-	_NET_ACTIVE_WINDOW,
-	_NET_WM_MOVERESIZE,
-	_NET_WM_NAME,
-	_NET_SUPPORTING_WM_CHECK,
-	_NET_WM_STATE_MODAL,
-	_NET_WM_STATE_FULLSCREEN,
-	_NET_WM_STATE_MAXIMIZED_VERT,
-	_NET_WM_STATE_MAXIMIZED_HORZ,
-	_NET_WM_PING,
+	NET_ACTIVE_WINDOW,
+	NET_WM_MOVERESIZE,
+	NET_SUPPORTING_WM_CHECK,
+	NET_WM_STATE_MODAL,
+	NET_WM_STATE_FULLSCREEN,
+	NET_WM_STATE_MAXIMIZED_VERT,
+	NET_WM_STATE_MAXIMIZED_HORZ,
+	NET_WM_PING,
 	WM_STATE,
 	CLIPBOARD,
 	PRIMARY,
@@ -80,8 +79,8 @@ enum atom_name {
 	DND_ACTION_COPY,
 	DND_ACTION_ASK,
 	DND_ACTION_PRIVATE,
-	_NET_CLIENT_LIST,
-	ATOM_LAST,
+	NET_CLIENT_LIST,
+	ATOM_LAST // keep last
 };
 
 extern const char *atom_map[ATOM_LAST];
@@ -139,7 +138,7 @@ struct wlr_xwm {
 	struct wl_listener seat_drag_source_destroy;
 };
 
-struct wlr_xwm *xwm_create(struct wlr_xwayland *wlr_xwayland);
+struct wlr_xwm *xwm_create(struct wlr_xwayland *wlr_xwayland, int wm_fd);
 
 void xwm_destroy(struct wlr_xwm *xwm);
 

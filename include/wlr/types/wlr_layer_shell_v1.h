@@ -29,7 +29,6 @@
  */
 struct wlr_layer_shell_v1 {
 	struct wl_global *global;
-	struct wl_list surfaces; // wl_layer_surface
 
 	struct wl_listener display_destroy;
 
@@ -63,7 +62,6 @@ struct wlr_layer_surface_v1_configure {
 };
 
 struct wlr_layer_surface_v1 {
-	struct wl_list link; // wlr_layer_shell_v1::surfaces
 	struct wlr_surface *surface;
 	struct wlr_output *output;
 	struct wl_resource *resource;
@@ -86,9 +84,30 @@ struct wlr_layer_surface_v1 {
 	struct wl_listener surface_destroy;
 
 	struct {
+		/**
+		 * The destroy signal indicates that the wlr_layer_surface is about to be
+		 * freed. It is guaranteed that the unmap signal is raised before the destroy
+		 * signal if the layer surface is destroyed while mapped.
+		 */
 		struct wl_signal destroy;
+		/**
+		 * The map signal indicates that the client has configured itself and is
+		 * ready to be rendered by the compositor.
+		 */
 		struct wl_signal map;
+		/**
+		 * The unmap signal indicates that the surface is no longer in a state where
+		 * it should be rendered by the compositor. This might happen if the surface
+		 * no longer has a displayable buffer because either the surface has been
+		 * hidden or is about to be destroyed. It is guaranteed that the unmap signal
+		 * is raised before the destroy signal if the layer surface is destroyed
+		 * while mapped.
+		 */
 		struct wl_signal unmap;
+		/**
+		 * The new_popup signal is raised when a new popup is created. The data
+		 * parameter passed to the listener is a pointer to the new wlr_xdg_popup.
+		 */
 		struct wl_signal new_popup;
 	} events;
 

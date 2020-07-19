@@ -98,7 +98,6 @@ static void manager_handle_capture_output(struct wl_client *client,
 		return;
 	}
 	frame->manager = manager;
-	frame->output = output;
 	wl_list_init(&frame->output_precommit.link);
 
 	uint32_t version = wl_resource_get_version(manager_resource);
@@ -129,6 +128,8 @@ static void manager_handle_capture_output(struct wl_client *client,
 		return;
 	}
 
+	frame->output = output;
+
 	wlr_output_lock_attach_render(frame->output, true);
 	if (overlay_cursor) {
 		wlr_output_lock_software_cursors(frame->output, true);
@@ -149,6 +150,8 @@ static void manager_handle_capture_output(struct wl_client *client,
 		zwlr_export_dmabuf_frame_v1_send_object(frame->resource, i,
 			attribs->fd[i], size, attribs->offset[i], attribs->stride[i], i);
 	}
+
+	wlr_output_schedule_frame(output);
 
 	wl_list_remove(&frame->output_precommit.link);
 	wl_signal_add(&output->events.precommit, &frame->output_precommit);

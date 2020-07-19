@@ -9,15 +9,11 @@
 #ifndef WLR_RENDER_INTERFACE_H
 #define WLR_RENDER_INTERFACE_H
 
-#include <wlr/config.h>
-
-#if !WLR_HAS_X11_BACKEND && !WLR_HAS_XWAYLAND
 #ifndef MESA_EGL_NO_X11_HEADERS
 #define MESA_EGL_NO_X11_HEADERS
 #endif
 #ifndef EGL_NO_X11
 #define EGL_NO_X11
-#endif
 #endif
 
 #include <EGL/egl.h>
@@ -36,9 +32,9 @@ struct wlr_renderer_impl {
 	void (*end)(struct wlr_renderer *renderer);
 	void (*clear)(struct wlr_renderer *renderer, const float color[static 4]);
 	void (*scissor)(struct wlr_renderer *renderer, struct wlr_box *box);
-	bool (*render_texture_with_matrix)(struct wlr_renderer *renderer,
-		struct wlr_texture *texture, const float matrix[static 9],
-		float alpha);
+	bool (*render_subtexture_with_matrix)(struct wlr_renderer *renderer,
+		struct wlr_texture *texture, const struct wlr_fbox *box,
+		const float matrix[static 9], float alpha);
 	void (*render_quad_with_matrix)(struct wlr_renderer *renderer,
 		const float color[static 4], const float matrix[static 9]);
 	void (*render_ellipse_with_matrix)(struct wlr_renderer *renderer,
@@ -66,15 +62,17 @@ struct wlr_renderer_impl {
 	struct wlr_texture *(*texture_from_dmabuf)(struct wlr_renderer *renderer,
 		struct wlr_dmabuf_attributes *attribs);
 	void (*destroy)(struct wlr_renderer *renderer);
-	void (*init_wl_display)(struct wlr_renderer *renderer,
+	bool (*init_wl_display)(struct wlr_renderer *renderer,
 		struct wl_display *wl_display);
+	bool (*blit_dmabuf)(struct wlr_renderer *renderer,
+		struct wlr_dmabuf_attributes *dst,
+		struct wlr_dmabuf_attributes *src);
 };
 
 void wlr_renderer_init(struct wlr_renderer *renderer,
 	const struct wlr_renderer_impl *impl);
 
 struct wlr_texture_impl {
-	void (*get_size)(struct wlr_texture *texture, int *width, int *height);
 	bool (*is_opaque)(struct wlr_texture *texture);
 	bool (*write_pixels)(struct wlr_texture *texture,
 		uint32_t stride, uint32_t width, uint32_t height,
@@ -86,6 +84,6 @@ struct wlr_texture_impl {
 };
 
 void wlr_texture_init(struct wlr_texture *texture,
-	const struct wlr_texture_impl *impl);
+	const struct wlr_texture_impl *impl, uint32_t width, uint32_t height);
 
 #endif

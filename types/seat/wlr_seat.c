@@ -10,6 +10,7 @@
 #include <wlr/types/wlr_seat.h>
 #include <wlr/util/log.h>
 #include "types/wlr_seat.h"
+#include "util/global.h"
 #include "util/signal.h"
 
 #define SEAT_VERSION 7
@@ -18,9 +19,9 @@ static void seat_handle_get_pointer(struct wl_client *client,
 		struct wl_resource *seat_resource, uint32_t id) {
 	struct wlr_seat_client *seat_client =
 		wlr_seat_client_from_resource(seat_resource);
-	if (!(seat_client->seat->capabilities & WL_SEAT_CAPABILITY_POINTER)) {
-		wlr_log(WLR_ERROR, "Client sent get_pointer on seat without the "
-			"pointer capability");
+	if (!(seat_client->seat->accumulated_capabilities & WL_SEAT_CAPABILITY_POINTER)) {
+		wl_resource_post_error(seat_resource, 0,
+				"wl_seat.get_pointer called when no pointer capability has existed");
 		return;
 	}
 
@@ -32,9 +33,9 @@ static void seat_handle_get_keyboard(struct wl_client *client,
 		struct wl_resource *seat_resource, uint32_t id) {
 	struct wlr_seat_client *seat_client =
 		wlr_seat_client_from_resource(seat_resource);
-	if (!(seat_client->seat->capabilities & WL_SEAT_CAPABILITY_KEYBOARD)) {
-		wlr_log(WLR_ERROR, "Client sent get_keyboard on seat without the "
-			"keyboard capability");
+	if (!(seat_client->seat->accumulated_capabilities & WL_SEAT_CAPABILITY_KEYBOARD)) {
+		wl_resource_post_error(seat_resource, 0,
+				"wl_seat.get_keyboard called when no keyboard capability has existed");
 		return;
 	}
 
@@ -46,9 +47,9 @@ static void seat_handle_get_touch(struct wl_client *client,
 		struct wl_resource *seat_resource, uint32_t id) {
 	struct wlr_seat_client *seat_client =
 		wlr_seat_client_from_resource(seat_resource);
-	if (!(seat_client->seat->capabilities & WL_SEAT_CAPABILITY_TOUCH)) {
-		wlr_log(WLR_ERROR, "Client sent get_touch on seat without the "
-			"touch capability");
+	if (!(seat_client->seat->accumulated_capabilities & WL_SEAT_CAPABILITY_TOUCH)) {
+		wl_resource_post_error(seat_resource, 0,
+				"wl_seat.get_touch called when no touch capability has existed");
 		return;
 	}
 
@@ -182,7 +183,7 @@ void wlr_seat_destroy(struct wlr_seat *seat) {
 		}
 	}
 
-	wl_global_destroy(seat->global);
+	wlr_global_destroy_safe(seat->global, seat->display);
 	free(seat->pointer_state.default_grab);
 	free(seat->keyboard_state.default_grab);
 	free(seat->touch_state.default_grab);
@@ -254,13 +255,8 @@ struct wlr_seat *wlr_seat_create(struct wl_display *display, const char *name) {
 	seat->touch_state.seat = seat;
 	wl_list_init(&seat->touch_state.touch_points);
 
-	// TODO: always use SEAT_VERSION (requires libwayland 1.17)
-	uint32_t version = SEAT_VERSION;
-	if (wl_seat_interface.version < SEAT_VERSION) {
-		version = wl_seat_interface.version;
-	}
 	seat->global = wl_global_create(display, &wl_seat_interface,
-		version, seat, seat_handle_bind);
+		SEAT_VERSION, seat, seat_handle_bind);
 	if (seat->global == NULL) {
 		free(touch_grab);
 		free(pointer_grab);
@@ -314,18 +310,49 @@ struct wlr_seat_client *wlr_seat_client_for_wl_client(struct wlr_seat *wlr_seat,
 
 void wlr_seat_set_capabilities(struct wlr_seat *wlr_seat,
 		uint32_t capabilities) {
+	// if the capabilities haven't changed (i.e a redundant mouse was removed),
+	// we don't actually have to do anything
+	if (capabilities == wlr_seat->capabilities) {
+		return;
+	}
 	wlr_seat->capabilities = capabilities;
+	wlr_seat->accumulated_capabilities |= capabilities;
 
 	struct wlr_seat_client *client;
 	wl_list_for_each(client, &wlr_seat->clients, link) {
 		// Make resources inert if necessary
 		if ((capabilities & WL_SEAT_CAPABILITY_POINTER) == 0) {
+			struct wlr_seat_client *focused_client =
+				wlr_seat->pointer_state.focused_client;
+			struct wlr_surface *focused_surface =
+				wlr_seat->pointer_state.focused_surface;
+
+			if (focused_client != NULL && focused_surface != NULL) {
+				seat_client_send_pointer_leave_raw(focused_client, focused_surface);
+			}
+
+			// Note: we don't set focused client/surface to NULL since we need
+			// them to send the enter event if the pointer is recreated
+
 			struct wl_resource *resource, *tmp;
 			wl_resource_for_each_safe(resource, tmp, &client->pointers) {
 				seat_client_destroy_pointer(resource);
 			}
 		}
 		if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) == 0) {
+			struct wlr_seat_client *focused_client =
+				wlr_seat->keyboard_state.focused_client;
+			struct wlr_surface *focused_surface =
+				wlr_seat->keyboard_state.focused_surface;
+
+			if (focused_client != NULL && focused_surface != NULL) {
+				seat_client_send_keyboard_leave_raw(focused_client,
+						focused_surface);
+			}
+
+			// Note: we don't set focused client/surface to NULL since we need
+			// them to send the enter event if the keyboard is recreated
+
 			struct wl_resource *resource, *tmp;
 			wl_resource_for_each_safe(resource, tmp, &client->keyboards) {
 				seat_client_destroy_keyboard(resource);

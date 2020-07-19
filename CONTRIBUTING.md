@@ -284,13 +284,22 @@ struct wlr_surface *wlr_surface_from_resource(struct wl_resource *resource) {
 }
 ```
 
+If a pointer to a `wl_resource` is stored, a resource destroy handler needs to
+be registered to clean it up. libwayland will automatically destroy resources
+in an arbitrary order when a client is disconnected, the compositor must handle
+this correctly.
+
 ### Destroying resources
 
 Object structs should only be destroyed when their resource is destroyed, ie.
 in the resource destroy handler (set with `wl_resource_set_implementation`).
-Destructor requests should only call `wl_resource_destroy`.
 
-The compositor should not destroy resources on its own.
+- If the object has a destructor request: the request handler should just call
+  `wl_resource_destroy` and do nothing else. The compositor must not destroy
+  resources on its own outside the destructor request handler.
+- If the protocol specifies that an object is destroyed when an event is sent:
+  it's the only case where the compositor is allowed to send the event and then
+  call `wl_resource_destroy`. An example of this is `wl_callback`.
 
 ### Inert resources
 

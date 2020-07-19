@@ -58,19 +58,16 @@ static void layer_surface_handle_ack_configure(struct wl_client *client,
 		struct wl_resource *resource, uint32_t serial) {
 	struct wlr_layer_surface_v1 *surface = layer_surface_from_resource(resource);
 
-	bool found = false;
-	struct wlr_layer_surface_v1_configure *configure, *tmp;
-
 	if (!surface || surface->closed) {
 		return;
 	}
-	wl_list_for_each_safe(configure, tmp, &surface->configure_list, link) {
-		if (configure->serial < serial) {
-			layer_surface_configure_destroy(configure);
-		} else if (configure->serial == serial) {
+
+	// First find the ack'ed configure
+	bool found = false;
+	struct wlr_layer_surface_v1_configure *configure, *tmp;
+	wl_list_for_each(configure, &surface->configure_list, link) {
+		if (configure->serial == serial) {
 			found = true;
-			break;
-		} else {
 			break;
 		}
 	}
@@ -79,6 +76,13 @@ static void layer_surface_handle_ack_configure(struct wl_client *client,
 			ZWLR_LAYER_SURFACE_V1_ERROR_INVALID_SURFACE_STATE,
 			"wrong configure serial: %u", serial);
 		return;
+	}
+	// Then remove old configures from the list
+	wl_list_for_each_safe(configure, tmp, &surface->configure_list, link) {
+		if (configure->serial == serial) {
+			break;
+		}
+		layer_surface_configure_destroy(configure);
 	}
 
 	if (surface->acked_configure) {
@@ -228,7 +232,6 @@ static void layer_surface_destroy(struct wlr_layer_surface_v1 *surface) {
 	wl_resource_set_user_data(surface->resource, NULL);
 	surface->surface->role_data = NULL;
 	wl_list_remove(&surface->surface_destroy.link);
-	wl_list_remove(&surface->link);
 	free(surface->namespace);
 	free(surface);
 }
@@ -291,7 +294,9 @@ void wlr_layer_surface_v1_close(struct wlr_layer_surface_v1 *surface) {
 		return;
 	}
 	surface->closed = true;
-	layer_surface_unmap(surface);
+	if (surface->mapped) {
+		layer_surface_unmap(surface);
+	}
 	zwlr_layer_surface_v1_send_closed(surface->resource);
 }
 
@@ -434,11 +439,11 @@ static void layer_shell_handle_get_layer_surface(struct wl_client *wl_client,
 			surface, surface->resource);
 	wl_resource_set_implementation(surface->resource,
 		&layer_surface_implementation, surface, layer_surface_resource_destroy);
-	wl_list_insert(&shell->surfaces, &surface->link);
 }
 
 static const struct zwlr_layer_shell_v1_interface layer_shell_implementation = {
 	.get_layer_surface = layer_shell_handle_get_layer_surface,
+	.destroy = resource_handle_destroy,
 };
 
 static void layer_shell_bind(struct wl_client *wl_client, void *data,
@@ -471,8 +476,6 @@ struct wlr_layer_shell_v1 *wlr_layer_shell_v1_create(struct wl_display *display)
 	if (!layer_shell) {
 		return NULL;
 	}
-
-	wl_list_init(&layer_shell->surfaces);
 
 	struct wl_global *global = wl_global_create(display,
 		&zwlr_layer_shell_v1_interface, 2, layer_shell, layer_shell_bind);

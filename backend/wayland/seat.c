@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <wayland-client.h>
 
@@ -19,6 +20,7 @@
 #include "relative-pointer-unstable-v1-client-protocol.h"
 #include "backend/wayland.h"
 #include "util/signal.h"
+#include "util/time.h"
 
 static struct wlr_wl_pointer *output_get_pointer(struct wlr_wl_output *output) {
 	struct wlr_input_device *wlr_dev;
@@ -193,13 +195,7 @@ static const struct wl_pointer_listener pointer_listener = {
 
 static void keyboard_handle_keymap(void *data, struct wl_keyboard *wl_keyboard,
 		uint32_t format, int32_t fd, uint32_t size) {
-	// TODO: set keymap
-}
-
-static uint32_t get_current_time_msec(void) {
-	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	return now.tv_nsec / 1000;
+	close(fd);
 }
 
 static void keyboard_handle_enter(void *data, struct wl_keyboard *wl_keyboard,
@@ -289,8 +285,9 @@ static struct wlr_wl_input_device *get_wl_input_device_from_input_device(
 static void input_device_destroy(struct wlr_input_device *wlr_dev) {
 	struct wlr_wl_input_device *dev =
 		get_wl_input_device_from_input_device(wlr_dev);
-	if (dev->resource) {
-		wl_proxy_destroy(dev->resource);
+	if (dev->wlr_input_device.type == WLR_INPUT_DEVICE_KEYBOARD) {
+		wl_keyboard_release(dev->backend->keyboard);
+		dev->backend->keyboard = NULL;
 	}
 	wl_list_remove(&dev->wlr_input_device.link);
 	free(dev);
@@ -535,6 +532,7 @@ void create_wl_pointer(struct wl_pointer *wl_pointer, struct wlr_wl_output *outp
 			&relative_pointer_listener, dev);
 	}
 
+	wl_pointer_add_listener(wl_pointer, &pointer_listener, backend);
 	wlr_signal_emit_safe(&backend->backend.events.new_input, wlr_dev);
 }
 
@@ -556,7 +554,6 @@ void create_wl_keyboard(struct wl_keyboard *wl_keyboard, struct wlr_wl_backend *
 	wlr_keyboard_init(wlr_dev->keyboard, NULL);
 
 	wl_keyboard_add_listener(wl_keyboard, &keyboard_listener, wlr_dev);
-	dev->resource = wl_keyboard;
 	wlr_signal_emit_safe(&wl->backend.events.new_input, wlr_dev);
 }
 
@@ -565,8 +562,8 @@ static void seat_handle_capabilities(void *data, struct wl_seat *wl_seat,
 	struct wlr_wl_backend *backend = data;
 	assert(backend->seat == wl_seat);
 
-	if ((caps & WL_SEAT_CAPABILITY_POINTER)) {
-		wlr_log(WLR_DEBUG, "seat %p offered pointer", (void*) wl_seat);
+	if ((caps & WL_SEAT_CAPABILITY_POINTER) && backend->pointer == NULL) {
+		wlr_log(WLR_DEBUG, "seat %p offered pointer", (void *)wl_seat);
 
 		struct wl_pointer *wl_pointer = wl_seat_get_pointer(wl_seat);
 		backend->pointer = wl_pointer;
@@ -575,11 +572,23 @@ static void seat_handle_capabilities(void *data, struct wl_seat *wl_seat,
 		wl_list_for_each(output, &backend->outputs, link) {
 			create_wl_pointer(wl_pointer, output);
 		}
-
-		wl_pointer_add_listener(wl_pointer, &pointer_listener, backend);
 	}
-	if ((caps & WL_SEAT_CAPABILITY_KEYBOARD)) {
-		wlr_log(WLR_DEBUG, "seat %p offered keyboard", (void*) wl_seat);
+	if (!(caps & WL_SEAT_CAPABILITY_POINTER) && backend->pointer != NULL) {
+		wlr_log(WLR_DEBUG, "seat %p dropped pointer", (void *)wl_seat);
+
+		struct wlr_input_device *device, *tmp;
+		wl_list_for_each_safe(device, tmp, &backend->devices, link) {
+			if (device->type == WLR_INPUT_DEVICE_POINTER) {
+				wlr_input_device_destroy(device);
+			}
+		}
+
+		wl_pointer_release(backend->pointer);
+		backend->pointer = NULL;
+	}
+
+	if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && backend->keyboard == NULL) {
+		wlr_log(WLR_DEBUG, "seat %p offered keyboard", (void *)wl_seat);
 
 		struct wl_keyboard *wl_keyboard = wl_seat_get_keyboard(wl_seat);
 		backend->keyboard = wl_keyboard;
@@ -587,6 +596,17 @@ static void seat_handle_capabilities(void *data, struct wl_seat *wl_seat,
 		if (backend->started) {
 			create_wl_keyboard(wl_keyboard, backend);
 		}
+	}
+	if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && backend->keyboard != NULL) {
+		wlr_log(WLR_DEBUG, "seat %p dropped keyboard", (void *)wl_seat);
+
+		struct wlr_input_device *device, *tmp;
+		wl_list_for_each_safe(device, tmp, &backend->devices, link) {
+			if (device->type == WLR_INPUT_DEVICE_KEYBOARD) {
+				wlr_input_device_destroy(device);
+			}
+		}
+		assert(backend->keyboard == NULL); // free'ed by input_device_destroy
 	}
 }
 

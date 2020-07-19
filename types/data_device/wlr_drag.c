@@ -124,8 +124,6 @@ static void drag_destroy(struct wlr_drag *drag) {
 	}
 	drag->cancelling = true;
 
-	wlr_signal_emit_safe(&drag->events.destroy, drag);
-
 	if (drag->started) {
 		wlr_seat_keyboard_end_grab(drag->seat);
 		switch (drag->grab_type) {
@@ -138,7 +136,12 @@ static void drag_destroy(struct wlr_drag *drag) {
 			wlr_seat_touch_end_grab(drag->seat);
 			break;
 		}
+	}
 
+	// We issue destroy after ending the grab to allow focus changes.
+	wlr_signal_emit_safe(&drag->events.destroy, drag);
+
+	if (drag->started) {
 		drag_set_focus(drag, NULL, 0, 0);
 
 		assert(drag->seat->drag == drag);
@@ -157,6 +160,11 @@ static void drag_handle_pointer_enter(struct wlr_seat_pointer_grab *grab,
 		struct wlr_surface *surface, double sx, double sy) {
 	struct wlr_drag *drag = grab->data;
 	drag_set_focus(drag, surface, sx, sy);
+}
+
+static void drag_handle_pointer_clear_focus(struct wlr_seat_pointer_grab *grab) {
+	struct wlr_drag *drag = grab->data;
+	drag_set_focus(drag, NULL, 0, 0);
 }
 
 static void drag_handle_pointer_motion(struct wlr_seat_pointer_grab *grab,
@@ -238,6 +246,7 @@ static void drag_handle_pointer_cancel(struct wlr_seat_pointer_grab *grab) {
 static const struct wlr_pointer_grab_interface
 		data_device_pointer_drag_interface = {
 	.enter = drag_handle_pointer_enter,
+	.clear_focus = drag_handle_pointer_clear_focus,
 	.motion = drag_handle_pointer_motion,
 	.button = drag_handle_pointer_button,
 	.axis = drag_handle_pointer_axis,
@@ -303,6 +312,10 @@ static void drag_handle_keyboard_enter(struct wlr_seat_keyboard_grab *grab,
 	// nothing has keyboard focus during drags
 }
 
+static void drag_handle_keyboard_clear_focus(struct wlr_seat_keyboard_grab *grab) {
+	// nothing has keyboard focus during drags
+}
+
 static void drag_handle_keyboard_key(struct wlr_seat_keyboard_grab *grab,
 		uint32_t time, uint32_t key, uint32_t state) {
 	// no keyboard input during drags
@@ -323,6 +336,7 @@ static void drag_handle_keyboard_cancel(struct wlr_seat_keyboard_grab *grab) {
 static const struct wlr_keyboard_grab_interface
 		data_device_keyboard_drag_interface = {
 	.enter = drag_handle_keyboard_enter,
+	.clear_focus = drag_handle_keyboard_clear_focus,
 	.key = drag_handle_keyboard_key,
 	.modifiers = drag_handle_keyboard_modifiers,
 	.cancel = drag_handle_keyboard_cancel,

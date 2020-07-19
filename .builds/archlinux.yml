@@ -2,7 +2,6 @@ image: archlinux
 packages:
   - clang
   - ffmpeg
-  - libcap
   - libinput
   - libxkbcommon
   - mesa
@@ -18,8 +17,8 @@ sources:
 tasks:
   - setup: |
       cd wlroots
-      CC=gcc meson build-gcc -Dauto_features=enabled
-      CC=clang meson build-clang -Dauto_features=enabled
+      CC=gcc meson build-gcc -Dauto_features=enabled -Dlogind-provider=systemd
+      CC=clang meson build-clang -Dauto_features=enabled -Dlogind-provider=systemd
   - gcc: |
       cd wlroots/build-gcc
       ninja
