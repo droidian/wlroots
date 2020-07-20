@@ -75,12 +75,21 @@ Files: protocol/wlr-output-management-unstable-v1.xml
 Copyright: 2019 Purism SPC
 License: Expat
 
+Files: protocol/wlr-output-power-management-unstable-v1.xml
+Copyright: 2019 Purism SPC
+License: Expat
+
 Files: protocol/wlr-screencopy-unstable-v1.xml
 Copyright: 2018 Simon Ser
 License: Expat
 
 Files: examples/screencopy.c
 Copyright: 2008 Kristian Høgsberg
+License: Expat
+
+Files: examples/screencopy-dmabuf.c
+Copyright: 2008 Kristian Høgsberg
+ 2020 Andri Yngvason
 License: Expat
 
 License: Expat
