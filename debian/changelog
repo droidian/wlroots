@@ -1,3 +1,13 @@
+wlroots (0.11.0-1) experimental; urgency=medium
+
+  * Upload to experimental
+  * Drop all patches - all are part of 0.11.0
+  * Adjust to soname change
+  * Update d/copyright
+  * Switch to dh 13
+
+ -- Guido Günther <agx@sigxcpu.org>  Mon, 20 Jul 2020 13:42:36 +0200
+
 wlroots (0.10.1-2) unstable; urgency=medium
 
   [ Vincent Bernat ]
