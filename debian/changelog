@@ -1,6 +1,8 @@
 wlroots (0.11.0-1) experimental; urgency=medium
 
   * Upload to experimental
+  * New upstream version 0.11.0
+    (Closes: #957953)
   * Drop all patches - all are part of 0.11.0
   * Adjust to soname change
   * Update d/copyright
