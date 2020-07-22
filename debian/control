@@ -4,6 +4,8 @@ Maintainer: Sway and related packages team <team+swaywm@tracker.debian.org>
 Uploaders: Guido Günther <agx@sigxcpu.org>, Birger Schacht <birger@rantanplan.org>
 Build-Depends:
  debhelper-compat (= 13),
+ libavformat-dev,
+ libavcodec-dev,
  libcap-dev,
  libdrm-dev (>= 2.4.95),
  libegl1-mesa-dev,
