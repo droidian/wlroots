@@ -148,7 +148,7 @@ add_project_arguments([
 	'-DLIBINPUT_MAJOR=' + libinput_ver[0],
 	'-DLIBINPUT_MINOR=' + libinput_ver[1],
 	'-DLIBINPUT_PATCH=' + libinput_ver[2],
-	'-I/usr/include/android-9.0',
+	'-I/usr/include/android',
 ], language: 'c')
 
 subdir('protocol')
