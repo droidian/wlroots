@@ -191,14 +191,16 @@ bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform, void *remote_display,
 		return false;
 	}
 
-	if (!check_egl_ext(client_exts_str, "EGL_EXT_platform_base")) {
-		wlr_log(WLR_ERROR, "EGL_EXT_platform_base not supported");
-		return false;
+	if (platform) {
+		if (!check_egl_ext(client_exts_str, "EGL_EXT_platform_base")) {
+			wlr_log(WLR_ERROR, "EGL_EXT_platform_base not supported");
+			return false;
+		}
+		load_egl_proc(&egl->procs.eglGetPlatformDisplayEXT,
+			"eglGetPlatformDisplayEXT");
+		load_egl_proc(&egl->procs.eglCreatePlatformWindowSurfaceEXT,
+			"eglCreatePlatformWindowSurfaceEXT");
 	}
-	load_egl_proc(&egl->procs.eglGetPlatformDisplayEXT,
-		"eglGetPlatformDisplayEXT");
-	load_egl_proc(&egl->procs.eglCreatePlatformWindowSurfaceEXT,
-		"eglCreatePlatformWindowSurfaceEXT");
 
 	if (check_egl_ext(client_exts_str, "EGL_KHR_debug")) {
 		load_egl_proc(&egl->procs.eglDebugMessageControlKHR,
