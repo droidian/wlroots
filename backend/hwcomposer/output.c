@@ -132,10 +132,17 @@ static void output_destroy(struct wlr_output *wlr_output) {
 	free(output);
 }
 
+static void output_rollback_render(struct wlr_output *wlr_output) {
+	struct wlr_hwcomposer_output *output =
+		(struct wlr_hwcomposer_output *)wlr_output;
+	wlr_egl_unset_current(&output->backend->egl);
+}
+
 static const struct wlr_output_impl output_impl = {
 	.destroy = output_destroy,
 	.attach_render = output_attach_render,
 	.commit = output_commit,
+	.rollback_render = output_rollback_render,
 };
 
 bool wlr_output_is_hwcomposer(struct wlr_output *wlr_output) {
