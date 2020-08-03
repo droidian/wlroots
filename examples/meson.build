@@ -2,7 +2,6 @@ threads = dependency('threads')
 wayland_cursor = dependency('wayland-cursor')
 libpng = dependency('libpng', required: false, disabler: true)
 # These versions correspond to ffmpeg 4.0
-libavutil = dependency('libavutil', version: '>=56.14.100', required: false, disabler: true)
 libavcodec = dependency('libavcodec', version: '>=58.18.100', required: false, disabler: true)
 libavformat = dependency('libavformat', version: '>=58.12.100', required: false, disabler: true)
 
@@ -11,11 +10,6 @@ if host_machine.system() == 'freebsd'
 	libepoll = dependency('epoll-shim')
 else
 	libepoll = dependency('', required: false)
-endif
-
-# Check if libavutil is found because of https://github.com/mesonbuild/meson/issues/6010
-if libavutil.found() and not cc.has_header('libavutil/hwcontext_drm.h', dependencies: libavutil)
-	libavutil = disabler()
 endif
 
 compositors = {
@@ -110,17 +104,6 @@ clients = {
 			'relative-pointer-unstable-v1',
 			'xdg-shell',
 		],
-	},
-	'dmabuf-capture': {
-		'src': 'dmabuf-capture.c',
-		'dep': [
-			libavcodec,
-			libavformat,
-			libavutil,
-			drm.partial_dependency(compile_args: true), # <drm_fourcc.h>
-			threads,
-		],
-		'proto': ['wlr-export-dmabuf-unstable-v1'],
 	},
 	'screencopy': {
 		'src': 'screencopy.c',
