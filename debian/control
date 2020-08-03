@@ -1,0 +1,92 @@
+Source: wlroots
+Priority: optional
+Maintainer: Sway and related packages team <team+swaywm@tracker.debian.org>
+Uploaders: Guido Günther <agx@sigxcpu.org>, Birger Schacht <birger@rantanplan.org>
+Build-Depends:
+ debhelper-compat (= 13),
+ libavformat-dev,
+ libavcodec-dev,
+ libcap-dev,
+ libdrm-dev (>= 2.4.95),
+ libegl1-mesa-dev,
+ libgbm-dev (>= 17.1.0),
+ libgles2-mesa-dev,
+ libinput-dev (>= 1.9.0),
+ libpixman-1-dev,
+ libpng-dev,
+ libsystemd-dev,
+ libwayland-dev (>= 1.16),
+ libxcb1-dev,
+ libxcb-composite0-dev,
+ libxcb-icccm4-dev,
+ libxcb-image0-dev,
+ libxcb-render0-dev,
+ libxcb-xfixes0-dev,
+ libxcb-xinput-dev,
+ libx11-xcb-dev,
+ libxkbcommon-dev,
+ meson (>= 0.51.2),
+ pkg-config,
+ wayland-protocols (>= 1.17),
+Standards-Version: 4.4.1
+Section: libs
+Homepage: https://github.com/swaywm/wlroots
+Vcs-Git: https://salsa.debian.org/swaywm-team/wlroots.git
+Vcs-Browser: https://salsa.debian.org/swaywm-team/wlroots
+Rules-Requires-Root: no
+
+Package: libwlroots-dev
+Section: libdevel
+Architecture: any
+Multi-Arch: same
+Depends:
+ ${misc:Depends},
+ libwlroots6 (= ${binary:Version}),
+ libcap-dev,
+ libdrm-dev,
+ libegl1-mesa-dev,
+ libgbm-dev (>= 17.1.0),
+ libgles2-mesa-dev,
+ libinput-dev (>= 1.7.0),
+ libpixman-1-dev,
+ libsystemd-dev,
+ libwayland-dev (>= 1.15),
+ libxcb1-dev,
+ libxcb-composite0-dev,
+ libxcb-icccm4-dev,
+ libxcb-image0-dev,
+ libxcb-render0-dev,
+ libxcb-xfixes0-dev,
+ libxcb-xinput-dev,
+ libxkbcommon-dev,
+ libx11-xcb-dev,
+ wayland-protocols (>= 1.15),
+Description: Modular wayland compositor library - development headers
+ wlroots is a set of pluggable, composable modules to build a Wayland
+ composior.
+ .
+ This package contains the development headers.
+
+Package: libwlroots6
+Architecture: any
+Multi-Arch: same
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+Description: Modular wayland compositor library - shared library
+ wlroots is a set of pluggable, composable modules to build a Wayland
+ composior.
+ .
+ This package contains the share library.
+
+Package: libwlroots-examples
+Architecture: any
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+Description: Modular wayland compositor library - binaries
+ wlroots is a set of pluggable, composable modules to build a Wayland
+ composior.
+ .
+ This package contains the reference compositor rootston and other
+ examples.

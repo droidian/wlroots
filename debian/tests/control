@@ -1,0 +1,3 @@
+Tests: build-test
+Depends: libwlroots-dev, build-essential, pkg-config
+Restrictions: allow-stderr, superficial
