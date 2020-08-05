@@ -82,7 +82,6 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 	static const EGLint config_attribs[] = {
 		EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
 		EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-		EGL_ALPHA_SIZE, 0,
 		EGL_RED_SIZE, 8,
 		EGL_GREEN_SIZE, 8,
 		EGL_BLUE_SIZE, 8,
