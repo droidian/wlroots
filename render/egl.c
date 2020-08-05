@@ -191,7 +191,7 @@ bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform, void *remote_display,
 		return false;
 	}
 
-	if (platform) {
+	if (platform != EGL_PLATFORM_ANDROID_KHR) {
 		if (!check_egl_ext(client_exts_str, "EGL_EXT_platform_base")) {
 			wlr_log(WLR_ERROR, "EGL_EXT_platform_base not supported");
 			return false;
@@ -221,7 +221,7 @@ bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform, void *remote_display,
 		goto error;
 	}
 
-	if (platform) {
+	if (platform != EGL_PLATFORM_ANDROID_KHR) {
 		egl->display = egl->procs.eglGetPlatformDisplayEXT(platform,
 				remote_display, NULL);
 	} else {

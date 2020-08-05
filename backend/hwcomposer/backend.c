@@ -79,7 +79,7 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 
 	hwcomposer_api_init(backend);
 
-	static const EGLint config_attribs[] = {
+	static EGLint config_attribs[] = {
 		EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
 		EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
 		EGL_RED_SIZE, 8,
@@ -96,8 +96,8 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 		create_renderer_func = wlr_renderer_autocreate;
 	}
 
-	backend->renderer = create_renderer_func(&backend->egl, 0,
-		NULL, (EGLint*)config_attribs, 0);
+	backend->renderer = create_renderer_func(&backend->egl, EGL_PLATFORM_ANDROID_KHR,
+		NULL, config_attribs, 0);
 
 	if (!backend->renderer) {
 		wlr_log(WLR_ERROR, "Failed to create renderer");
