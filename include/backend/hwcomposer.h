@@ -4,6 +4,8 @@
 #include <wlr/backend/hwcomposer.h>
 #include <wlr/backend/interface.h>
 
+#include <pthread.h>
+
 #include <hardware/hardware.h>
 #include <hardware/hwcomposer.h>
 
@@ -29,6 +31,10 @@ struct wlr_hwcomposer_backend {
 	uint32_t hwcVersion;
 	int hwcWidth;
 	int hwcHeight;
+	int hwcRefresh;
+	bool hwcHasVsync;
+	pthread_mutex_t hwcVsyncMutex;
+	pthread_cond_t hwcVsyncWaitCondition;
 
 #ifdef HWC_DEVICE_API_VERSION_2_0
 	hwc2_compat_device_t* hwc2Device;
@@ -50,6 +56,9 @@ struct wlr_hwcomposer_output {
 	int frame_delay; // ms
 };
 
+void enableVSync(struct wlr_hwcomposer_backend *hwc, bool enable);
+void waitVSync(struct wlr_hwcomposer_backend *hwc);
+void wakeVSync(struct wlr_hwcomposer_backend *hwc);
 bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc);
 #ifdef HWC_DEVICE_API_VERSION_2_0
 bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc);

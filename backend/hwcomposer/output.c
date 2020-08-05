@@ -18,9 +18,9 @@ static void output_present(void *user_data, struct ANativeWindow *window,
 		struct ANativeWindowBuffer *buffer)
 {
     struct wlr_hwcomposer_backend *hwc = (struct wlr_hwcomposer_backend *)user_data;
-
-    hwc_display_contents_1_t **contents = hwc->hwcContents;
-    hwc_layer_1_t *fblayer = hwc->fblayer;
+	waitVSync(hwc);
+	hwc_display_contents_1_t **contents = hwc->hwcContents;
+	hwc_layer_1_t *fblayer = hwc->fblayer;
     hwc_composer_device_1_t *hwcdevice = hwc->hwcDevicePtr;
 
     int oldretire = contents[0]->retireFenceFd;
@@ -186,7 +186,7 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend) {
 	backend->egl.display = output->egl_display;
 
 	output_set_custom_mode(wlr_output, backend->hwcWidth,
-		backend->hwcHeight, 0);
+		backend->hwcHeight, backend->hwcRefresh);
 	strncpy(wlr_output->make, "hwcomposer", sizeof(wlr_output->make));
 	strncpy(wlr_output->model, "hwcomposer", sizeof(wlr_output->model));
 	snprintf(wlr_output->name, sizeof(wlr_output->name), "HWCOMPOSER-%d",

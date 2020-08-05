@@ -12,6 +12,38 @@
 
 #include "backend/hwcomposer.h"
 
+void enableVSync(struct wlr_hwcomposer_backend *hwc, bool enable)
+{
+    if (hwc->hwcHasVsync == enable) {
+        return;
+    }
+    int result = 0;
+#if defined(HWC_DEVICE_API_VERSION_2_0)
+	if (hwc->hwcVersion == HWC_DEVICE_API_VERSION_2_0)
+		hwc2_compat_display_set_vsync_enabled(hwc->hwc2_primary_display, enable ? HWC2_VSYNC_ENABLE : HWC2_VSYNC_DISABLE);
+	else
+#endif
+		result = hwc->hwcDevicePtr->eventControl(hwc->hwcDevicePtr, 0, HWC_EVENT_VSYNC, enable ? 1 : 0);
+	hwc->hwcHasVsync = enable && (result == 0);
+}
+
+void waitVSync(struct wlr_hwcomposer_backend *hwc)
+{
+    if (!hwc->hwcHasVsync) {
+         return;
+    }
+	pthread_mutex_lock(&hwc->hwcVsyncMutex);
+	pthread_cond_wait(&hwc->hwcVsyncWaitCondition, &hwc->hwcVsyncMutex);
+	pthread_mutex_unlock(&hwc->hwcVsyncMutex);
+}
+
+void wakeVSync(struct wlr_hwcomposer_backend *hwc)
+{
+	pthread_mutex_lock(&hwc->hwcVsyncMutex);
+	pthread_cond_signal(&hwc->hwcVsyncWaitCondition);
+	pthread_mutex_unlock(&hwc->hwcVsyncMutex);
+}
+
 inline static uint32_t interpreted_version(hw_device_t *hwc_device)
 {
 	uint32_t version = hwc_device->version;
@@ -82,7 +114,11 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 	} else
 #endif
 		hwc->hwcVersion = interpreted_version(hwcDevice);
-
+	if (pthread_mutex_init(&hwc->hwcVsyncMutex, NULL) ||
+        pthread_cond_init(&hwc->hwcVsyncWaitCondition, NULL)) {
+		wlr_log(WLR_INFO, "Error creating rendering thread\n");
+		return false;
+	}
 #ifdef HWC_DEVICE_API_VERSION_2_0
 	if (hwc->hwcVersion == HWC_DEVICE_API_VERSION_2_0)
 		return hwcomposer2_api_init(hwc);
@@ -115,7 +151,7 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 	assert (err == 0);
 
 	int32_t attr_values[2];
-	uint32_t attributes[] = { HWC_DISPLAY_WIDTH, HWC_DISPLAY_HEIGHT, HWC_DISPLAY_NO_ATTRIBUTE };
+	uint32_t attributes[] = { HWC_DISPLAY_WIDTH, HWC_DISPLAY_HEIGHT, HWC_DISPLAY_VSYNC_PERIOD, HWC_DISPLAY_NO_ATTRIBUTE };
 
 	hwcDevicePtr->getDisplayAttributes(hwcDevicePtr, 0,
 			configs[0], attributes, attr_values);
@@ -123,6 +159,7 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 	wlr_log(WLR_INFO, "width: %i height: %i\n", attr_values[0], attr_values[1]);
 	hwc->hwcWidth = attr_values[0];
 	hwc->hwcHeight = attr_values[1];
+	hwc->hwcRefresh = (attr_values[2] == 0) ? 60000 : 10E11 / attr_values[2];
 
 	size_t size = sizeof(hwc_display_contents_1_t) + 2 * sizeof(hwc_layer_1_t);
 	hwc_display_contents_1_t *list = (hwc_display_contents_1_t *) malloc(size);

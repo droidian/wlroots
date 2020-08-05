@@ -24,6 +24,8 @@ typedef struct
 void hwc2_callback_vsync(HWC2EventListener* listener, int32_t sequenceId,
                          hwc2_display_t display, int64_t timestamp)
 {
+    struct wlr_hwcomposer_backend *hwc = ((HwcProcs_v20 *)listener)->hwc;
+    wakeVSync(hwc);
 }
 
 void hwc2_callback_hotplug(HWC2EventListener* listener, int32_t sequenceId,
@@ -78,9 +80,10 @@ bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc)
 
 	hwc->hwcWidth = config->width;
 	hwc->hwcHeight = config->height;
-	wlr_log(WLR_INFO, "width: %i height: %i\n", config->width, config->height);
+    hwc->hwcRefresh = (config->vsyncPeriod == 0) ? 60000 : 10E11 / config->vsyncPeriod;
+    wlr_log(WLR_INFO, "width: %i height: %i Refresh: %i\n", config->width, config->height, hwc->hwcRefresh);
 
-	hwc2_compat_layer_t* layer = hwc->hwc2_primary_layer =
+    hwc2_compat_layer_t* layer = hwc->hwc2_primary_layer =
         hwc2_compat_display_create_layer(hwc->hwc2_primary_display);
 
     hwc2_compat_layer_set_composition_type(layer, HWC2_COMPOSITION_CLIENT);
@@ -100,7 +103,8 @@ void hwc_present_hwcomposer2(void *user_data, struct ANativeWindow *window,
 								struct ANativeWindowBuffer *buffer)
 {
 	struct wlr_hwcomposer_backend *hwc = (struct wlr_hwcomposer_backend *)user_data;
-	static int lastPresentFence = -1;
+    waitVSync(hwc);
+    static int lastPresentFence = -1;
 
 	uint32_t numTypes = 0;
     uint32_t numRequests = 0;
@@ -141,6 +145,7 @@ void hwc_present_hwcomposer2(void *user_data, struct ANativeWindow *window,
                                           acquireFenceFd,
                                           HAL_DATASPACE_UNKNOWN);
 
+    enableVSync(hwc, true);
     int presentFence = -1;
     hwc2_compat_display_present(hwcDisplay, &presentFence);
 
