@@ -24,6 +24,7 @@ struct wlr_hwcomposer_backend {
 	struct wl_list input_devices;
 	struct wl_listener display_destroy;
 	bool started;
+	bool outputBlank;
 
 	hwc_composer_device_1_t *hwcDevicePtr;
 	hwc_display_contents_1_t **hwcContents;
@@ -59,6 +60,7 @@ struct wlr_hwcomposer_output {
 void enableVSync(struct wlr_hwcomposer_backend *hwc, bool enable);
 void waitVSync(struct wlr_hwcomposer_backend *hwc);
 void wakeVSync(struct wlr_hwcomposer_backend *hwc);
+void toggleBlankOutput(struct wlr_hwcomposer_backend *hwc);
 bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc);
 #ifdef HWC_DEVICE_API_VERSION_2_0
 bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc);

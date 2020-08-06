@@ -75,6 +75,12 @@ static bool output_commit(struct wlr_output *wlr_output) {
 	struct wlr_hwcomposer_output *output =
 		(struct wlr_hwcomposer_output *)wlr_output;
 
+	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_ENABLED)
+		toggleBlankOutput(output->backend);
+
+	if (output->backend->outputBlank)
+		return false;
+
 	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_MODE) {
 		if (!output_set_custom_mode(wlr_output,
 				wlr_output->pending.custom_mode.width,

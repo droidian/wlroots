@@ -44,6 +44,23 @@ void wakeVSync(struct wlr_hwcomposer_backend *hwc)
 	pthread_mutex_unlock(&hwc->hwcVsyncMutex);
 }
 
+void toggleBlankOutput(struct wlr_hwcomposer_backend *hwc)
+{
+	hwc->outputBlank = !hwc->outputBlank;
+	enableVSync(hwc, hwc->outputBlank);
+#ifdef HWC_DEVICE_API_VERSION_2_0
+	if (hwc->hwcVersion == HWC_DEVICE_API_VERSION_2_0)
+		hwc2_compat_display_set_power_mode(hwc->hwc2_primary_display, hwc->outputBlank ? HWC2_POWER_MODE_OFF : HWC2_POWER_MODE_ON);
+	else
+#endif
+#if defined(HWC_DEVICE_API_VERSION_1_4) || defined(HWC_DEVICE_API_VERSION_1_5)
+	if (hwc->hwcVersion > HWC_DEVICE_API_VERSION_1_3)
+		hwc->hwcDevicePtr->setPowerMode(hwc->hwcDevicePtr, 0, hwc->outputBlank ? HWC_POWER_MODE_OFF : HWC_POWER_MODE_NORMAL);
+	else
+#endif
+		hwc->hwcDevicePtr->blank(hwc->hwcDevicePtr, 0, hwc->outputBlank ? 1 : 0);
+}
+
 inline static uint32_t interpreted_version(hw_device_t *hwc_device)
 {
 	uint32_t version = hwc_device->version;
@@ -118,6 +135,7 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 		wlr_log(WLR_INFO, "Error creating rendering thread\n");
 		return false;
 	}
+	hwc->outputBlank = false;
 #ifdef HWC_DEVICE_API_VERSION_2_0
 	if (hwc->hwcVersion == HWC_DEVICE_API_VERSION_2_0) {
 		err = hwcomposer2_api_init(hwc);
