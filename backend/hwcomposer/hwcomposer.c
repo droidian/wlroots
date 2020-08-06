@@ -119,26 +119,19 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 		return false;
 	}
 #ifdef HWC_DEVICE_API_VERSION_2_0
-	if (hwc->hwcVersion == HWC_DEVICE_API_VERSION_2_0)
-		return hwcomposer2_api_init(hwc);
+	if (hwc->hwcVersion == HWC_DEVICE_API_VERSION_2_0) {
+		err = hwcomposer2_api_init(hwc);
+		hwc2_compat_display_set_power_mode(hwc->hwc2_primary_display, HWC2_POWER_MODE_ON);
+		return err;
+	}
 #endif
 
 	hwc_composer_device_1_t *hwcDevicePtr = (hwc_composer_device_1_t*) hwcDevice;
 	wlr_log(WLR_INFO, "HWC Version=%x\n", hwc->hwcVersion);
 
-#ifdef HWC_DEVICE_API_VERSION_1_4
-	if (hwc->hwcVersion == HWC_DEVICE_API_VERSION_1_4) {
+#ifdef defined(HWC_DEVICE_API_VERSION_1_4) || defined(HWC_DEVICE_API_VERSION_1_5)
+	if (hwc->hwcVersion > HWC_DEVICE_API_VERSION_1_3) {
 		hwcDevicePtr->setPowerMode(hwcDevicePtr, 0, HWC_POWER_MODE_NORMAL);
-	} else
-#endif
-#ifdef HWC_DEVICE_API_VERSION_1_5
-	if (hwc->hwcVersion == HWC_DEVICE_API_VERSION_1_5) {
-		hwcDevicePtr->setPowerMode(hwcDevicePtr, 0, HWC_POWER_MODE_NORMAL);
-	} else
-#endif
-#ifdef HWC_DEVICE_API_VERSION_2_0
-	if (hwc->hwcVersion == HWC_DEVICE_API_VERSION_2_0) {
-		hwc2_compat_display_set_power_mode(hwc->hwc2_primary_display, HWC2_POWER_MODE_ON);
 	} else
 #endif
 		hwcDevicePtr->blank(hwcDevicePtr, 0, 0);
