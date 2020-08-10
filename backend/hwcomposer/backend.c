@@ -97,7 +97,7 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 	}
 
 	backend->renderer = create_renderer_func(&backend->egl, EGL_PLATFORM_ANDROID_KHR,
-		NULL, config_attribs, 0);
+		NULL, config_attribs, HAL_PIXEL_FORMAT_RGBA_8888);
 
 	if (!backend->renderer) {
 		wlr_log(WLR_ERROR, "Failed to create renderer");
