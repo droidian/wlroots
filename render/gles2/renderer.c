@@ -297,6 +297,9 @@ static enum wl_shm_format gles2_preferred_read_format(
 	eglGetConfigAttrib(renderer->egl->display, renderer->egl->config,
 		EGL_ALPHA_SIZE, &alpha_size);
 
+	if (gl_format == GL_BGRA_EXT && !renderer->exts.read_format_bgra_ext) {
+		gl_format = GL_RGBA;
+	}
 	const struct wlr_gles2_pixel_format *fmt =
 		get_gles2_format_from_gl(gl_format, gl_type, alpha_size > 0);
 	if (fmt != NULL) {
