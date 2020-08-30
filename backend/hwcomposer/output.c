@@ -111,7 +111,7 @@ static bool output_commit(struct wlr_output *wlr_output) {
 		wlr_output_send_present(wlr_output, NULL);
 	}
 
-	wlr_egl_make_current(&output->backend->egl, EGL_NO_SURFACE, NULL);
+	wlr_egl_unset_current(&output->backend->egl);
 
 	return true;
 }
