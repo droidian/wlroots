@@ -1,3 +1,11 @@
+wlroots (0.11.0-3) unstable; urgency=medium
+
+  * [c95d2e9] output-management-v1: send complete head state on enable change.
+    Fixes a phosh crash when the compositor fails to send updated
+    state.
+
+ -- Guido Günther <agx@sigxcpu.org>  Mon, 12 Oct 2020 12:40:11 +0200
+
 wlroots (0.11.0-2) unstable; urgency=medium
 
   * Upload to unstable
