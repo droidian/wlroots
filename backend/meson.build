@@ -6,7 +6,6 @@ subdir('libinput')
 subdir('multi')
 subdir('noop')
 subdir('wayland')
-subdir('hwcomposer')
 subdir('x11')
 
 subdir('session')

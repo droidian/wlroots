@@ -42,16 +42,6 @@ add_project_arguments(cc.get_supported_arguments([
 	'-Wno-unused-parameter',
 ]), language: 'c')
 
-add_project_link_arguments(
-       [
-               '-lhardware',
-               '-lsync',
-               '-lhybris-hwcomposerwindow',
-               '-lhwc2',
-       ],
-       language: 'c',
-)
-
 
 # Compute the relative path used by compiler invocations.
 source_root = meson.current_source_dir().split('/')
@@ -148,7 +138,6 @@ add_project_arguments([
 	'-DLIBINPUT_MAJOR=' + libinput_ver[0],
 	'-DLIBINPUT_MINOR=' + libinput_ver[1],
 	'-DLIBINPUT_PATCH=' + libinput_ver[2],
-	'-I/usr/include/android',
 ], language: 'c')
 
 subdir('protocol')
@@ -191,7 +180,7 @@ summary({
 	'xwayland': conf_data.get('WLR_HAS_XWAYLAND', 0),
 	'x11_backend': conf_data.get('WLR_HAS_X11_BACKEND', 0),
 	'xcb-icccm': conf_data.get('WLR_HAS_XCB_ICCCM', 0),
-	'xcb-errors': conf_data.get('WLR_HAS_XCB_ERRORS', 0),
+	'xcb-errors': conf_data.get('WLR_HAS_XCB_ERRORS', 1),
 })
 
 if get_option('examples')

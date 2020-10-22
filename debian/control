@@ -28,9 +28,6 @@ Build-Depends:
  meson (>= 0.51.2),
  pkg-config,
  wayland-protocols (>= 1.17),
- android-headers,
- libhybris-dev,
- libhardware-dev,
 Standards-Version: 4.4.1
 Section: libs
 Homepage: https://github.com/swaywm/wlroots
@@ -64,9 +61,6 @@ Depends:
  libxkbcommon-dev,
  libx11-xcb-dev,
  wayland-protocols (>= 1.15),
- android-headers,
- libhybris-dev,
- libhardware-dev,
 Description: Modular wayland compositor library - development headers
  wlroots is a set of pluggable, composable modules to build a Wayland
  composior.

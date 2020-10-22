@@ -8,7 +8,6 @@
 #include <wayland-server-core.h>
 #include <wlr/backend/drm.h>
 #include <wlr/backend/headless.h>
-#include <wlr/backend/hwcomposer.h>
 #include <wlr/backend/interface.h>
 #include <wlr/backend/libinput.h>
 #include <wlr/backend/multi.h>
@@ -149,21 +148,6 @@ static struct wlr_backend *attempt_noop_backend(struct wl_display *display) {
 	return backend;
 }
 
-static struct wlr_backend *attempt_hwcomposer_backend(
-		struct wl_display *display,	wlr_renderer_create_func_t create_renderer_func) {
-	struct wlr_backend *backend = wlr_hwcomposer_backend_create(display, create_renderer_func);
-	if (backend == NULL) {
-		return NULL;
-	}
-
-	size_t outputs = parse_outputs_env("WLR_HWC_OUTPUTS");
-	for (size_t i = 0; i < outputs; ++i) {
-		wlr_hwcomposer_add_output(backend);
-	}
-
-	return backend;
-}
-
 static struct wlr_backend *attempt_drm_backend(struct wl_display *display,
 		struct wlr_backend *backend, struct wlr_session *session,
 		wlr_renderer_create_func_t create_renderer_func) {
@@ -218,8 +202,6 @@ static struct wlr_backend *attempt_backend_by_name(struct wl_display *display,
 		} else {
 			return attempt_drm_backend(display, backend, *session, create_renderer_func);
 		}
-	} else if (strcmp(name, "hwcomposer") == 0) {
-		return attempt_hwcomposer_backend(display, create_renderer_func);
 	}
 
 	wlr_log(WLR_ERROR, "unrecognized backend '%s'", name);
@@ -315,16 +297,6 @@ struct wlr_backend *wlr_backend_autocreate(struct wl_display *display,
 		return NULL;
 	}
 	wlr_multi_backend_add(backend, libinput);
-
-	const char *egl_platform = getenv("EGL_PLATFORM");
-	if (egl_platform) {
-		struct wlr_backend *hwc_backend =
-			attempt_hwcomposer_backend(display, create_renderer_func);
-		if (hwc_backend) {
-			wlr_multi_backend_add(backend, hwc_backend);
-			return backend;
-		}
-	}
 
 	struct wlr_backend *primary_drm = attempt_drm_backend(display, backend,
 		multi->session, create_renderer_func);
