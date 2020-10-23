@@ -75,8 +75,10 @@ static bool output_commit(struct wlr_output *wlr_output) {
 	struct wlr_hwcomposer_output *output =
 		(struct wlr_hwcomposer_output *)wlr_output;
 
-	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_ENABLED)
+	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_ENABLED) {
 		toggleBlankOutput(output->backend);
+		wlr_output_update_enabled(wlr_output, !output->backend->outputBlank);
+	}
 
 	if (output->backend->outputBlank)
 		return false;
