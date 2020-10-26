@@ -65,7 +65,7 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 		return false;
 	}
 
-	output->frame_delay = 1000000 / refresh;
+	output->frame_delay = 500000 / refresh;
 
 	wlr_output_update_custom_mode(&output->wlr_output, width, height, refresh);
 	return true;
