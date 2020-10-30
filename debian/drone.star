@@ -17,6 +17,7 @@ BUILD_ON = [
 # Note that builds with EXTRA_REPOS won't start on production or staging.
 EXTRA_REPOS = [
 	"deb http://droidian-libhybris.repo.droidian.org/bullseye-multiwindow/ bullseye main",
+	"deb http://droidian-libinput.repo.droidian.org/bullseye-keypad-slide/ bullseye main",
 ]
 
 # Host architecture. This can be used to instruct the buildd to
