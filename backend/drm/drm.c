@@ -27,6 +27,7 @@
 #include "backend/drm/drm.h"
 #include "backend/drm/iface.h"
 #include "backend/drm/util.h"
+#include "render/swapchain.h"
 #include "util/signal.h"
 
 bool check_drm_features(struct wlr_drm_backend *drm) {
@@ -331,6 +332,15 @@ static bool drm_connector_attach_render(struct wlr_output *output,
 	return drm_surface_make_current(&conn->crtc->primary->surf, buffer_age);
 }
 
+static void drm_plane_set_committed(struct wlr_drm_plane *plane) {
+	drm_fb_move(&plane->queued_fb, &plane->pending_fb);
+
+	struct wlr_buffer *queued = plane->queued_fb.wlr_buf;
+	if (queued != NULL) {
+		wlr_swapchain_set_buffer_submitted(plane->surf.swapchain, queued);
+	}
+}
+
 static bool drm_crtc_commit(struct wlr_drm_connector *conn, uint32_t flags) {
 	struct wlr_drm_backend *drm =
 		get_drm_backend_from_backend(conn->output.backend);
@@ -338,9 +348,9 @@ static bool drm_crtc_commit(struct wlr_drm_connector *conn, uint32_t flags) {
 	bool ok = drm->iface->crtc_commit(drm, conn, flags);
 	if (ok && !(flags & DRM_MODE_ATOMIC_TEST_ONLY)) {
 		memcpy(&crtc->current, &crtc->pending, sizeof(struct wlr_drm_crtc_state));
-		drm_fb_move(&crtc->primary->queued_fb, &crtc->primary->pending_fb);
+		drm_plane_set_committed(crtc->primary);
 		if (crtc->cursor != NULL) {
-			drm_fb_move(&crtc->cursor->queued_fb, &crtc->cursor->pending_fb);
+			drm_plane_set_committed(crtc->cursor);
 		}
 	} else {
 		memcpy(&crtc->pending, &crtc->current, sizeof(struct wlr_drm_crtc_state));
@@ -367,12 +377,18 @@ static bool drm_crtc_page_flip(struct wlr_drm_connector *conn) {
 	}
 
 	assert(crtc->pending.active);
-	assert(plane_get_next_fb(crtc->primary)->type != WLR_DRM_FB_TYPE_NONE);
+	assert(plane_get_next_fb(crtc->primary)->bo);
 	if (!drm_crtc_commit(conn, DRM_MODE_PAGE_FLIP_EVENT)) {
 		return false;
 	}
 
 	conn->pageflip_pending = true;
+
+	// wlr_output's API guarantees that submitting a buffer will schedule a
+	// frame event. However the DRM backend will also schedule a frame event
+	// when performing a modeset. Set frame_pending to true so that
+	// wlr_output_schedule_frame doesn't trigger a synthetic frame event.
+	conn->output.frame_pending = true;
 	return true;
 }
 
@@ -587,8 +603,8 @@ static bool drm_connector_commit(struct wlr_output *output) {
 }
 
 static void drm_connector_rollback_render(struct wlr_output *output) {
-	struct wlr_drm_backend *drm = get_drm_backend_from_backend(output->backend);
-	wlr_egl_unset_current(&drm->renderer.egl);
+	struct wlr_drm_connector *conn = get_drm_connector_from_output(output);
+	return drm_surface_unset_current(&conn->crtc->primary->surf);
 }
 
 size_t drm_crtc_get_gamma_lut_size(struct wlr_drm_backend *drm,
@@ -633,20 +649,22 @@ static bool drm_connector_export_dmabuf(struct wlr_output *output,
 		return false;
 	}
 
-	struct wlr_drm_plane *plane = crtc->primary;
-
-	if (plane->current_fb.type == WLR_DRM_FB_TYPE_NONE) {
+	struct wlr_drm_fb *fb = &crtc->primary->queued_fb;
+	if (fb->bo == NULL) {
+		fb = &crtc->primary->current_fb;
+	}
+	if (fb->bo == NULL) {
 		return false;
 	}
 
-	return export_drm_bo(plane->current_fb.bo, attribs);
+	return export_drm_bo(fb->bo, attribs);
 }
 
 struct wlr_drm_fb *plane_get_next_fb(struct wlr_drm_plane *plane) {
-	if (plane->pending_fb.type != WLR_DRM_FB_TYPE_NONE) {
+	if (plane->pending_fb.bo) {
 		return &plane->pending_fb;
 	}
-	if (plane->queued_fb.type != WLR_DRM_FB_TYPE_NONE) {
+	if (plane->queued_fb.bo) {
 		return &plane->queued_fb;
 	}
 	return &plane->current_fb;
@@ -662,8 +680,10 @@ static bool drm_connector_pageflip_renderer(struct wlr_drm_connector *conn) {
 
 	// drm_crtc_page_flip expects a FB to be available
 	struct wlr_drm_plane *plane = crtc->primary;
-	if (plane_get_next_fb(plane)->type == WLR_DRM_FB_TYPE_NONE) {
-		drm_surface_render_black_frame(&plane->surf);
+	if (!plane_get_next_fb(plane)->bo) {
+		if (!drm_surface_render_black_frame(&plane->surf)) {
+			return false;
+		}
 		if (!drm_fb_lock_surface(&plane->pending_fb, &plane->surf)) {
 			return false;
 		}
@@ -800,7 +820,7 @@ bool drm_connector_set_mode(struct wlr_drm_connector *conn,
 		return false;
 	}
 
-	wlr_log(WLR_INFO, "Modesetting '%s' with '%ux%u@%u mHz'",
+	wlr_log(WLR_INFO, "Modesetting '%s' with '%" PRId32 "x%" PRId32 "@%" PRId32 "mHz'",
 		conn->output.name, wlr_mode->width, wlr_mode->height,
 		wlr_mode->refresh);
 
@@ -875,7 +895,7 @@ static bool drm_connector_set_cursor(struct wlr_output *output,
 		return false;
 	}
 
-	if (!plane->surf.gbm) {
+	if (!plane->surf.swapchain) {
 		int ret;
 		uint64_t w, h;
 		ret = drmGetCap(drm->fd, DRM_CAP_CURSOR_WIDTH, &w);
@@ -1398,7 +1418,7 @@ void scan_drm_connectors(struct wlr_drm_backend *drm) {
 			bool is_mst = false;
 			char *path = get_drm_prop_blob(drm->fd, wlr_conn->id,
 				wlr_conn->props.path, &path_len);
-			if (path_len > 4 && path && strncmp(path, "mst:", 4) == 0) {
+			if (path && path_len > 4 && strncmp(path, "mst:", 4) == 0) {
 				is_mst = true;
 			}
 			free(path);
@@ -1489,11 +1509,10 @@ static void page_flip_handler(int fd, unsigned seq,
 	}
 
 	struct wlr_drm_plane *plane = conn->crtc->primary;
-	if (plane->queued_fb.type != WLR_DRM_FB_TYPE_NONE) {
+	if (plane->queued_fb.bo) {
 		drm_fb_move(&plane->current_fb, &plane->queued_fb);
 	}
-	if (conn->crtc->cursor &&
-			conn->crtc->cursor->queued_fb.type != WLR_DRM_FB_TYPE_NONE) {
+	if (conn->crtc->cursor && conn->crtc->cursor->queued_fb.bo) {
 		drm_fb_move(&conn->crtc->cursor->current_fb,
 			&conn->crtc->cursor->queued_fb);
 	}
@@ -1504,7 +1523,8 @@ static void page_flip_handler(int fd, unsigned seq,
 	 * data between the GPUs, even if we were using the direct scanout
 	 * interface.
 	 */
-	if (!drm->parent && plane->current_fb.type == WLR_DRM_FB_TYPE_WLR_BUFFER) {
+	if (!drm->parent && plane->current_fb.wlr_buf &&
+			wlr_client_buffer_get(plane->current_fb.wlr_buf)) {
 		present_flags |= WLR_OUTPUT_PRESENT_ZERO_COPY;
 	}
 
@@ -1523,7 +1543,7 @@ static void page_flip_handler(int fd, unsigned seq,
 	};
 	wlr_output_send_present(&conn->output, &present_event);
 
-	if (drm->session->active) {
+	if (drm->session->active && conn->output.enabled) {
 		wlr_output_send_frame(&conn->output);
 	}
 }

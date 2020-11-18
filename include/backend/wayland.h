@@ -12,6 +12,7 @@
 #include <wlr/render/egl.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_box.h>
+#include <wlr/types/wlr_pointer.h>
 #include <wlr/render/drm_format_set.h>
 
 struct wlr_wl_backend {
@@ -38,12 +39,8 @@ struct wlr_wl_backend {
 	struct wp_presentation *presentation;
 	struct zwp_linux_dmabuf_v1 *zwp_linux_dmabuf_v1;
 	struct zwp_relative_pointer_manager_v1 *zwp_relative_pointer_manager_v1;
-	struct wl_seat *seat;
-	struct wl_pointer *pointer;
-	struct wl_keyboard *keyboard;
-	struct wlr_wl_pointer *current_pointer;
+	struct wl_list seats; // wlr_wl_seat.link
 	struct zwp_tablet_manager_v2 *tablet_manager;
-	char *seat_name;
 	struct wlr_drm_format_set linux_dmabuf_v1_formats;
 };
 
@@ -77,6 +74,7 @@ struct wlr_wl_output {
 	uint32_t enter_serial;
 
 	struct {
+		struct wlr_wl_pointer *pointer;
 		struct wl_surface *surface;
 		struct wl_egl_window *egl_window;
 		int32_t hotspot_x, hotspot_y;
@@ -89,6 +87,7 @@ struct wlr_wl_input_device {
 	uint32_t fingers;
 
 	struct wlr_wl_backend *backend;
+	struct wlr_wl_seat *seat;
 	void *resource;
 };
 
@@ -107,18 +106,34 @@ struct wlr_wl_pointer {
 	struct wl_listener output_destroy;
 };
 
+struct wlr_wl_seat {
+	struct wl_seat *wl_seat;
+
+	struct wl_list link; // wlr_wl_backend.seats
+	char *name;
+	struct wl_touch *touch;
+	struct wl_pointer *pointer;
+	struct wl_keyboard *keyboard;
+
+	struct wlr_wl_backend *backend;
+	struct wlr_wl_pointer *active_pointer;
+};
+
 struct wlr_wl_backend *get_wl_backend_from_backend(struct wlr_backend *backend);
 void update_wl_output_cursor(struct wlr_wl_output *output);
 struct wlr_wl_pointer *pointer_get_wl(struct wlr_pointer *wlr_pointer);
-void create_wl_pointer(struct wl_pointer *wl_pointer, struct wlr_wl_output *output);
-void create_wl_keyboard(struct wl_keyboard *wl_keyboard, struct wlr_wl_backend *wl);
+void create_wl_pointer(struct wlr_wl_seat *seat, struct wlr_wl_output *output);
+void create_wl_keyboard(struct wlr_wl_seat *seat);
+void create_wl_touch(struct wlr_wl_seat *seat);
 struct wlr_wl_input_device *create_wl_input_device(
-	struct wlr_wl_backend *backend, enum wlr_input_device_type type);
+	struct wlr_wl_seat *seat, enum wlr_input_device_type type);
+bool create_wl_seat(struct wl_seat *wl_seat, struct wlr_wl_backend *wl);
+void destroy_wl_seats(struct wlr_wl_backend *wl);
 
 extern const struct wl_seat_listener seat_listener;
 
 struct wlr_wl_tablet_seat *wl_add_tablet_seat(
 		struct zwp_tablet_manager_v2 *manager,
-		struct wl_seat *seat, struct wlr_wl_backend *backend);
+		struct wlr_wl_seat *seat);
 
 #endif

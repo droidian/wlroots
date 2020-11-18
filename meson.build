@@ -1,7 +1,7 @@
 project(
 	'wlroots',
 	'c',
-	version: '0.11.0',
+	version: '0.12.0',
 	license: 'MIT',
 	meson_version: '>=0.54.0',
 	default_options: [
@@ -15,7 +15,7 @@ project(
 # necessary for bugfix releases. Increasing soversion is required because
 # wlroots never guarantees ABI stability -- only API stability is guaranteed
 # between minor releases.
-soversion = 6
+soversion = 7
 
 add_project_arguments([
 	'-DWLR_USE_UNSTABLE',
@@ -93,6 +93,7 @@ endif
 conf_data = configuration_data()
 conf_data.set10('WLR_HAS_SYSTEMD', false)
 conf_data.set10('WLR_HAS_ELOGIND', false)
+conf_data.set10('WLR_HAS_LIBSEAT', false)
 conf_data.set10('WLR_HAS_X11_BACKEND', false)
 conf_data.set10('WLR_HAS_XWAYLAND', false)
 conf_data.set10('WLR_HAS_XCB_ERRORS', false)
@@ -114,7 +115,7 @@ egl = dependency('egl')
 glesv2 = dependency('glesv2')
 drm = dependency('libdrm', version: '>=2.4.95')
 gbm = dependency('gbm', version: '>=17.1.0')
-libinput = dependency('libinput', version: '>=1.9.0')
+libinput = dependency('libinput', version: '>=1.14.0')
 xkbcommon = dependency('xkbcommon')
 udev = dependency('libudev')
 pixman = dependency('pixman-1')
@@ -186,13 +187,14 @@ wlroots = declare_dependency(
 meson.override_dependency('wlroots', wlroots)
 
 summary({
-	'systemd': conf_data.get('WLR_HAS_SYSTEMD', 0),
-	'elogind': conf_data.get('WLR_HAS_ELOGIND', 0),
-	'xwayland': conf_data.get('WLR_HAS_XWAYLAND', 0),
-	'x11_backend': conf_data.get('WLR_HAS_X11_BACKEND', 0),
-	'xcb-icccm': conf_data.get('WLR_HAS_XCB_ICCCM', 0),
-	'xcb-errors': conf_data.get('WLR_HAS_XCB_ERRORS', 0),
-})
+	'systemd': conf_data.get('WLR_HAS_SYSTEMD', 0) == 1,
+	'elogind': conf_data.get('WLR_HAS_ELOGIND', 0) == 1,
+	'libseat': conf_data.get('WLR_HAS_LIBSEAT', 0) == 1,
+	'xwayland': conf_data.get('WLR_HAS_XWAYLAND', 0) == 1,
+	'x11_backend': conf_data.get('WLR_HAS_X11_BACKEND', 0) == 1,
+	'xcb-icccm': conf_data.get('WLR_HAS_XCB_ICCCM', 0) == 1,
+	'xcb-errors': conf_data.get('WLR_HAS_XCB_ERRORS', 0) == 1,
+}, bool_yn: true)
 
 if get_option('examples')
 	subdir('examples')

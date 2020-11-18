@@ -21,6 +21,7 @@ enum wlr_renderer_read_pixels_flags {
 
 struct wlr_renderer_impl;
 struct wlr_drm_format_set;
+struct wlr_buffer;
 
 struct wlr_renderer {
 	const struct wlr_renderer_impl *impl;
@@ -35,7 +36,7 @@ struct wlr_renderer {
 struct wlr_renderer *wlr_renderer_autocreate(struct wlr_egl *egl, EGLenum platform,
 	void *remote_display, EGLint *config_attribs, EGLint visual_id);
 
-void wlr_renderer_begin(struct wlr_renderer *r, int width, int height);
+void wlr_renderer_begin(struct wlr_renderer *r, uint32_t width, uint32_t height);
 void wlr_renderer_end(struct wlr_renderer *r);
 void wlr_renderer_clear(struct wlr_renderer *r, const float color[static 4]);
 /**
@@ -129,6 +130,13 @@ bool wlr_renderer_format_supported(struct wlr_renderer *r,
  */
 bool wlr_renderer_init_wl_display(struct wlr_renderer *r,
 	struct wl_display *wl_display);
+
+/**
+ * Obtains the FD of the DRM device used for rendering, or -1 if unavailable.
+ *
+ * The caller doesn't have ownership of the FD, it must not close it.
+ */
+int wlr_renderer_get_drm_fd(struct wlr_renderer *r);
 
 /**
  * Destroys this wlr_renderer. Textures must be destroyed separately.

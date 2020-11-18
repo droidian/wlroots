@@ -15,6 +15,9 @@
 #ifndef EGL_NO_X11
 #define EGL_NO_X11
 #endif
+#ifndef EGL_NO_PLATFORM_SPECIFIC_TYPES
+#define EGL_NO_PLATFORM_SPECIFIC_TYPES
+#endif
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -27,6 +30,8 @@
 #include <wlr/render/dmabuf.h>
 
 struct wlr_renderer_impl {
+	bool (*bind_buffer)(struct wlr_renderer *renderer,
+		struct wlr_buffer *buffer);
 	void (*begin)(struct wlr_renderer *renderer, uint32_t width,
 		uint32_t height);
 	void (*end)(struct wlr_renderer *renderer);
@@ -67,6 +72,7 @@ struct wlr_renderer_impl {
 	bool (*blit_dmabuf)(struct wlr_renderer *renderer,
 		struct wlr_dmabuf_attributes *dst,
 		struct wlr_dmabuf_attributes *src);
+	int (*get_drm_fd)(struct wlr_renderer *renderer);
 };
 
 void wlr_renderer_init(struct wlr_renderer *renderer,

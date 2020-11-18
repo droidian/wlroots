@@ -7,6 +7,7 @@
 #include <wlr/types/wlr_matrix.h>
 #include <wlr/util/log.h>
 #include "util/signal.h"
+#include "render/wlr_renderer.h"
 
 void wlr_renderer_init(struct wlr_renderer *renderer,
 		const struct wlr_renderer_impl *impl) {
@@ -37,7 +38,16 @@ void wlr_renderer_destroy(struct wlr_renderer *r) {
 	}
 }
 
-void wlr_renderer_begin(struct wlr_renderer *r, int width, int height) {
+bool wlr_renderer_bind_buffer(struct wlr_renderer *r,
+		struct wlr_buffer *buffer) {
+	assert(!r->rendering);
+	if (!r->impl->bind_buffer) {
+		return false;
+	}
+	return r->impl->bind_buffer(r, buffer);
+}
+
+void wlr_renderer_begin(struct wlr_renderer *r, uint32_t width, uint32_t height) {
 	assert(!r->rendering);
 
 	r->impl->begin(r, width, height);
@@ -99,6 +109,9 @@ bool wlr_render_subtexture_with_matrix(struct wlr_renderer *r,
 
 void wlr_render_rect(struct wlr_renderer *r, const struct wlr_box *box,
 		const float color[static 4], const float projection[static 9]) {
+	if (box->width == 0 || box->height == 0) {
+		return;
+	}
 	assert(box->width > 0 && box->height > 0);
 	float matrix[9];
 	wlr_matrix_project_box(matrix, box, WL_OUTPUT_TRANSFORM_NORMAL, 0,
@@ -115,6 +128,9 @@ void wlr_render_quad_with_matrix(struct wlr_renderer *r,
 
 void wlr_render_ellipse(struct wlr_renderer *r, const struct wlr_box *box,
 		const float color[static 4], const float projection[static 9]) {
+	if (box->width == 0 || box->height == 0) {
+		return;
+	}
 	assert(box->width > 0 && box->height > 0);
 	float matrix[9];
 	wlr_matrix_project_box(matrix, box, WL_OUTPUT_TRANSFORM_NORMAL, 0,
@@ -252,4 +268,11 @@ struct wlr_renderer *wlr_renderer_autocreate(struct wlr_egl *egl,
 	}
 
 	return renderer;
+}
+
+int wlr_renderer_get_drm_fd(struct wlr_renderer *r) {
+	if (!r->impl->get_drm_fd) {
+		return -1;
+	}
+	return r->impl->get_drm_fd(r);
 }
