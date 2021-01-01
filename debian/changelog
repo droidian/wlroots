@@ -1,3 +1,17 @@
+wlroots (0.12.0-1) experimental; urgency=medium
+
+  * Upload to experimental
+  * [45e00a5] Drop patches. All applied upstream
+  * [ee0f2eb] Revert "layer-shell: error on 0 dimension without anchors"
+    Undo this until phosh has a fixed release.
+  * [6866955] d/gbp.conf: Use xz when generating tarballs
+  * [788b999] debian: Adjust to soname change
+  * [32602cb] d/control: Bump standards version
+  * [efa76a2] d/upstream/metadata: Add upstream bug tracker URLs
+  * [2ac8de7] d/rules: Enable all hardening opts
+
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 01 Jan 2021 15:29:35 +0100
+
 wlroots (0.11.0-3) unstable; urgency=medium
 
   * [c95d2e9] output-management-v1: send complete head state on enable change.
