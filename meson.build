@@ -111,7 +111,7 @@ endif
 wayland_server = dependency('wayland-server', version: '>=1.18')
 wayland_client = dependency('wayland-client')
 wayland_egl = dependency('wayland-egl')
-wayland_protos = dependency('wayland-protocols', version: '>=1.17')
+wayland_protos = dependency('wayland-protocols', version: '>=1.21')
 egl = dependency('egl')
 glesv2 = dependency('glesv2')
 drm = dependency('libdrm', version: '>=2.4.95')
