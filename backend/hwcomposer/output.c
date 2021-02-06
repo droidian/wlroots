@@ -81,7 +81,7 @@ static bool output_commit(struct wlr_output *wlr_output) {
 	}
 
 	if (output->backend->outputBlank)
-		return false;
+		return true;
 
 	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_MODE) {
 		if (!output_set_custom_mode(wlr_output,
