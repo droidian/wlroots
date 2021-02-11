@@ -18,7 +18,6 @@ static void output_present(void *user_data, struct ANativeWindow *window,
 		struct ANativeWindowBuffer *buffer)
 {
 	struct wlr_hwcomposer_backend *hwc = (struct wlr_hwcomposer_backend *)user_data;
-	hwcomposer_vsync_wait(hwc);
 	hwc_display_contents_1_t **contents = hwc->hwc_contents;
 	hwc_layer_1_t *fblayer = hwc->fblayer;
 	hwc_composer_device_1_t *hwcdevice = hwc->hwc_device_ptr;
@@ -65,9 +64,9 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 		return false;
 	}
 
-	output->frame_delay = 500000 / refresh;
+	output->frame_delay = 1000000 / refresh;
 
-	wlr_output_update_custom_mode(&output->wlr_output, width, height, refresh);
+	wlr_output_update_custom_mode(&output->wlr_output, width, height, 0);
 	return true;
 }
 
@@ -78,6 +77,14 @@ static bool output_commit(struct wlr_output *wlr_output) {
 	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_ENABLED) {
 		hwcomposer_blank_toggle(output->backend);
 		wlr_output_update_enabled(wlr_output, !output->backend->is_blank);
+
+		if (output->backend->is_blank)
+			// Disable vsync
+			hwcomposer_vsync_control(output->backend, false);
+		else
+			// Start timer so that we can let hwc initialize
+			wl_event_source_timer_update(output->vsync_timer,
+				output->frame_delay); // ms
 	}
 
 	if (output->backend->is_blank)
@@ -87,7 +94,7 @@ static bool output_commit(struct wlr_output *wlr_output) {
 		if (!output_set_custom_mode(wlr_output,
 				wlr_output->pending.custom_mode.width,
 				wlr_output->pending.custom_mode.height,
-				wlr_output->pending.custom_mode.refresh)) {
+				0)) {
 			return false;
 		}
 	}
@@ -109,8 +116,6 @@ static bool output_commit(struct wlr_output *wlr_output) {
 			wlr_log(WLR_ERROR, "WLR_OUTPUT_STATE_BUFFER_SCANOUT not implemented");
 			break;
 		}
-
-		wlr_output_send_present(wlr_output, NULL);
 	}
 
 	wlr_egl_unset_current(&output->backend->egl);
@@ -132,8 +137,14 @@ static void output_destroy(struct wlr_output *wlr_output) {
 	wl_list_remove(&output->link);
 
 	wl_event_source_remove(output->frame_timer);
+	wl_event_source_remove(output->vsync_timer);
+
+	wl_list_remove(&output->vsync_listener.link);
 
 	wlr_egl_destroy_surface(&output->backend->egl, output->egl_surface);
+
+	// Disable vsync
+	hwcomposer_vsync_control(output->backend, false);
 
 	// XXX: free native window?
 
@@ -159,9 +170,38 @@ bool wlr_output_is_hwcomposer(struct wlr_output *wlr_output) {
 
 static int signal_frame(void *data) {
 	struct wlr_hwcomposer_output *output = data;
+
+	wlr_output_send_present(&output->wlr_output, NULL);
+
 	wlr_output_send_frame(&output->wlr_output);
-	wl_event_source_timer_update(output->frame_timer, output->frame_delay);
+
 	return 0;
+}
+
+static int on_vsync_timer_elapsed(void *data) {
+	struct wlr_hwcomposer_output *output = data;
+	static int vsync_enable_tries = 0;
+
+	// Ensure vsync gets enabled
+	hwcomposer_vsync_control(output->backend, true);
+
+	if (!output->backend->hwc_vsync_enabled && vsync_enable_tries < 5) {
+		// Try again
+		wl_event_source_timer_update(output->vsync_timer,
+			output->frame_delay);
+		vsync_enable_tries++;
+	} else if (output->backend->hwc_vsync_enabled) {
+		vsync_enable_tries = 0;
+	}
+
+	return 0;
+}
+
+static void on_vsync(struct wl_listener *listener, void *data) {
+	struct wlr_hwcomposer_output *output = wl_container_of(listener,
+		output, vsync_listener);
+	wl_event_source_timer_update(output->frame_timer,
+		output->backend->idle_time);
 }
 
 struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend) {
@@ -211,11 +251,15 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend) {
 
 	struct wl_event_loop *ev = wl_display_get_event_loop(backend->display);
 	output->frame_timer = wl_event_loop_add_timer(ev, signal_frame, output);
+	output->vsync_timer = wl_event_loop_add_timer(ev, on_vsync_timer_elapsed, output);
+
+	output->vsync_listener.notify = on_vsync;
+	wl_signal_add(&backend->events.vsync, &output->vsync_listener);
 
 	wl_list_insert(&backend->outputs, &output->link);
 
 	if (backend->started) {
-		wl_event_source_timer_update(output->frame_timer, output->frame_delay);
+		wl_event_source_timer_update(output->vsync_timer, output->frame_delay);
 		wlr_output_update_enabled(wlr_output, true);
 		wlr_signal_emit_safe(&backend->backend.events.new_output, wlr_output);
 	}
