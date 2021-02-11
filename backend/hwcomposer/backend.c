@@ -77,6 +77,8 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 	backend->display = display;
 	wl_list_init(&backend->outputs);
 
+	wl_signal_init(&backend->events.vsync);
+
 	hwcomposer_api_init(backend);
 
 	static EGLint config_attribs[] = {
