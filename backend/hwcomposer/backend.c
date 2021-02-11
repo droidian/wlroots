@@ -13,7 +13,7 @@ static bool backend_start(struct wlr_backend *wlr_backend) {
 
 	struct wlr_hwcomposer_output *output;
 	wl_list_for_each(output, &backend->outputs, link) {
-		wl_event_source_timer_update(output->frame_timer, output->frame_delay);
+		wl_event_source_timer_update(output->vsync_timer, output->frame_delay);
 		wlr_output_update_enabled(&output->wlr_output, true);
 		wlr_signal_emit_safe(&backend->backend.events.new_output,
 			&output->wlr_output);
