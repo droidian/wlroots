@@ -17,29 +17,29 @@
 static void output_present(void *user_data, struct ANativeWindow *window,
 		struct ANativeWindowBuffer *buffer)
 {
-    struct wlr_hwcomposer_backend *hwc = (struct wlr_hwcomposer_backend *)user_data;
-	waitVSync(hwc);
-	hwc_display_contents_1_t **contents = hwc->hwcContents;
+	struct wlr_hwcomposer_backend *hwc = (struct wlr_hwcomposer_backend *)user_data;
+	hwcomposer_vsync_wait(hwc);
+	hwc_display_contents_1_t **contents = hwc->hwc_contents;
 	hwc_layer_1_t *fblayer = hwc->fblayer;
-    hwc_composer_device_1_t *hwcdevice = hwc->hwcDevicePtr;
+	hwc_composer_device_1_t *hwcdevice = hwc->hwc_device_ptr;
 
-    int oldretire = contents[0]->retireFenceFd;
-    contents[0]->retireFenceFd = -1;
+	int oldretire = contents[0]->retireFenceFd;
+	contents[0]->retireFenceFd = -1;
 
-    fblayer->handle = buffer->handle;
-    fblayer->acquireFenceFd = HWCNativeBufferGetFence(buffer);
-    fblayer->releaseFenceFd = -1;
-    int err = hwcdevice->prepare(hwcdevice, HWC_NUM_DISPLAY_TYPES, contents);
-    assert(err == 0);
+	fblayer->handle = buffer->handle;
+	fblayer->acquireFenceFd = HWCNativeBufferGetFence(buffer);
+	fblayer->releaseFenceFd = -1;
+	int err = hwcdevice->prepare(hwcdevice, HWC_NUM_DISPLAY_TYPES, contents);
+	assert(err == 0);
 
-    err = hwcdevice->set(hwcdevice, HWC_NUM_DISPLAY_TYPES, contents);
-    // in android surfaceflinger ignores the return value as not all display types may be supported
-    HWCNativeBufferSetFence(buffer, fblayer->releaseFenceFd);
+	err = hwcdevice->set(hwcdevice, HWC_NUM_DISPLAY_TYPES, contents);
+	// in android surfaceflinger ignores the return value as not all display types may be supported
+	HWCNativeBufferSetFence(buffer, fblayer->releaseFenceFd);
 
-    if (oldretire != -1) {
-        sync_wait(oldretire, -1);
-        close(oldretire);
-    }
+	if (oldretire != -1) {
+		sync_wait(oldretire, -1);
+		close(oldretire);
+	}
 }
 
 static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
@@ -76,11 +76,11 @@ static bool output_commit(struct wlr_output *wlr_output) {
 		(struct wlr_hwcomposer_output *)wlr_output;
 
 	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_ENABLED) {
-		toggleBlankOutput(output->backend);
-		wlr_output_update_enabled(wlr_output, !output->backend->outputBlank);
+		hwcomposer_blank_toggle(output->backend);
+		wlr_output_update_enabled(wlr_output, !output->backend->is_blank);
 	}
 
-	if (output->backend->outputBlank)
+	if (output->backend->is_blank)
 		return true;
 
 	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_MODE) {
@@ -180,21 +180,21 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend) {
 	struct wlr_output *wlr_output = &output->wlr_output;
 
 #ifdef HWC_DEVICE_API_VERSION_2_0
-	if (backend->hwcVersion == HWC_DEVICE_API_VERSION_2_0)
+	if (backend->hwc_version == HWC_DEVICE_API_VERSION_2_0)
 		output->egl_window = HWCNativeWindowCreate(
-			backend->hwcWidth, backend->hwcHeight,
-			HAL_PIXEL_FORMAT_RGBA_8888, hwc_present_hwcomposer2, backend);
+			backend->hwc_width, backend->hwc_height,
+			HAL_PIXEL_FORMAT_RGBA_8888, hwcomposer2_present, backend);
 	else
 #endif
 		output->egl_window = HWCNativeWindowCreate(
-			backend->hwcWidth, backend->hwcHeight,
+			backend->hwc_width, backend->hwc_height,
 			HAL_PIXEL_FORMAT_RGBA_8888, output_present, backend);
 
 	output->egl_display = eglGetDisplay(NULL);
 	backend->egl.display = output->egl_display;
 
-	output_set_custom_mode(wlr_output, backend->hwcWidth,
-		backend->hwcHeight, backend->hwcRefresh);
+	output_set_custom_mode(wlr_output, backend->hwc_width,
+		backend->hwc_height, backend->hwc_refresh);
 	strncpy(wlr_output->make, "hwcomposer", sizeof(wlr_output->make));
 	strncpy(wlr_output->model, "hwcomposer", sizeof(wlr_output->model));
 	snprintf(wlr_output->name, sizeof(wlr_output->name), "HWCOMPOSER-%d",

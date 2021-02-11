@@ -12,53 +12,53 @@
 
 #include "backend/hwcomposer.h"
 
-void enableVSync(struct wlr_hwcomposer_backend *hwc, bool enable)
+void hwcomposer_vsync_control(struct wlr_hwcomposer_backend *hwc, bool enable)
 {
-    if (hwc->hwcHasVsync == enable) {
-        return;
-    }
-    int result = 0;
+	if (hwc->hwc_vsync_enabled == enable) {
+		return;
+	}
+	int result = 0;
 #if defined(HWC_DEVICE_API_VERSION_2_0)
-	if (hwc->hwcVersion == HWC_DEVICE_API_VERSION_2_0)
+	if (hwc->hwc_version == HWC_DEVICE_API_VERSION_2_0)
 		hwc2_compat_display_set_vsync_enabled(hwc->hwc2_primary_display, enable ? HWC2_VSYNC_ENABLE : HWC2_VSYNC_DISABLE);
 	else
 #endif
-		result = hwc->hwcDevicePtr->eventControl(hwc->hwcDevicePtr, 0, HWC_EVENT_VSYNC, enable ? 1 : 0);
-	hwc->hwcHasVsync = enable && (result == 0);
+		result = hwc->hwc_device_ptr->eventControl(hwc->hwc_device_ptr, 0, HWC_EVENT_VSYNC, enable ? 1 : 0);
+	hwc->hwc_vsync_enabled = enable && (result == 0);
 }
 
-void waitVSync(struct wlr_hwcomposer_backend *hwc)
+void hwcomposer_vsync_wait(struct wlr_hwcomposer_backend *hwc)
 {
-    if (!hwc->hwcHasVsync) {
-         return;
-    }
-	pthread_mutex_lock(&hwc->hwcVsyncMutex);
-	pthread_cond_wait(&hwc->hwcVsyncWaitCondition, &hwc->hwcVsyncMutex);
-	pthread_mutex_unlock(&hwc->hwcVsyncMutex);
+	if (!hwc->hwc_vsync_enabled) {
+		 return;
+	}
+	pthread_mutex_lock(&hwc->hwc_vsync_mutex);
+	pthread_cond_wait(&hwc->hwc_vsync_wait_condition, &hwc->hwc_vsync_mutex);
+	pthread_mutex_unlock(&hwc->hwc_vsync_mutex);
 }
 
-void wakeVSync(struct wlr_hwcomposer_backend *hwc)
+void hwcomposer_vsync_wake(struct wlr_hwcomposer_backend *hwc)
 {
-	pthread_mutex_lock(&hwc->hwcVsyncMutex);
-	pthread_cond_signal(&hwc->hwcVsyncWaitCondition);
-	pthread_mutex_unlock(&hwc->hwcVsyncMutex);
+	pthread_mutex_lock(&hwc->hwc_vsync_mutex);
+	pthread_cond_signal(&hwc->hwc_vsync_wait_condition);
+	pthread_mutex_unlock(&hwc->hwc_vsync_mutex);
 }
 
-void toggleBlankOutput(struct wlr_hwcomposer_backend *hwc)
+void hwcomposer_blank_toggle(struct wlr_hwcomposer_backend *hwc)
 {
-	hwc->outputBlank = !hwc->outputBlank;
-	enableVSync(hwc, hwc->outputBlank);
+	hwc->is_blank = !hwc->is_blank;
+	hwcomposer_vsync_control(hwc, hwc->is_blank);
 #ifdef HWC_DEVICE_API_VERSION_2_0
-	if (hwc->hwcVersion == HWC_DEVICE_API_VERSION_2_0)
-		hwc2_compat_display_set_power_mode(hwc->hwc2_primary_display, hwc->outputBlank ? HWC2_POWER_MODE_OFF : HWC2_POWER_MODE_ON);
+	if (hwc->hwc_version == HWC_DEVICE_API_VERSION_2_0)
+		hwc2_compat_display_set_power_mode(hwc->hwc2_primary_display, hwc->is_blank ? HWC2_POWER_MODE_OFF : HWC2_POWER_MODE_ON);
 	else
 #endif
 #if defined(HWC_DEVICE_API_VERSION_1_4) || defined(HWC_DEVICE_API_VERSION_1_5)
-	if (hwc->hwcVersion > HWC_DEVICE_API_VERSION_1_3)
-		hwc->hwcDevicePtr->setPowerMode(hwc->hwcDevicePtr, 0, hwc->outputBlank ? HWC_POWER_MODE_OFF : HWC_POWER_MODE_NORMAL);
+	if (hwc->hwc_version > HWC_DEVICE_API_VERSION_1_3)
+		hwc->hwc_device_ptr->setPowerMode(hwc->hwc_device_ptr, 0, hwc->is_blank ? HWC_POWER_MODE_OFF : HWC_POWER_MODE_NORMAL);
 	else
 #endif
-		hwc->hwcDevicePtr->blank(hwc->hwcDevicePtr, 0, hwc->outputBlank ? 1 : 0);
+		hwc->hwc_device_ptr->blank(hwc->hwc_device_ptr, 0, hwc->is_blank ? 1 : 0);
 }
 
 inline static uint32_t interpreted_version(hw_device_t *hwc_device)
@@ -77,29 +77,29 @@ inline static uint32_t interpreted_version(hw_device_t *hwc_device)
 
 static void init_hwcomposer_layer(hwc_layer_1_t *layer, const hwc_rect_t *rect, int layerCompositionType)
 {
-    memset(layer, 0, sizeof(hwc_layer_1_t));
-    layer->compositionType = layerCompositionType;
-    layer->hints = 0;
-    layer->flags = 0;
-    layer->handle = 0;
-    layer->transform = 0;
-    layer->blending = HWC_BLENDING_NONE;
+	memset(layer, 0, sizeof(hwc_layer_1_t));
+	layer->compositionType = layerCompositionType;
+	layer->hints = 0;
+	layer->flags = 0;
+	layer->handle = 0;
+	layer->transform = 0;
+	layer->blending = HWC_BLENDING_NONE;
 #ifdef HWC_DEVICE_API_VERSION_1_3
-    layer->sourceCropf.top = 0.0f;
-    layer->sourceCropf.left = 0.0f;
-    layer->sourceCropf.bottom = (float) rect->bottom;
-    layer->sourceCropf.right = (float) rect->right;
+	layer->sourceCropf.top = 0.0f;
+	layer->sourceCropf.left = 0.0f;
+	layer->sourceCropf.bottom = (float) rect->bottom;
+	layer->sourceCropf.right = (float) rect->right;
 #else
-    layer->sourceCrop = *rect;
+	layer->sourceCrop = *rect;
 #endif
-    layer->displayFrame = *rect;
-    layer->visibleRegionScreen.numRects = 1;
-    layer->visibleRegionScreen.rects = &layer->displayFrame;
-    layer->acquireFenceFd = -1;
-    layer->releaseFenceFd = -1;
-    layer->planeAlpha = 0xFF;
+	layer->displayFrame = *rect;
+	layer->visibleRegionScreen.numRects = 1;
+	layer->visibleRegionScreen.rects = &layer->displayFrame;
+	layer->acquireFenceFd = -1;
+	layer->releaseFenceFd = -1;
+	layer->planeAlpha = 0xFF;
 #ifdef HWC_DEVICE_API_VERSION_1_5
-    layer->surfaceDamage.numRects = 0;
+	layer->surfaceDamage.numRects = 0;
 #endif
 }
 
@@ -107,85 +107,85 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 {
 	int err;
 
-	hw_module_t *hwcModule = 0;
+	hw_module_t *hwc_module = 0;
 
-	err = hw_get_module(HWC_HARDWARE_MODULE_ID, (const hw_module_t **) &hwcModule);
+	err = hw_get_module(HWC_HARDWARE_MODULE_ID, (const hw_module_t **) &hwc_module);
 	assert(err == 0);
 
 	wlr_log(WLR_INFO, "== hwcomposer module ==\n");
-	wlr_log(WLR_INFO, " * Address: %p\n", hwcModule);
-	wlr_log(WLR_INFO, " * Module API Version: %x\n", hwcModule->module_api_version);
-	wlr_log(WLR_INFO, " * HAL API Version: %x\n", hwcModule->hal_api_version); /* should be zero */
-	wlr_log(WLR_INFO, " * Identifier: %s\n", hwcModule->id);
-	wlr_log(WLR_INFO, " * Name: %s\n", hwcModule->name);
-	wlr_log(WLR_INFO, " * Author: %s\n", hwcModule->author);
+	wlr_log(WLR_INFO, " * Address: %p\n", hwc_module);
+	wlr_log(WLR_INFO, " * Module API Version: %x\n", hwc_module->module_api_version);
+	wlr_log(WLR_INFO, " * HAL API Version: %x\n", hwc_module->hal_api_version); /* should be zero */
+	wlr_log(WLR_INFO, " * Identifier: %s\n", hwc_module->id);
+	wlr_log(WLR_INFO, " * Name: %s\n", hwc_module->name);
+	wlr_log(WLR_INFO, " * Author: %s\n", hwc_module->author);
 	wlr_log(WLR_INFO, "== hwcomposer module ==\n");
 
 	hw_device_t *hwcDevice = NULL;
-	err = hwcModule->methods->open(hwcModule, HWC_HARDWARE_COMPOSER, &hwcDevice);
+	err = hwc_module->methods->open(hwc_module, HWC_HARDWARE_COMPOSER, &hwcDevice);
 #ifdef HWC_DEVICE_API_VERSION_2_0
 	if (err) {
 		// For weird reason module open seems to currently fail on tested HWC2 device
-		hwc->hwcVersion = HWC_DEVICE_API_VERSION_2_0;
+		hwc->hwc_version = HWC_DEVICE_API_VERSION_2_0;
 	} else
 #endif
-		hwc->hwcVersion = interpreted_version(hwcDevice);
-	if (pthread_mutex_init(&hwc->hwcVsyncMutex, NULL) ||
-        pthread_cond_init(&hwc->hwcVsyncWaitCondition, NULL)) {
+		hwc->hwc_version = interpreted_version(hwcDevice);
+	if (pthread_mutex_init(&hwc->hwc_vsync_mutex, NULL) ||
+		pthread_cond_init(&hwc->hwc_vsync_wait_condition, NULL)) {
 		wlr_log(WLR_INFO, "Error creating rendering thread\n");
 		return false;
 	}
-	hwc->outputBlank = false;
+	hwc->is_blank = false;
 #ifdef HWC_DEVICE_API_VERSION_2_0
-	if (hwc->hwcVersion == HWC_DEVICE_API_VERSION_2_0) {
+	if (hwc->hwc_version == HWC_DEVICE_API_VERSION_2_0) {
 		err = hwcomposer2_api_init(hwc);
 		hwc2_compat_display_set_power_mode(hwc->hwc2_primary_display, HWC2_POWER_MODE_ON);
 		return err;
 	}
 #endif
 
-	hwc_composer_device_1_t *hwcDevicePtr = (hwc_composer_device_1_t*) hwcDevice;
-	wlr_log(WLR_INFO, "HWC Version=%x\n", hwc->hwcVersion);
+	hwc_composer_device_1_t *hwc_device_ptr = (hwc_composer_device_1_t*) hwcDevice;
+	wlr_log(WLR_INFO, "HWC Version=%x\n", hwc->hwc_version);
 
 #ifdef defined(HWC_DEVICE_API_VERSION_1_4) || defined(HWC_DEVICE_API_VERSION_1_5)
-	if (hwc->hwcVersion > HWC_DEVICE_API_VERSION_1_3) {
-		hwcDevicePtr->setPowerMode(hwcDevicePtr, 0, HWC_POWER_MODE_NORMAL);
+	if (hwc->hwc_version > HWC_DEVICE_API_VERSION_1_3) {
+		hwc_device_ptr->setPowerMode(hwc_device_ptr, 0, HWC_POWER_MODE_NORMAL);
 	} else
 #endif
-		hwcDevicePtr->blank(hwcDevicePtr, 0, 0);
+		hwc_device_ptr->blank(hwc_device_ptr, 0, 0);
 
 	uint32_t configs[5];
 	size_t numConfigs = 5;
 
-	err = hwcDevicePtr->getDisplayConfigs(hwcDevicePtr, 0, configs, &numConfigs);
+	err = hwc_device_ptr->getDisplayConfigs(hwc_device_ptr, 0, configs, &numConfigs);
 	assert (err == 0);
 
 	int32_t attr_values[2];
 	uint32_t attributes[] = { HWC_DISPLAY_WIDTH, HWC_DISPLAY_HEIGHT, HWC_DISPLAY_VSYNC_PERIOD, HWC_DISPLAY_NO_ATTRIBUTE };
 
-	hwcDevicePtr->getDisplayAttributes(hwcDevicePtr, 0,
-			configs[0], attributes, attr_values);
+	hwc_device_ptr->getDisplayAttributes(hwc_device_ptr, 0,
+		configs[0], attributes, attr_values);
 
 	wlr_log(WLR_INFO, "width: %i height: %i\n", attr_values[0], attr_values[1]);
-	hwc->hwcWidth = attr_values[0];
-	hwc->hwcHeight = attr_values[1];
-	hwc->hwcRefresh = (attr_values[2] == 0) ? 60000 : 10E11 / attr_values[2];
+	hwc->hwc_width = attr_values[0];
+	hwc->hwc_height = attr_values[1];
+	hwc->hwc_refresh = (attr_values[2] == 0) ? 60000 : 10E11 / attr_values[2];
 
 	size_t size = sizeof(hwc_display_contents_1_t) + 2 * sizeof(hwc_layer_1_t);
 	hwc_display_contents_1_t *list = (hwc_display_contents_1_t *) malloc(size);
-	hwc->hwcContents = (hwc_display_contents_1_t **) malloc(HWC_NUM_DISPLAY_TYPES * sizeof(hwc_display_contents_1_t *));
+	hwc->hwc_contents = (hwc_display_contents_1_t **) malloc(HWC_NUM_DISPLAY_TYPES * sizeof(hwc_display_contents_1_t *));
 
 	int counter = 0;
 	for (; counter < HWC_NUM_DISPLAY_TYPES; counter++)
-		hwc->hwcContents[counter] = NULL;
+		hwc->hwc_contents[counter] = NULL;
 	// Assign the layer list only to the first display,
 	// otherwise HWC might freeze if others are disconnected
-	hwc->hwcContents[0] = list;
+	hwc->hwc_contents[0] = list;
 	hwc->fblayer = &list->hwLayers[1];
 
 	const hwc_rect_t rect = { 0, 0, attr_values[0], attr_values[1] };
 	init_hwcomposer_layer(&list->hwLayers[0], &rect, HWC_FRAMEBUFFER);
-        init_hwcomposer_layer(&list->hwLayers[1], &rect, HWC_FRAMEBUFFER_TARGET);
+		init_hwcomposer_layer(&list->hwLayers[1], &rect, HWC_FRAMEBUFFER_TARGET);
 
 	list->retireFenceFd = -1;
 	list->flags = HWC_GEOMETRY_CHANGED;

@@ -24,21 +24,21 @@ struct wlr_hwcomposer_backend {
 	struct wl_list input_devices;
 	struct wl_listener display_destroy;
 	bool started;
-	bool outputBlank;
+	bool is_blank;
 
-	hwc_composer_device_1_t *hwcDevicePtr;
-	hwc_display_contents_1_t **hwcContents;
+	hwc_composer_device_1_t *hwc_device_ptr;
+	hwc_display_contents_1_t **hwc_contents;
 	hwc_layer_1_t *fblayer;
-	uint32_t hwcVersion;
-	int hwcWidth;
-	int hwcHeight;
-	int hwcRefresh;
-	bool hwcHasVsync;
-	pthread_mutex_t hwcVsyncMutex;
-	pthread_cond_t hwcVsyncWaitCondition;
+	uint32_t hwc_version;
+	int hwc_width;
+	int hwc_height;
+	int hwc_refresh;
+	bool hwc_vsync_enabled;
+	pthread_mutex_t hwc_vsync_mutex;
+	pthread_cond_t hwc_vsync_wait_condition;
 
 #ifdef HWC_DEVICE_API_VERSION_2_0
-	hwc2_compat_device_t* hwc2Device;
+	hwc2_compat_device_t* hwc2_device;
 	hwc2_compat_display_t* hwc2_primary_display;
 	hwc2_compat_layer_t* hwc2_primary_layer;
 #endif
@@ -57,23 +57,23 @@ struct wlr_hwcomposer_output {
 	int frame_delay; // ms
 };
 
-void enableVSync(struct wlr_hwcomposer_backend *hwc, bool enable);
-void waitVSync(struct wlr_hwcomposer_backend *hwc);
-void wakeVSync(struct wlr_hwcomposer_backend *hwc);
-void toggleBlankOutput(struct wlr_hwcomposer_backend *hwc);
+void hwcomposer_vsync_control(struct wlr_hwcomposer_backend *hwc, bool enable);
+void hwcomposer_vsync_wait(struct wlr_hwcomposer_backend *hwc);
+void hwcomposer_vsync_wake(struct wlr_hwcomposer_backend *hwc);
+void hwcomposer_blank_toggle(struct wlr_hwcomposer_backend *hwc);
 bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc);
 #ifdef HWC_DEVICE_API_VERSION_2_0
 bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc);
-void hwc2_callback_vsync(HWC2EventListener* listener, int32_t sequenceId,
-                         hwc2_display_t display, int64_t timestamp);
-void hwc2_callback_hotplug(HWC2EventListener* listener, int32_t sequenceId,
-                           hwc2_display_t display, bool connected,
-                           bool primaryDisplay);
-void hwc2_callback_refresh(HWC2EventListener* listener, int32_t sequenceId,
-                           hwc2_display_t display);
-void hwc_hwcomposer2_close(struct wlr_hwcomposer_backend *hwc);
-void hwc_present_hwcomposer2(void *user_data, struct ANativeWindow *window,
-								struct ANativeWindowBuffer *buffer);
+void hwcomposer2_vsync_callback(HWC2EventListener* listener, int32_t sequence_id,
+	hwc2_display_t display, int64_t timestamp);
+void hwcomposer2_hotplug_callback(HWC2EventListener* listener, int32_t sequence_id,
+	hwc2_display_t display, bool connected,
+	bool primary_display);
+void hwcomposer2_refresh_callback(HWC2EventListener* listener, int32_t sequence_id,
+	hwc2_display_t display);
+void hwcomposer2_close(struct wlr_hwcomposer_backend *hwc);
+void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
+	struct ANativeWindowBuffer *buffer);
 #endif
 
 #endif
