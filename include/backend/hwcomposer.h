@@ -37,6 +37,10 @@ struct wlr_hwcomposer_backend {
 	pthread_mutex_t hwc_vsync_mutex;
 	pthread_cond_t hwc_vsync_wait_condition;
 
+	struct {
+		struct wl_signal vsync;
+	} events;
+
 #ifdef HWC_DEVICE_API_VERSION_2_0
 	hwc2_compat_device_t* hwc2_device;
 	hwc2_compat_display_t* hwc2_primary_display;

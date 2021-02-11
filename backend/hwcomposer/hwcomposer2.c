@@ -26,6 +26,7 @@ void hwcomposer2_vsync_callback(HWC2EventListener* listener, int32_t sequence_id
 {
 	struct wlr_hwcomposer_backend *hwc = ((hwc_procs_v20 *)listener)->hwc;
 	hwcomposer_vsync_wake(hwc);
+	wlr_signal_emit_safe(&hwc->events.vsync, hwc);
 }
 
 void hwcomposer2_hotplug_callback(HWC2EventListener* listener, int32_t sequence_id,
