@@ -66,7 +66,7 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 
 	output->frame_delay = 1000000 / refresh;
 
-	wlr_output_update_custom_mode(&output->wlr_output, width, height, 0);
+	wlr_output_update_custom_mode(&output->wlr_output, width, height, refresh);
 	return true;
 }
 
@@ -94,7 +94,7 @@ static bool output_commit(struct wlr_output *wlr_output) {
 		if (!output_set_custom_mode(wlr_output,
 				wlr_output->pending.custom_mode.width,
 				wlr_output->pending.custom_mode.height,
-				0)) {
+				wlr_output->pending.custom_mode.refresh)) {
 			return false;
 		}
 	}
