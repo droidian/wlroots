@@ -111,9 +111,6 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 		int idle_time = (int)strtol(idle_time_env, &end, 10);
 
 		hwc->idle_time = (*end || idle_time < 4) ? 4 : idle_time;
-	} else {
-		// Default to 4
-		hwc->idle_time = 4;
 	}
 
 	hw_device_t *hwcDevice = NULL;
@@ -160,6 +157,11 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 	hwc->hwc_width = attr_values[0];
 	hwc->hwc_height = attr_values[1];
 	hwc->hwc_refresh = (attr_values[2] == 0) ? 60000 : 10E11 / attr_values[2];
+
+	if (!hwc->idle_time)
+		// Try to be as close as possible as the actual vsync
+		// as calculated by the hwc_refresh.
+		hwc->idle_time = (1000000 / hwc->hwc_refresh) - 3; // ms
 
 	size_t size = sizeof(hwc_display_contents_1_t) + 2 * sizeof(hwc_layer_1_t);
 	hwc_display_contents_1_t *list = (hwc_display_contents_1_t *) malloc(size);

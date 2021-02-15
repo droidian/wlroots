@@ -47,8 +47,8 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 		(struct wlr_hwcomposer_output *)wlr_output;
 	struct wlr_hwcomposer_backend *backend = output->backend;
 
-	wlr_log(WLR_INFO, "output_set_custom_mode width=%d height=%d refresh=%d",
-		width, height, refresh);
+	wlr_log(WLR_INFO, "output_set_custom_mode width=%d height=%d refresh=%d idle_time=%d",
+		width, height, refresh, backend->idle_time);
 
 	if (refresh <= 0) {
 		refresh = HWCOMPOSER_DEFAULT_REFRESH;
