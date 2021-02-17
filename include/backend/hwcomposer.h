@@ -59,6 +59,8 @@ struct wlr_hwcomposer_output {
 	struct wl_event_source *vsync_timer;
 	int frame_delay; // ms
 
+	bool committed;
+
 	struct wl_listener vsync_listener;
 };
 

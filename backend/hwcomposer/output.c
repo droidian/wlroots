@@ -99,6 +99,8 @@ static bool output_commit(struct wlr_output *wlr_output) {
 		}
 	}
 
+	output->committed = true;
+
 	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_BUFFER) {
 		pixman_region32_t *damage = NULL;
 		if (wlr_output->pending.committed & WLR_OUTPUT_STATE_DAMAGE) {
@@ -185,6 +187,9 @@ static int on_vsync_timer_elapsed(void *data) {
 	// Ensure vsync gets enabled
 	hwcomposer_vsync_control(output->backend, true);
 
+	// Ensure the first frame event can be emitted
+	output->committed = true;
+
 	if (!output->backend->hwc_vsync_enabled && vsync_enable_tries < 5) {
 		// Try again
 		wl_event_source_timer_update(output->vsync_timer,
@@ -200,8 +205,12 @@ static int on_vsync_timer_elapsed(void *data) {
 static void on_vsync(struct wl_listener *listener, void *data) {
 	struct wlr_hwcomposer_output *output = wl_container_of(listener,
 		output, vsync_listener);
-	wl_event_source_timer_update(output->frame_timer,
-		output->backend->idle_time);
+
+	if (output->committed) {
+		output->committed = false;
+		wl_event_source_timer_update(output->frame_timer,
+			output->backend->idle_time);
+	}
 }
 
 struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend) {
