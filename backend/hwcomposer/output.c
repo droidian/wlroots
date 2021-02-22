@@ -118,6 +118,8 @@ static bool output_commit(struct wlr_output *wlr_output) {
 			wlr_log(WLR_ERROR, "WLR_OUTPUT_STATE_BUFFER_SCANOUT not implemented");
 			break;
 		}
+
+		wlr_output_send_present(wlr_output, NULL);
 	}
 
 	wlr_egl_unset_current(&output->backend->egl);
@@ -216,8 +218,6 @@ bool wlr_output_is_hwcomposer(struct wlr_output *wlr_output) {
 
 static int signal_frame(void *data) {
 	struct wlr_hwcomposer_output *output = data;
-
-	wlr_output_send_present(&output->wlr_output, NULL);
 
 	wlr_output_send_frame(&output->wlr_output);
 
