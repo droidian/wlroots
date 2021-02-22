@@ -49,6 +49,7 @@ struct wlr_egl {
 	struct {
 		bool bind_wayland_display_wl;
 		bool buffer_age_ext;
+		bool partial_update_ext;
 		bool image_base_khr;
 		bool image_dma_buf_export_mesa;
 		bool image_dmabuf_import_ext;
@@ -64,6 +65,7 @@ struct wlr_egl {
 		PFNEGLQUERYWAYLANDBUFFERWL eglQueryWaylandBufferWL;
 		PFNEGLBINDWAYLANDDISPLAYWL eglBindWaylandDisplayWL;
 		PFNEGLUNBINDWAYLANDDISPLAYWL eglUnbindWaylandDisplayWL;
+		PFNEGLSETDAMAGEREGIONKHRPROC eglSetDamageRegionKHR;
 		PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC eglSwapBuffersWithDamage; // KHR or EXT
 		PFNEGLQUERYDMABUFFORMATSEXTPROC eglQueryDmaBufFormatsEXT;
 		PFNEGLQUERYDMABUFMODIFIERSEXTPROC eglQueryDmaBufModifiersEXT;
