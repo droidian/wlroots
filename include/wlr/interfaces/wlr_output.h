@@ -57,6 +57,14 @@ struct wlr_output_impl {
 	 */
 	bool (*attach_render)(struct wlr_output *output, int *buffer_age);
 	/**
+	 * HACK: allows to work on the damaged area after the buffer has
+	 * been made current.
+	 *
+	 * This is especially useful when using the EGL_KHR_partial_update
+	 * extension.
+	 */
+	bool (*handle_damage)(struct wlr_output *output, pixman_region32_t *damage);
+	/**
 	 * Unset the current renderer's buffer.
 	 *
 	 * This is the opposite of attach_render.
