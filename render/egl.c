@@ -520,6 +520,32 @@ static void transform_damage(EGLDisplay display, EGLSurface surface,
 	}
 }
 
+bool wlr_egl_set_damage_region(struct wlr_egl *egl, EGLSurface surface,
+		pixman_region32_t *damage) {
+	if (!egl->exts.partial_update_ext || damage == NULL) {
+		return true;
+	}
+
+	int nrects;
+	EGLint *egl_damage;
+	EGLBoolean ret;
+
+	transform_damage(egl->display, surface, damage, &nrects,
+		&egl_damage);
+
+	ret = egl->procs.eglSetDamageRegionKHR(egl->display, surface,
+			egl_damage, nrects);
+
+	free(egl_damage);
+
+	if (!ret) {
+		wlr_log(WLR_ERROR, "eglSetDamageRegionKHR failed");
+		return false;
+	}
+
+	return true;
+}
+
 bool wlr_egl_swap_buffers(struct wlr_egl *egl, EGLSurface surface,
 		pixman_region32_t *damage) {
 	// Never block when swapping buffers on Wayland
