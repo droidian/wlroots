@@ -161,6 +161,9 @@ void wlr_egl_save_context(struct wlr_egl_context *context);
  */
 bool wlr_egl_restore_context(struct wlr_egl_context *context);
 
+bool wlr_egl_set_damage_region(struct wlr_egl *egl, EGLSurface surface,
+		pixman_region32_t *damage);
+
 bool wlr_egl_swap_buffers(struct wlr_egl *egl, EGLSurface surface,
 	pixman_region32_t *damage);
 
