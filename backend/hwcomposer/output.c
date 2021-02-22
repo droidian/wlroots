@@ -189,6 +189,49 @@ static bool output_attach_render(struct wlr_output *wlr_output, int *buffer_age)
 		buffer_age);
 }
 
+static bool output_handle_damage(struct wlr_output *wlr_output, pixman_region32_t *damage) {
+	struct wlr_hwcomposer_output *output =
+		(struct wlr_hwcomposer_output *)wlr_output;
+
+	if (damage == NULL) {
+		return true;
+	}
+
+	/*
+	 * HACK: transform the damaged area to take in account output
+	 * transformations.
+	 *
+	 * This being here is wrong, as it should be a job of the compositor
+	 * and we're doing an assumption on behalf of them.
+	 */
+
+	int width, height;
+	wlr_output_transformed_resolution(wlr_output, &width, &height);
+
+	pixman_region32_t frame_damage;
+	pixman_region32_init(&frame_damage);
+
+	wlr_region_transform(&frame_damage, damage,
+		wlr_output_transform_invert(wlr_output->transform), width, height);
+
+	if (wlr_output->needs_frame) {
+		/*
+		 * By checking for needs_frame, we're predicting the compositor's
+		 * behaviour, and it's horribly wrong.
+		 *
+		 * Unfortunately, the alternative would be to damage the whole
+		 * region when rollbacks happen.
+		 *
+		 * This will probably also break the "damage-tracking" debug
+		 * phoc feature.
+		*/
+		return wlr_egl_set_damage_region(&output->backend->egl,
+			output->egl_surface, &frame_damage);
+	}
+
+	return true;
+}
+
 static void output_destroy(struct wlr_output *wlr_output) {
 	struct wlr_hwcomposer_output *output =
 		(struct wlr_hwcomposer_output *)wlr_output;
@@ -223,6 +266,7 @@ static void output_rollback_render(struct wlr_output *wlr_output) {
 static const struct wlr_output_impl output_impl = {
 	.destroy = output_destroy,
 	.attach_render = output_attach_render,
+	.handle_damage = output_handle_damage,
 	.commit = output_commit,
 	.rollback_render = output_rollback_render,
 };
