@@ -255,6 +255,12 @@ bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform, void *remote_display,
 	egl->exts.buffer_age_ext =
 		check_egl_ext(display_exts_str, "EGL_EXT_buffer_age");
 
+	if (check_egl_ext(display_exts_str, "EGL_KHR_partial_update")) {
+		egl->exts.partial_update_ext = true;
+		load_egl_proc(&egl->procs.eglSetDamageRegionKHR,
+			"eglSetDamageRegionKHR");
+	}
+
 	if (check_egl_ext(display_exts_str, "EGL_KHR_swap_buffers_with_damage")) {
 		egl->exts.swap_buffers_with_damage = true;
 		load_egl_proc(&egl->procs.eglSwapBuffersWithDamage,
@@ -416,7 +422,7 @@ EGLSurface wlr_egl_create_surface(struct wlr_egl *egl, void *window) {
 }
 
 static int egl_get_buffer_age(struct wlr_egl *egl, EGLSurface surface) {
-	if (!egl->exts.buffer_age_ext) {
+	if (!egl->exts.buffer_age_ext && !egl->exts.partial_update_ext) {
 		return -1;
 	}
 
