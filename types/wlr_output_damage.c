@@ -5,6 +5,7 @@
 #include <wlr/types/wlr_box.h>
 #include <wlr/types/wlr_output_damage.h>
 #include <wlr/types/wlr_output.h>
+#include <wlr/util/log.h>
 #include "util/signal.h"
 
 static void output_handle_destroy(struct wl_listener *listener, void *data) {
@@ -179,6 +180,11 @@ bool wlr_output_damage_attach_render(struct wlr_output_damage *output_damage,
 			pixman_region32_union_rect(damage, damage, extents->x1, extents->y1,
 				extents->x2 - extents->x1, extents->y2 - extents->y1);
 		}
+	}
+
+	// HACK: this should really be done by the compositor rather than us
+	if (!wlr_output_handle_damage(output, damage)) {
+		wlr_log(WLR_ERROR, "Error during handle_damage call");
 	}
 
 	return true;

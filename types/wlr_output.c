@@ -446,6 +446,14 @@ bool wlr_output_attach_render(struct wlr_output *output, int *buffer_age) {
 	return true;
 }
 
+bool wlr_output_handle_damage(struct wlr_output *output, pixman_region32_t *damage) {
+	if (!output->impl->handle_damage) {
+		return false;
+	}
+
+	return output->impl->handle_damage(output, damage);
+}
+
 bool wlr_output_preferred_read_format(struct wlr_output *output,
 		enum wl_shm_format *fmt) {
 	struct wlr_renderer *renderer = wlr_backend_get_renderer(output->backend);
