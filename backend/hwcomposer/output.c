@@ -78,13 +78,16 @@ static bool output_commit(struct wlr_output *wlr_output) {
 		hwcomposer_blank_toggle(output->backend);
 		wlr_output_update_enabled(wlr_output, !output->backend->is_blank);
 
-		if (output->backend->is_blank)
+		if (output->backend->is_blank) {
 			// Disable vsync
 			hwcomposer_vsync_control(output->backend, false);
-		else
+		} else {
 			// Start timer so that we can let hwc initialize
-			wl_event_source_timer_update(output->vsync_timer,
-				output->frame_delay); // ms
+			if (wl_event_source_timer_update(output->vsync_timer,
+					output->frame_delay) != 0) {
+				wlr_log(WLR_ERROR, "Unable to restart vsync timer");
+			}
+		}
 	}
 
 	if (output->backend->is_blank)
@@ -236,9 +239,10 @@ static int on_vsync_timer_elapsed(void *data) {
 
 	if (!output->backend->hwc_vsync_enabled && vsync_enable_tries < 5) {
 		// Try again
-		wl_event_source_timer_update(output->vsync_timer,
-			output->frame_delay);
-		vsync_enable_tries++;
+		if (wl_event_source_timer_update(output->vsync_timer,
+				output->frame_delay) == 0) {
+			vsync_enable_tries++;
+		}
 	} else if (output->backend->hwc_vsync_enabled) {
 		vsync_enable_tries = 0;
 	}
