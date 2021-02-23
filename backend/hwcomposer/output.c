@@ -254,10 +254,9 @@ static void on_vsync(struct wl_listener *listener, void *data) {
 	struct wlr_hwcomposer_output *output = wl_container_of(listener,
 		output, vsync_listener);
 
-	if (output->committed) {
+	if (output->committed && wl_event_source_timer_update(output->frame_timer,
+			output->backend->idle_time) == 0) {
 		output->committed = false;
-		wl_event_source_timer_update(output->frame_timer,
-			output->backend->idle_time);
 	}
 }
 
