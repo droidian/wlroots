@@ -37,7 +37,7 @@ struct wlr_hwcomposer_backend {
 		struct wl_signal vsync;
 	} events;
 
-	int idle_time; // ms
+	int idle_time; // nsec
 
 #ifdef HWC_DEVICE_API_VERSION_2_0
 	hwc2_compat_device_t* hwc2_device;
@@ -58,6 +58,8 @@ struct wlr_hwcomposer_output {
 	struct wl_event_source *frame_timer;
 	struct wl_event_source *vsync_timer;
 	int frame_delay; // ms
+	int vsync_timer_fd;
+	struct wl_event_source *vsync_event;
 
 	bool committed;
 

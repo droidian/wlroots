@@ -1,3 +1,7 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <assert.h>
@@ -13,6 +17,10 @@
 #include <wlr/util/log.h>
 #include "backend/hwcomposer.h"
 #include "util/signal.h"
+
+#include "time.h"
+#include <sys/epoll.h>
+#include <sys/timerfd.h>
 
 static void output_present(void *user_data, struct ANativeWindow *window,
 		struct ANativeWindowBuffer *buffer)
@@ -102,8 +110,6 @@ static bool output_commit(struct wlr_output *wlr_output) {
 		}
 	}
 
-	output->committed = true;
-
 	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_BUFFER) {
 		pixman_region32_t *damage = NULL;
 		if (wlr_output->pending.committed & WLR_OUTPUT_STATE_DAMAGE) {
@@ -116,6 +122,7 @@ static bool output_commit(struct wlr_output *wlr_output) {
 					output->egl_surface, damage)) {
 				return false;
 			}
+			output->committed = true;
 			break;
 		case WLR_OUTPUT_STATE_BUFFER_SCANOUT:;
 			wlr_log(WLR_ERROR, "WLR_OUTPUT_STATE_BUFFER_SCANOUT not implemented");
@@ -186,8 +193,14 @@ static void output_destroy(struct wlr_output *wlr_output) {
 
 	wl_list_remove(&output->link);
 
-	wl_event_source_remove(output->frame_timer);
+	if (output->vsync_event) {
+		wl_event_source_remove(output->vsync_event);
+	}
 	wl_event_source_remove(output->vsync_timer);
+
+	if (output->vsync_timer_fd >= 0 && close(output->vsync_timer_fd) == -1) {
+		wlr_log(WLR_ERROR, "Unable to close vsync timer fd!");
+	}
 
 	wl_list_remove(&output->vsync_listener.link);
 
@@ -219,10 +232,13 @@ bool wlr_output_is_hwcomposer(struct wlr_output *wlr_output) {
 	return wlr_output->impl == &output_impl;
 }
 
-static int signal_frame(void *data) {
+static int signal_frame(int fd, uint32_t mask, void *data) {
 	struct wlr_hwcomposer_output *output = data;
 
-	wlr_output_send_frame(&output->wlr_output);
+	uint64_t res;
+	if (read(fd, &res, sizeof(res)) > 0) {
+		wlr_output_send_frame(&output->wlr_output);
+	}
 
 	return 0;
 }
@@ -254,9 +270,19 @@ static void on_vsync(struct wl_listener *listener, void *data) {
 	struct wlr_hwcomposer_output *output = wl_container_of(listener,
 		output, vsync_listener);
 
-	if (output->committed && wl_event_source_timer_update(output->frame_timer,
-			output->backend->idle_time) == 0) {
-		output->committed = false;
+	if (output->committed) {
+		struct itimerspec spec = {
+			.it_interval = {0},
+			.it_value = {
+				.tv_sec = 0,
+				.tv_nsec = output->backend->idle_time,
+			}
+		};
+		if (timerfd_settime(output->vsync_timer_fd, 0, &spec, NULL) == 0) {
+			output->committed = false;
+		} else {
+			wlr_log(WLR_ERROR, "Failed to arm timer");
+		}
 	}
 }
 
@@ -306,13 +332,24 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend) {
 	wlr_renderer_end(backend->renderer);
 
 	struct wl_event_loop *ev = wl_display_get_event_loop(backend->display);
-	output->frame_timer = wl_event_loop_add_timer(ev, signal_frame, output);
 	output->vsync_timer = wl_event_loop_add_timer(ev, on_vsync_timer_elapsed, output);
 
 	output->vsync_listener.notify = on_vsync;
 	wl_signal_add(&backend->events.vsync, &output->vsync_listener);
 
 	wl_list_insert(&backend->outputs, &output->link);
+
+	output->vsync_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
+	if (output->vsync_timer_fd < 0) {
+		wlr_log(WLR_ERROR, "Failed to create vsync timer fd");
+		return NULL;
+	}
+	output->vsync_event = wl_event_loop_add_fd(ev, output->vsync_timer_fd,
+		WL_EVENT_READABLE, signal_frame, output);
+	if (!output->vsync_event) {
+		wlr_log(WLR_ERROR, "Failed to create vsync event source");
+		return NULL;
+	}
 
 	if (backend->started) {
 		wl_event_source_timer_update(output->vsync_timer, output->frame_delay);

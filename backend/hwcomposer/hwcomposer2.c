@@ -83,11 +83,6 @@ bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc)
 	hwc->hwc_refresh = (config->vsyncPeriod == 0) ? 60000 : 10E11 / config->vsyncPeriod;
 	wlr_log(WLR_INFO, "width: %i height: %i Refresh: %i\n", config->width, config->height, hwc->hwc_refresh);
 
-	if (!hwc->idle_time)
-		// Try to be as close as possible as the actual vsync
-		// as calculated by the hwc_refresh.
-		hwc->idle_time = (1000000 / hwc->hwc_refresh) - 3; // ms
-
 	hwc2_compat_layer_t* layer = hwc->hwc2_primary_layer =
 		hwc2_compat_display_create_layer(hwc->hwc2_primary_display);
 
