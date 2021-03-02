@@ -112,8 +112,8 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 
 		hwc->idle_time = (*end || idle_time < 2) ? 2 * 1000000 : idle_time * 1000000;
 	} else {
-		// Default to 5
-		hwc->idle_time = 5 * 1000000;
+		// Default to 2
+		hwc->idle_time = 2 * 1000000;
 	}
 
 	hw_device_t *hwcDevice = NULL;
@@ -159,7 +159,8 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 	wlr_log(WLR_INFO, "width: %i height: %i\n", attr_values[0], attr_values[1]);
 	hwc->hwc_width = attr_values[0];
 	hwc->hwc_height = attr_values[1];
-	hwc->hwc_refresh = (attr_values[2] == 0) ? 60000 : 10E11 / attr_values[2];
+	hwc->hwc_refresh = (attr_values[2] == 0) ?
+		(1000000000000LL / HWCOMPOSER_DEFAULT_REFRESH) : attr_values[2];
 
 	size_t size = sizeof(hwc_display_contents_1_t) + 2 * sizeof(hwc_layer_1_t);
 	hwc_display_contents_1_t *list = (hwc_display_contents_1_t *) malloc(size);

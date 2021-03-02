@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
+#include <errno.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <assert.h>
@@ -49,6 +50,44 @@ static void output_present(void *user_data, struct ANativeWindow *window,
 	}
 }
 
+static void schedule_frame(struct wlr_hwcomposer_output *output) {
+	struct wlr_output *wlr_output =
+		(struct wl_output *)output;
+
+	int64_t time, next_vsync, scheduled_next;
+	struct timespec now, frame_tspec;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+
+	time = (now.tv_sec * 1000000000LL) +  now.tv_nsec;
+	next_vsync = output->backend->hwc_vsync_last_timestamp + output->backend->hwc_refresh;
+
+	// We need to schedule the frame render so that it can be hopefully
+	// be swapped before the next vsync.
+	//
+	// If the delta of the current time and the predicted next vsync
+	// is too close, we won't make it, so defer the render on the next
+	// cycle.
+	if ((next_vsync - time) <= output->backend->idle_time) {
+		// Too close! Sad
+		scheduled_next = next_vsync + output->backend->hwc_refresh - output->backend->idle_time;
+	} else {
+		// We can go ahead
+		scheduled_next = next_vsync - output->backend->idle_time;
+	}
+
+	timespec_from_nsec(&frame_tspec, scheduled_next);
+
+	struct itimerspec frame_interval = {
+		.it_interval = {0},
+		.it_value = frame_tspec,
+	};
+
+	if (timerfd_settime(output->vsync_timer_fd, TFD_TIMER_ABSTIME, &frame_interval, NULL) == -1) {
+		wlr_log(WLR_ERROR, "Failed to arm timer, errno %d", errno);
+	}
+}
+
 static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 		int32_t height, int32_t refresh) {
 	struct wlr_hwcomposer_output *output =
@@ -72,7 +111,7 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 		return false;
 	}
 
-	output->frame_delay = 1000000 / refresh;
+	output->frame_delay = refresh * 0.000001;
 
 	wlr_output_update_custom_mode(&output->wlr_output, width, height, refresh);
 	return true;
@@ -81,6 +120,8 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 static bool output_commit(struct wlr_output *wlr_output) {
 	struct wlr_hwcomposer_output *output =
 		(struct wlr_hwcomposer_output *)wlr_output;
+
+	bool should_schedule_frame = false;
 
 	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_ENABLED) {
 		hwcomposer_blank_toggle(output->backend);
@@ -122,7 +163,7 @@ static bool output_commit(struct wlr_output *wlr_output) {
 					output->egl_surface, damage)) {
 				return false;
 			}
-			output->committed = true;
+			should_schedule_frame = true;
 			break;
 		case WLR_OUTPUT_STATE_BUFFER_SCANOUT:;
 			wlr_log(WLR_ERROR, "WLR_OUTPUT_STATE_BUFFER_SCANOUT not implemented");
@@ -133,6 +174,10 @@ static bool output_commit(struct wlr_output *wlr_output) {
 	}
 
 	wlr_egl_unset_current(&output->backend->egl);
+
+	if (should_schedule_frame) {
+		schedule_frame(output);
+	}
 
 	return true;
 }
@@ -202,8 +247,6 @@ static void output_destroy(struct wlr_output *wlr_output) {
 		wlr_log(WLR_ERROR, "Unable to close vsync timer fd!");
 	}
 
-	wl_list_remove(&output->vsync_listener.link);
-
 	wlr_egl_destroy_surface(&output->backend->egl, output->egl_surface);
 
 	// Disable vsync
@@ -250,9 +293,6 @@ static int on_vsync_timer_elapsed(void *data) {
 	// Ensure vsync gets enabled
 	hwcomposer_vsync_control(output->backend, true);
 
-	// Ensure the first frame event can be emitted
-	output->committed = true;
-
 	if (!output->backend->hwc_vsync_enabled && vsync_enable_tries < 5) {
 		// Try again
 		if (wl_event_source_timer_update(output->vsync_timer,
@@ -261,29 +301,10 @@ static int on_vsync_timer_elapsed(void *data) {
 		}
 	} else if (output->backend->hwc_vsync_enabled) {
 		vsync_enable_tries = 0;
+		schedule_frame(output);
 	}
 
 	return 0;
-}
-
-static void on_vsync(struct wl_listener *listener, void *data) {
-	struct wlr_hwcomposer_output *output = wl_container_of(listener,
-		output, vsync_listener);
-
-	if (output->committed) {
-		struct itimerspec spec = {
-			.it_interval = {0},
-			.it_value = {
-				.tv_sec = 0,
-				.tv_nsec = output->backend->idle_time,
-			}
-		};
-		if (timerfd_settime(output->vsync_timer_fd, 0, &spec, NULL) == 0) {
-			output->committed = false;
-		} else {
-			wlr_log(WLR_ERROR, "Failed to arm timer");
-		}
-	}
 }
 
 struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend) {
@@ -334,10 +355,12 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend) {
 	struct wl_event_loop *ev = wl_display_get_event_loop(backend->display);
 	output->vsync_timer = wl_event_loop_add_timer(ev, on_vsync_timer_elapsed, output);
 
-	output->vsync_listener.notify = on_vsync;
-	wl_signal_add(&backend->events.vsync, &output->vsync_listener);
-
 	wl_list_insert(&backend->outputs, &output->link);
+
+	// FIXME: This will break on multiple outputs!
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	output->backend->hwc_vsync_last_timestamp = now.tv_sec * 1000000000 + now.tv_nsec;
 
 	output->vsync_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
 	if (output->vsync_timer_fd < 0) {

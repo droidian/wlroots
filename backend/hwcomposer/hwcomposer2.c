@@ -25,7 +25,9 @@ void hwcomposer2_vsync_callback(HWC2EventListener* listener, int32_t sequence_id
 		hwc2_display_t display, int64_t timestamp)
 {
 	struct wlr_hwcomposer_backend *hwc = ((hwc_procs_v20 *)listener)->hwc;
-	wlr_signal_emit_safe(&hwc->events.vsync, hwc);
+
+	// FIXME: This will cause issues with multiple displays
+	hwc->hwc_vsync_last_timestamp = timestamp;
 }
 
 void hwcomposer2_hotplug_callback(HWC2EventListener* listener, int32_t sequence_id,
@@ -80,7 +82,9 @@ bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc)
 
 	hwc->hwc_width = config->width;
 	hwc->hwc_height = config->height;
-	hwc->hwc_refresh = (config->vsyncPeriod == 0) ? 60000 : 10E11 / config->vsyncPeriod;
+	hwc->hwc_refresh = config->vsyncPeriod;
+	hwc->hwc_refresh = (config->vsyncPeriod == 0) ?
+		(1000000000000LL / HWCOMPOSER_DEFAULT_REFRESH) : config->vsyncPeriod;
 	wlr_log(WLR_INFO, "width: %i height: %i Refresh: %i\n", config->width, config->height, hwc->hwc_refresh);
 
 	hwc2_compat_layer_t* layer = hwc->hwc2_primary_layer =

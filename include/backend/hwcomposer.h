@@ -30,14 +30,16 @@ struct wlr_hwcomposer_backend {
 	uint32_t hwc_version;
 	int hwc_width;
 	int hwc_height;
-	int hwc_refresh;
+	int64_t hwc_refresh;
 	bool hwc_vsync_enabled;
 
-	struct {
-		struct wl_signal vsync;
-	} events;
+	int64_t idle_time; // nsec
 
-	int idle_time; // nsec
+	// FIXME: Store the last vsync event timestamp. This really
+	// belongs to wlr_hwcomposer_output, but for simplicity's sake
+	// until we support multiple outputs we'll keep it here.
+	int64_t hwc_vsync_last_timestamp;
+	// TODO: Also store 'vsyncPeriodNanos' if vsync2_4 is supported
 
 #ifdef HWC_DEVICE_API_VERSION_2_0
 	hwc2_compat_device_t* hwc2_device;
@@ -55,15 +57,10 @@ struct wlr_hwcomposer_output {
 	struct ANativeWindow *egl_window;
 	void *egl_display;
 	void *egl_surface;
-	struct wl_event_source *frame_timer;
 	struct wl_event_source *vsync_timer;
 	int frame_delay; // ms
 	int vsync_timer_fd;
 	struct wl_event_source *vsync_event;
-
-	bool committed;
-
-	struct wl_listener vsync_listener;
 };
 
 void hwcomposer_vsync_control(struct wlr_hwcomposer_backend *hwc, bool enable);
