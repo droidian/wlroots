@@ -27,23 +27,6 @@ void hwcomposer_vsync_control(struct wlr_hwcomposer_backend *hwc, bool enable)
 	hwc->hwc_vsync_enabled = enable && (result == 0);
 }
 
-void hwcomposer_vsync_wait(struct wlr_hwcomposer_backend *hwc)
-{
-	if (!hwc->hwc_vsync_enabled) {
-		 return;
-	}
-	pthread_mutex_lock(&hwc->hwc_vsync_mutex);
-	pthread_cond_wait(&hwc->hwc_vsync_wait_condition, &hwc->hwc_vsync_mutex);
-	pthread_mutex_unlock(&hwc->hwc_vsync_mutex);
-}
-
-void hwcomposer_vsync_wake(struct wlr_hwcomposer_backend *hwc)
-{
-	pthread_mutex_lock(&hwc->hwc_vsync_mutex);
-	pthread_cond_signal(&hwc->hwc_vsync_wait_condition);
-	pthread_mutex_unlock(&hwc->hwc_vsync_mutex);
-}
-
 void hwcomposer_blank_toggle(struct wlr_hwcomposer_backend *hwc)
 {
 	hwc->is_blank = !hwc->is_blank;
@@ -121,6 +104,18 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 	wlr_log(WLR_INFO, " * Author: %s\n", hwc_module->author);
 	wlr_log(WLR_INFO, "== hwcomposer module ==\n");
 
+	// Get idle time from the environment, if specified
+	char *idle_time_env = getenv("WLR_HWC_IDLE_TIME");
+	if (idle_time_env) {
+		char *end;
+		int idle_time = (int)strtol(idle_time_env, &end, 10);
+
+		hwc->idle_time = (*end || idle_time < 2) ? 2 * 1000000 : idle_time * 1000000;
+	} else {
+		// Default to 2
+		hwc->idle_time = 2 * 1000000;
+	}
+
 	hw_device_t *hwcDevice = NULL;
 	err = hwc_module->methods->open(hwc_module, HWC_HARDWARE_COMPOSER, &hwcDevice);
 #ifdef HWC_DEVICE_API_VERSION_2_0
@@ -130,11 +125,6 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 	} else
 #endif
 		hwc->hwc_version = interpreted_version(hwcDevice);
-	if (pthread_mutex_init(&hwc->hwc_vsync_mutex, NULL) ||
-		pthread_cond_init(&hwc->hwc_vsync_wait_condition, NULL)) {
-		wlr_log(WLR_INFO, "Error creating rendering thread\n");
-		return false;
-	}
 	hwc->is_blank = false;
 #ifdef HWC_DEVICE_API_VERSION_2_0
 	if (hwc->hwc_version == HWC_DEVICE_API_VERSION_2_0) {
@@ -169,7 +159,8 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 	wlr_log(WLR_INFO, "width: %i height: %i\n", attr_values[0], attr_values[1]);
 	hwc->hwc_width = attr_values[0];
 	hwc->hwc_height = attr_values[1];
-	hwc->hwc_refresh = (attr_values[2] == 0) ? 60000 : 10E11 / attr_values[2];
+	hwc->hwc_refresh = (attr_values[2] == 0) ?
+		(1000000000000LL / HWCOMPOSER_DEFAULT_REFRESH) : attr_values[2];
 
 	size_t size = sizeof(hwc_display_contents_1_t) + 2 * sizeof(hwc_layer_1_t);
 	hwc_display_contents_1_t *list = (hwc_display_contents_1_t *) malloc(size);
