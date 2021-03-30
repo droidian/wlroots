@@ -255,6 +255,12 @@ bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform, void *remote_display,
 	egl->exts.buffer_age_ext =
 		check_egl_ext(display_exts_str, "EGL_EXT_buffer_age");
 
+	if (check_egl_ext(display_exts_str, "EGL_KHR_partial_update")) {
+		egl->exts.partial_update_ext = true;
+		load_egl_proc(&egl->procs.eglSetDamageRegionKHR,
+			"eglSetDamageRegionKHR");
+	}
+
 	if (check_egl_ext(display_exts_str, "EGL_KHR_swap_buffers_with_damage")) {
 		egl->exts.swap_buffers_with_damage = true;
 		load_egl_proc(&egl->procs.eglSwapBuffersWithDamage,
@@ -416,7 +422,7 @@ EGLSurface wlr_egl_create_surface(struct wlr_egl *egl, void *window) {
 }
 
 static int egl_get_buffer_age(struct wlr_egl *egl, EGLSurface surface) {
-	if (!egl->exts.buffer_age_ext) {
+	if (!egl->exts.buffer_age_ext && !egl->exts.partial_update_ext) {
 		return -1;
 	}
 
@@ -482,6 +488,64 @@ bool wlr_egl_restore_context(struct wlr_egl_context *context) {
 			context->read_surface, context->context);
 }
 
+static void transform_damage(EGLDisplay display, EGLSurface surface,
+		pixman_region32_t *damage, int *nrects, EGLint **egl_damage) {
+	EGLint width = 0, height = 0;
+	eglQuerySurface(display, surface, EGL_WIDTH, &width);
+	eglQuerySurface(display, surface, EGL_HEIGHT, &height);
+
+	pixman_region32_t flipped_damage;
+	pixman_region32_init(&flipped_damage);
+	wlr_region_transform(&flipped_damage, damage,
+		WL_OUTPUT_TRANSFORM_FLIPPED_180, width, height);
+
+	pixman_box32_t *rects =
+		pixman_region32_rectangles(&flipped_damage, nrects);
+	*egl_damage = malloc((*nrects * 4 + 1) * sizeof(EGLint));
+	for (int i = 0; i < *nrects; ++i) {
+		(*egl_damage)[4*i] = rects[i].x1;
+		(*egl_damage)[4*i + 1] = rects[i].y1;
+		(*egl_damage)[4*i + 2] = rects[i].x2 - rects[i].x1;
+		(*egl_damage)[4*i + 3] = rects[i].y2 - rects[i].y1;
+	}
+
+	pixman_region32_fini(&flipped_damage);
+
+	if (*nrects == 0) {
+		// Swapping with no rects is the same as swapping with the entire
+		// surface damaged. To swap with no damage, we set the damage region
+		// to a single empty rectangle.
+		*nrects = 1;
+		memset(*egl_damage, 0, sizeof(EGLint));
+	}
+}
+
+bool wlr_egl_set_damage_region(struct wlr_egl *egl, EGLSurface surface,
+		pixman_region32_t *damage) {
+	if (!egl->exts.partial_update_ext || damage == NULL) {
+		return true;
+	}
+
+	int nrects;
+	EGLint *egl_damage;
+	EGLBoolean ret;
+
+	transform_damage(egl->display, surface, damage, &nrects,
+		&egl_damage);
+
+	ret = egl->procs.eglSetDamageRegionKHR(egl->display, surface,
+			egl_damage, nrects);
+
+	free(egl_damage);
+
+	if (!ret) {
+		wlr_log(WLR_ERROR, "eglSetDamageRegionKHR failed");
+		return false;
+	}
+
+	return true;
+}
+
 bool wlr_egl_swap_buffers(struct wlr_egl *egl, EGLSurface surface,
 		pixman_region32_t *damage) {
 	// Never block when swapping buffers on Wayland
@@ -491,38 +555,16 @@ bool wlr_egl_swap_buffers(struct wlr_egl *egl, EGLSurface surface,
 
 	EGLBoolean ret;
 	if (damage != NULL && egl->exts.swap_buffers_with_damage) {
-		EGLint width = 0, height = 0;
-		eglQuerySurface(egl->display, surface, EGL_WIDTH, &width);
-		eglQuerySurface(egl->display, surface, EGL_HEIGHT, &height);
-
-		pixman_region32_t flipped_damage;
-		pixman_region32_init(&flipped_damage);
-		wlr_region_transform(&flipped_damage, damage,
-			WL_OUTPUT_TRANSFORM_FLIPPED_180, width, height);
-
 		int nrects;
-		pixman_box32_t *rects =
-			pixman_region32_rectangles(&flipped_damage, &nrects);
-		EGLint egl_damage[4 * nrects + 1];
-		for (int i = 0; i < nrects; ++i) {
-			egl_damage[4*i] = rects[i].x1;
-			egl_damage[4*i + 1] = rects[i].y1;
-			egl_damage[4*i + 2] = rects[i].x2 - rects[i].x1;
-			egl_damage[4*i + 3] = rects[i].y2 - rects[i].y1;
-		}
+		EGLint *egl_damage;
 
-		pixman_region32_fini(&flipped_damage);
-
-		if (nrects == 0) {
-			// Swapping with no rects is the same as swapping with the entire
-			// surface damaged. To swap with no damage, we set the damage region
-			// to a single empty rectangle.
-			nrects = 1;
-			memset(egl_damage, 0, sizeof(egl_damage));
-		}
+		transform_damage(egl->display, surface, damage, &nrects,
+			&egl_damage);
 
 		ret = egl->procs.eglSwapBuffersWithDamage(egl->display, surface,
 			egl_damage, nrects);
+
+		free(egl_damage);
 	} else {
 		ret = eglSwapBuffers(egl->display, surface);
 	}

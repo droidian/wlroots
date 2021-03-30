@@ -49,6 +49,7 @@ struct wlr_egl {
 	struct {
 		bool bind_wayland_display_wl;
 		bool buffer_age_ext;
+		bool partial_update_ext;
 		bool image_base_khr;
 		bool image_dma_buf_export_mesa;
 		bool image_dmabuf_import_ext;
@@ -64,6 +65,7 @@ struct wlr_egl {
 		PFNEGLQUERYWAYLANDBUFFERWL eglQueryWaylandBufferWL;
 		PFNEGLBINDWAYLANDDISPLAYWL eglBindWaylandDisplayWL;
 		PFNEGLUNBINDWAYLANDDISPLAYWL eglUnbindWaylandDisplayWL;
+		PFNEGLSETDAMAGEREGIONKHRPROC eglSetDamageRegionKHR;
 		PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC eglSwapBuffersWithDamage; // KHR or EXT
 		PFNEGLQUERYDMABUFFORMATSEXTPROC eglQueryDmaBufFormatsEXT;
 		PFNEGLQUERYDMABUFMODIFIERSEXTPROC eglQueryDmaBufModifiersEXT;
@@ -158,6 +160,9 @@ void wlr_egl_save_context(struct wlr_egl_context *context);
  * Restore EGL context that was previously saved using wlr_egl_save_current().
  */
 bool wlr_egl_restore_context(struct wlr_egl_context *context);
+
+bool wlr_egl_set_damage_region(struct wlr_egl *egl, EGLSurface surface,
+		pixman_region32_t *damage);
 
 bool wlr_egl_swap_buffers(struct wlr_egl *egl, EGLSurface surface,
 	pixman_region32_t *damage);
