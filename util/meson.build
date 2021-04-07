@@ -6,4 +6,5 @@ wlr_files += files(
 	'shm.c',
 	'signal.c',
 	'time.c',
+	'token.c',
 )
