@@ -167,6 +167,16 @@ static void session_signal(struct wl_listener *listener, void *data) {
 
 	if (session->active) {
 		libinput_resume(backend->libinput_context);
+
+		// HACK: Forcibly process events if there are any queued
+		// On some devices it has been observed event processing
+		// getting stuck on resume.
+		enum libinput_event_type next_event =
+			libinput_next_event_type(backend->libinput_context);
+		if (next_event != LIBINPUT_EVENT_NONE) {
+			handle_libinput_readable(libinput_get_fd(backend->libinput_context),
+				WL_EVENT_READABLE, backend);
+		}
 	} else {
 		libinput_suspend(backend->libinput_context);
 	}
