@@ -32,6 +32,7 @@ static void backend_destroy(struct wlr_backend *wlr_backend) {
 
 	wl_list_remove(&backend->display_destroy.link);
 	wl_list_remove(&backend->session_destroy.link);
+	wl_list_remove(&backend->session_signal.link);
 
 	struct wlr_hwcomposer_output *output, *output_tmp;
 	wl_list_for_each_safe(output, output_tmp, &backend->outputs, link) {
@@ -68,6 +69,22 @@ static void handle_session_destroy(struct wl_listener *listener, void *data) {
 	struct wlr_hwcomposer_backend *backend =
 		wl_container_of(listener, backend, session_destroy);
 	backend_destroy(&backend->backend);
+}
+
+static void handle_session_signal(struct wl_listener *listener, void *data) {
+	struct wlr_hwcomposer_backend *backend =
+		wl_container_of(listener, backend, session_signal);
+	struct wlr_session *session = (struct wlr_session *)data;
+
+	struct wlr_hwcomposer_output *output, *output_tmp;
+
+	// HACK: Queue enable/disable output events on session events.
+	// This allows the state to be coherent on what is expected even
+	// if there is no time to set the output state.
+	wl_list_for_each_safe(output, output_tmp, &backend->outputs, link) {
+		wlr_output_enable(&output->wlr_output, session->active);
+		// commit() is not needed
+	}
 }
 
 struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
@@ -116,6 +133,9 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 
 	backend->session_destroy.notify = handle_session_destroy;
 	wl_signal_add(&session->events.destroy, &backend->session_destroy);
+
+	backend->session_signal.notify = handle_session_signal;
+	wl_signal_add(&session->session_signal, &backend->session_signal);
 
 	return &backend->backend;
 }

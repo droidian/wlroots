@@ -23,6 +23,7 @@ struct wlr_hwcomposer_backend {
 	struct wl_list input_devices;
 	struct wl_listener display_destroy;
 	struct wl_listener session_destroy;
+	struct wl_listener session_signal;
 	bool started;
 	bool is_blank;
 
