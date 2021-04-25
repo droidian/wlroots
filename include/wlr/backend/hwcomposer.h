@@ -9,7 +9,7 @@
  * default.
  */
 struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
-	wlr_renderer_create_func_t create_renderer_func);
+	struct wlr_session *session, wlr_renderer_create_func_t create_renderer_func);
 /**
  * Create a new hwcomposer output backed by an in-memory EGL framebuffer. You can
  * read pixels from this framebuffer via wlr_renderer_read_pixels but it is

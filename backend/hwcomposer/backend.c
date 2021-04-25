@@ -31,6 +31,7 @@ static void backend_destroy(struct wlr_backend *wlr_backend) {
 	}
 
 	wl_list_remove(&backend->display_destroy.link);
+	wl_list_remove(&backend->session_destroy.link);
 
 	struct wlr_hwcomposer_output *output, *output_tmp;
 	wl_list_for_each_safe(output, output_tmp, &backend->outputs, link) {
@@ -63,8 +64,14 @@ static void handle_display_destroy(struct wl_listener *listener, void *data) {
 	backend_destroy(&backend->backend);
 }
 
+static void handle_session_destroy(struct wl_listener *listener, void *data) {
+	struct wlr_hwcomposer_backend *backend =
+		wl_container_of(listener, backend, session_destroy);
+	backend_destroy(&backend->backend);
+}
+
 struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
-		wlr_renderer_create_func_t create_renderer_func) {
+		struct wlr_session *session, wlr_renderer_create_func_t create_renderer_func) {
 	wlr_log(WLR_INFO, "Creating hwcomposer backend");
 
 	struct wlr_hwcomposer_backend *backend =
@@ -106,6 +113,9 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 
 	backend->display_destroy.notify = handle_display_destroy;
 	wl_display_add_destroy_listener(display, &backend->display_destroy);
+
+	backend->session_destroy.notify = handle_session_destroy;
+	wl_signal_add(&session->events.destroy, &backend->session_destroy);
 
 	return &backend->backend;
 }

@@ -17,10 +17,12 @@ struct wlr_hwcomposer_backend {
 	struct wlr_backend backend;
 	struct wlr_egl egl;
 	struct wlr_renderer *renderer;
+	struct wlr_session *session;
 	struct wl_display *display;
 	struct wl_list outputs;
 	struct wl_list input_devices;
 	struct wl_listener display_destroy;
+	struct wl_listener session_destroy;
 	bool started;
 	bool is_blank;
 
