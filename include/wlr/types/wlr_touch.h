@@ -22,6 +22,7 @@ struct wlr_touch {
 		struct wl_signal up;
 		struct wl_signal motion;
 		struct wl_signal cancel;
+		struct wl_signal frame;
 	} events;
 
 	void *data;
