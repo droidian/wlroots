@@ -12,6 +12,7 @@
 #include <wlr/interfaces/wlr_output.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_matrix.h>
+#include <wlr/util/box.h>
 #include <wlr/util/log.h>
 
 #include "backend/wayland.h"

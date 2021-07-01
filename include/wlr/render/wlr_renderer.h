@@ -13,7 +13,6 @@
 #include <wayland-server-protocol.h>
 #include <wlr/render/egl.h>
 #include <wlr/render/wlr_texture.h>
-#include <wlr/types/wlr_box.h>
 
 enum wlr_renderer_read_pixels_flags {
 	WLR_RENDERER_READ_PIXELS_Y_INVERT = 1,
@@ -21,6 +20,8 @@ enum wlr_renderer_read_pixels_flags {
 
 struct wlr_renderer_impl;
 struct wlr_drm_format_set;
+struct wlr_box;
+struct wlr_fbox;
 
 struct wlr_renderer {
 	const struct wlr_renderer_impl *impl;

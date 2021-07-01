@@ -7,6 +7,7 @@
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_output.h>
+#include <wlr/util/box.h>
 #include <wlr/util/log.h>
 #include "util/signal.h"
 

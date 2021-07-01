@@ -25,9 +25,11 @@
 #include <wayland-server-protocol.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/render/wlr_texture.h>
-#include <wlr/types/wlr_box.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/render/dmabuf.h>
+
+struct wlr_box;
+struct wlr_fbox;
 
 struct wlr_renderer_impl {
 	void (*begin)(struct wlr_renderer *renderer, uint32_t width,

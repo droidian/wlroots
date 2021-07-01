@@ -6,6 +6,7 @@
 #include <wlr/types/wlr_linux_dmabuf_v1.h>
 #include <wlr/types/wlr_screencopy_v1.h>
 #include <wlr/backend.h>
+#include <wlr/util/box.h>
 #include <wlr/util/log.h>
 #include "wlr-screencopy-unstable-v1-protocol.h"
 #include "util/signal.h"
