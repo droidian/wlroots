@@ -852,7 +852,7 @@ static void subsurface_handle_place_below(struct wl_client *client,
 
 	struct wl_list *node;
 	if (sibling_surface == subsurface->parent) {
-		node = subsurface->parent->subsurfaces_pending_below.prev;
+		node = &subsurface->parent->subsurfaces_pending_below;
 	} else {
 		struct wlr_subsurface *sibling =
 			subsurface_find_sibling(subsurface, sibling_surface);
