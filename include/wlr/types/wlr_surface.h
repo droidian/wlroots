@@ -141,6 +141,7 @@ struct wlr_surface {
  */
 struct wlr_subsurface_parent_state {
 	int32_t x, y;
+	struct wl_list link;
 };
 
 struct wlr_subsurface {
@@ -156,9 +157,6 @@ struct wlr_subsurface {
 	bool synchronized;
 	bool reordered;
 	bool mapped;
-
-	struct wl_list parent_link;
-	struct wl_list parent_pending_link;
 
 	struct wl_listener surface_destroy;
 	struct wl_listener parent_destroy;
