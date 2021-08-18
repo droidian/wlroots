@@ -1179,7 +1179,7 @@ static void surface_for_each_surface(struct wlr_surface *surface, int x, int y,
 		wlr_surface_iterator_func_t iterator, void *user_data) {
 	struct wlr_subsurface *subsurface;
 	wl_list_for_each(subsurface, &surface->subsurfaces_below, parent_link) {
-		struct wlr_subsurface_state *state = &subsurface->current;
+		struct wlr_subsurface_parent_state *state = &subsurface->current;
 		int sx = state->x;
 		int sy = state->y;
 
@@ -1190,7 +1190,7 @@ static void surface_for_each_surface(struct wlr_surface *surface, int x, int y,
 	iterator(surface, x, y, user_data);
 
 	wl_list_for_each(subsurface, &surface->subsurfaces_above, parent_link) {
-		struct wlr_subsurface_state *state = &subsurface->current;
+		struct wlr_subsurface_parent_state *state = &subsurface->current;
 		int sx = state->x;
 		int sy = state->y;
 

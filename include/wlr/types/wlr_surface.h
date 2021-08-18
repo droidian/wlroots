@@ -134,7 +134,12 @@ struct wlr_surface {
 	void *data;
 };
 
-struct wlr_subsurface_state {
+/**
+ * The sub-surface state describing the sub-surface's relationship with its
+ * parent. Contrary to other states, this one is not applied on surface commit.
+ * Instead, it's applied on parent surface commit.
+ */
+struct wlr_subsurface_parent_state {
 	int32_t x, y;
 };
 
@@ -143,7 +148,7 @@ struct wlr_subsurface {
 	struct wlr_surface *surface;
 	struct wlr_surface *parent;
 
-	struct wlr_subsurface_state current, pending;
+	struct wlr_subsurface_parent_state current, pending;
 
 	struct wlr_surface_state cached;
 	bool has_cache;
