@@ -117,6 +117,16 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 	return true;
 }
 
+static bool output_test(struct wlr_output *wlr_output) {
+	if ((wlr_output->pending.committed & WLR_OUTPUT_STATE_BUFFER) &&
+		(wlr_output->pending.buffer_type & WLR_OUTPUT_STATE_BUFFER_SCANOUT)) {
+		/* Direct scan-out not supported yet */
+		return false;
+	}
+
+	return true;
+}
+
 static bool output_commit(struct wlr_output *wlr_output) {
 	struct wlr_hwcomposer_output *output =
 		(struct wlr_hwcomposer_output *)wlr_output;
@@ -269,6 +279,7 @@ static const struct wlr_output_impl output_impl = {
 	.handle_damage = output_handle_damage,
 	.commit = output_commit,
 	.rollback_render = output_rollback_render,
+	.test = output_test,
 };
 
 bool wlr_output_is_hwcomposer(struct wlr_output *wlr_output) {
