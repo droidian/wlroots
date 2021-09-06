@@ -111,7 +111,7 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 		return false;
 	}
 
-	output->frame_delay = refresh * 0.000001;
+	output->frame_delay = 1000000 / refresh;
 
 	wlr_output_update_custom_mode(&output->wlr_output, width, height, refresh);
 	return true;
@@ -348,7 +348,10 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend) {
 	backend->egl.display = output->egl_display;
 
 	output_set_custom_mode(wlr_output, backend->hwc_width,
-		backend->hwc_height, backend->hwc_refresh);
+		backend->hwc_height,
+		backend->hwc_refresh ?
+			(1000000000000LL / backend->hwc_refresh) :
+			0);
 	strncpy(wlr_output->make, "hwcomposer", sizeof(wlr_output->make));
 	strncpy(wlr_output->model, "hwcomposer", sizeof(wlr_output->model));
 	snprintf(wlr_output->name, sizeof(wlr_output->name), "HWCOMPOSER-%d",
