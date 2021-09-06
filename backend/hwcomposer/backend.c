@@ -77,7 +77,7 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 	backend->display = display;
 	wl_list_init(&backend->outputs);
 
-	hwcomposer_api_init(backend);
+	hwcomposer2_api_init(backend);
 
 	static EGLint config_attribs[] = {
 		EGL_SURFACE_TYPE, EGL_WINDOW_BIT,

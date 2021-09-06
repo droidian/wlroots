@@ -14,12 +14,41 @@
 
 #include "backend/hwcomposer.h"
 
-#ifdef HWC_DEVICE_API_VERSION_2_0
 typedef struct
 {
 	struct HWC2EventListener listener;
 	struct wlr_hwcomposer_backend *hwc;
 } hwc_procs_v20;
+
+inline static uint32_t interpreted_version(hw_device_t *hwc_device)
+{
+	uint32_t version = hwc_device->version;
+
+	if ((version & 0xffff0000) == 0) {
+		// Assume header version is always 1
+		uint32_t header_version = 1;
+
+		// Legacy version encoding
+		version = (version << 16) | header_version;
+	}
+	return version;
+}
+
+void hwcomposer_vsync_control(struct wlr_hwcomposer_backend *hwc, bool enable)
+{
+	if (hwc->hwc_vsync_enabled == enable) {
+		return;
+	}
+	hwc2_compat_display_set_vsync_enabled(hwc->hwc2_primary_display, enable ? HWC2_VSYNC_ENABLE : HWC2_VSYNC_DISABLE);
+	hwc->hwc_vsync_enabled = enable;
+}
+
+void hwcomposer_blank_toggle(struct wlr_hwcomposer_backend *hwc)
+{
+	hwc->is_blank = !hwc->is_blank;
+	hwcomposer_vsync_control(hwc, hwc->is_blank);
+	hwc2_compat_display_set_power_mode(hwc->hwc2_primary_display, hwc->is_blank ? HWC2_POWER_MODE_OFF : HWC2_POWER_MODE_ON);
+}
 
 void hwcomposer2_vsync_callback(HWC2EventListener* listener, int32_t sequence_id,
 		hwc2_display_t display, int64_t timestamp)
@@ -53,6 +82,40 @@ bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc)
 {
 	int err;
 	static int composer_sequence_id = 0;
+
+	hw_module_t *hwc_module = 0;
+
+	err = hw_get_module(HWC_HARDWARE_MODULE_ID, (const hw_module_t **) &hwc_module);
+	assert(err == 0);
+
+	wlr_log(WLR_INFO, "== hwcomposer module ==\n");
+	wlr_log(WLR_INFO, " * Address: %p\n", hwc_module);
+	wlr_log(WLR_INFO, " * Module API Version: %x\n", hwc_module->module_api_version);
+	wlr_log(WLR_INFO, " * HAL API Version: %x\n", hwc_module->hal_api_version); /* should be zero */
+	wlr_log(WLR_INFO, " * Identifier: %s\n", hwc_module->id);
+	wlr_log(WLR_INFO, " * Name: %s\n", hwc_module->name);
+	wlr_log(WLR_INFO, " * Author: %s\n", hwc_module->author);
+	wlr_log(WLR_INFO, "== hwcomposer module ==\n");
+
+	// Get idle time from the environment, if specified
+	char *idle_time_env = getenv("WLR_HWC_IDLE_TIME");
+	if (idle_time_env) {
+		char *end;
+		int idle_time = (int)strtol(idle_time_env, &end, 10);
+
+		hwc->idle_time = (*end || idle_time < 2) ? 2 * 1000000 : idle_time * 1000000;
+	} else {
+		// Default to 2
+		hwc->idle_time = 2 * 1000000;
+	}
+
+	hw_device_t *hwcDevice = NULL;
+	err = hwc_module->methods->open(hwc_module, HWC_HARDWARE_COMPOSER, &hwcDevice);
+	// On some HWC2 tested open fails
+	hwc->hwc_version = err ? HWC_DEVICE_API_VERSION_2_0 : interpreted_version(hwcDevice);
+
+	/* We only support hwc2 */
+	assert (hwc->hwc_version == HWC_DEVICE_API_VERSION_2_0);
 
 	hwc_procs_v20* procs = malloc(sizeof(hwc_procs_v20));
 	procs->listener.on_vsync_received = hwcomposer2_vsync_callback;
@@ -95,6 +158,8 @@ bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc)
 	hwc2_compat_layer_set_source_crop(layer, 0.0f, 0.0f, hwc->hwc_width, hwc->hwc_height);
 	hwc2_compat_layer_set_display_frame(layer, 0, 0, hwc->hwc_width, hwc->hwc_height);
 	hwc2_compat_layer_set_visible_region(layer, 0, 0, hwc->hwc_width, hwc->hwc_height);
+
+	hwc2_compat_display_set_power_mode(hwc->hwc2_primary_display, HWC2_POWER_MODE_ON);
 
 	return true;
 }
@@ -161,4 +226,3 @@ void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
 
 	HWCNativeBufferSetFence(buffer, present_fence);
 }
-#endif // HWC_DEVICE_API_VERSION_2_0

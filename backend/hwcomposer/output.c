@@ -23,33 +23,6 @@
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 
-static void output_present(void *user_data, struct ANativeWindow *window,
-		struct ANativeWindowBuffer *buffer)
-{
-	struct wlr_hwcomposer_backend *hwc = (struct wlr_hwcomposer_backend *)user_data;
-	hwc_display_contents_1_t **contents = hwc->hwc_contents;
-	hwc_layer_1_t *fblayer = hwc->fblayer;
-	hwc_composer_device_1_t *hwcdevice = hwc->hwc_device_ptr;
-
-	int oldretire = contents[0]->retireFenceFd;
-	contents[0]->retireFenceFd = -1;
-
-	fblayer->handle = buffer->handle;
-	fblayer->acquireFenceFd = HWCNativeBufferGetFence(buffer);
-	fblayer->releaseFenceFd = -1;
-	int err = hwcdevice->prepare(hwcdevice, HWC_NUM_DISPLAY_TYPES, contents);
-	assert(err == 0);
-
-	err = hwcdevice->set(hwcdevice, HWC_NUM_DISPLAY_TYPES, contents);
-	// in android surfaceflinger ignores the return value as not all display types may be supported
-	HWCNativeBufferSetFence(buffer, fblayer->releaseFenceFd);
-
-	if (oldretire != -1) {
-		sync_wait(oldretire, -1);
-		close(oldretire);
-	}
-}
-
 static void schedule_frame(struct wlr_hwcomposer_output *output) {
 	struct wlr_output *wlr_output =
 		(struct wl_output *)output;
@@ -333,16 +306,9 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend) {
 		backend->display);
 	struct wlr_output *wlr_output = &output->wlr_output;
 
-#ifdef HWC_DEVICE_API_VERSION_2_0
-	if (backend->hwc_version == HWC_DEVICE_API_VERSION_2_0)
-		output->egl_window = HWCNativeWindowCreate(
-			backend->hwc_width, backend->hwc_height,
-			HAL_PIXEL_FORMAT_RGBA_8888, hwcomposer2_present, backend);
-	else
-#endif
-		output->egl_window = HWCNativeWindowCreate(
-			backend->hwc_width, backend->hwc_height,
-			HAL_PIXEL_FORMAT_RGBA_8888, output_present, backend);
+	output->egl_window = HWCNativeWindowCreate(
+		backend->hwc_width, backend->hwc_height,
+		HAL_PIXEL_FORMAT_RGBA_8888, hwcomposer2_present, backend);
 
 	output->egl_display = eglGetDisplay(NULL);
 	backend->egl.display = output->egl_display;
