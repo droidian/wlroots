@@ -70,7 +70,7 @@ struct wlr_hwcomposer_backend* hwcomposer2_api_init(hw_device_t *hwc_device)
 {
 	int err;
 	static int composer_sequence_id = 0;
-	struct wlr_hwcomposer_backend *hwc;
+	struct wlr_hwcomposer_backend *hwc_backend;
 	struct wlr_hwcomposer_backend_hwc2 *hwc2 =
 		calloc(1, sizeof(struct wlr_hwcomposer_backend_hwc2));
 	if (!hwc2) {
@@ -79,7 +79,7 @@ struct wlr_hwcomposer_backend* hwcomposer2_api_init(hw_device_t *hwc_device)
 	}
 
 	hwcomposer_init (&hwc2->hwc_backend);
-	hwc = &hwc2->hwc_backend;
+	hwc_backend = &hwc2->hwc_backend;
 
 	hwc_procs_v20* procs = malloc(sizeof(hwc_procs_v20));
 	procs->listener.on_vsync_received = hwcomposer2_vsync_callback;
@@ -107,21 +107,21 @@ struct wlr_hwcomposer_backend* hwcomposer2_api_init(hw_device_t *hwc_device)
 	HWC2DisplayConfig *config = hwc2_compat_display_get_active_config(hwc2->hwc2_primary_display);
 	assert(config);
 
-	hwc->hwc_width = config->width;
-	hwc->hwc_height = config->height;
-	hwc->hwc_refresh = config->vsyncPeriod;
-	hwc->hwc_refresh = (config->vsyncPeriod == 0) ?
+	hwc_backend->hwc_width = config->width;
+	hwc_backend->hwc_height = config->height;
+	hwc_backend->hwc_refresh = config->vsyncPeriod;
+	hwc_backend->hwc_refresh = (config->vsyncPeriod == 0) ?
 		(1000000000000LL / HWCOMPOSER_DEFAULT_REFRESH) : config->vsyncPeriod;
-	wlr_log(WLR_INFO, "width: %i height: %i Refresh: %i\n", config->width, config->height, hwc->hwc_refresh);
+	wlr_log(WLR_INFO, "width: %i height: %i Refresh: %i\n", config->width, config->height, hwc_backend->hwc_refresh);
 
 	hwc2_compat_layer_t* layer = hwc2->hwc2_primary_layer =
 		hwc2_compat_display_create_layer(hwc2->hwc2_primary_display);
 
 	hwc2_compat_layer_set_composition_type(layer, HWC2_COMPOSITION_CLIENT);
 	hwc2_compat_layer_set_blend_mode(layer, HWC2_BLEND_MODE_NONE);
-	hwc2_compat_layer_set_source_crop(layer, 0.0f, 0.0f, hwc->hwc_width, hwc->hwc_height);
-	hwc2_compat_layer_set_display_frame(layer, 0, 0, hwc->hwc_width, hwc->hwc_height);
-	hwc2_compat_layer_set_visible_region(layer, 0, 0, hwc->hwc_width, hwc->hwc_height);
+	hwc2_compat_layer_set_source_crop(layer, 0.0f, 0.0f, hwc_backend->hwc_width, hwc_backend->hwc_height);
+	hwc2_compat_layer_set_display_frame(layer, 0, 0, hwc_backend->hwc_width, hwc_backend->hwc_height);
+	hwc2_compat_layer_set_visible_region(layer, 0, 0, hwc_backend->hwc_width, hwc_backend->hwc_height);
 
 	hwc2->hwc_backend.impl = &hwcomposer_hwc2;
 
@@ -157,8 +157,8 @@ static void hwcomposer2_set_power_mode(struct wlr_hwcomposer_backend *hwc_backen
 static void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
 		struct ANativeWindowBuffer *buffer)
 {
-	struct wlr_hwcomposer_backend *hwc = (struct wlr_hwcomposer_backend *)user_data;
-	struct wlr_hwcomposer_backend_hwc2 *hwc2 = hwc2_backend_from_base(hwc);
+	struct wlr_hwcomposer_backend *hwc_backend = (struct wlr_hwcomposer_backend *)user_data;
+	struct wlr_hwcomposer_backend_hwc2 *hwc2 = hwc2_backend_from_base(hwc_backend);
 
 	static int last_present_fence = -1;
 
@@ -201,7 +201,7 @@ static void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
 		acquireFenceFd,
 		HAL_DATASPACE_UNKNOWN);
 
-	hwcomposer2_vsync_control(hwc, true);
+	hwcomposer2_vsync_control(hwc_backend, true);
 	int present_fence = -1;
 	hwc2_compat_display_present(hwc_display, &present_fence);
 
