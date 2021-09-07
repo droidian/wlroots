@@ -18,49 +18,76 @@
 typedef struct
 {
 	struct HWC2EventListener listener;
-	struct wlr_hwcomposer_backend *hwc;
+	struct wlr_hwcomposer_backend_hwc2 *hwc2;
 } hwc_procs_v20;
 
-void hwcomposer2_vsync_callback(HWC2EventListener* listener, int32_t sequence_id,
-		hwc2_display_t display, int64_t timestamp)
-{
-	struct wlr_hwcomposer_backend *hwc = ((hwc_procs_v20 *)listener)->hwc;
+const struct hwcomposer_impl hwcomposer_hwc2;
 
-	// FIXME: This will cause issues with multiple displays
-	hwc->hwc_vsync_last_timestamp = timestamp;
+struct wlr_hwcomposer_backend_hwc2
+{
+	struct wlr_hwcomposer_backend hwc_backend;
+
+	hwc2_compat_device_t* hwc2_device;
+	hwc2_compat_display_t* hwc2_primary_display;
+	hwc2_compat_layer_t* hwc2_primary_layer;
+};
+
+static struct wlr_hwcomposer_backend_hwc2 *hwc2_backend_from_base(struct wlr_hwcomposer_backend *hwc_backend)
+{
+	assert(hwc_backend->impl == &hwcomposer_hwc2);
+	return (struct wlr_hwcomposer_backend_hwc2 *)hwc_backend;
 }
 
-void hwcomposer2_hotplug_callback(HWC2EventListener* listener, int32_t sequence_id,
+static void hwcomposer2_vsync_callback(HWC2EventListener* listener, int32_t sequence_id,
+		hwc2_display_t display, int64_t timestamp)
+{
+	struct wlr_hwcomposer_backend_hwc2 *hwc2 = ((hwc_procs_v20 *)listener)->hwc2;
+
+	// FIXME: This will cause issues with multiple displays
+	hwc2->hwc_backend.hwc_vsync_last_timestamp = timestamp;
+}
+
+static void hwcomposer2_hotplug_callback(HWC2EventListener* listener, int32_t sequence_id,
 		hwc2_display_t display, bool connected,
 		bool primary_display)
 {
-	struct wlr_hwcomposer_backend *hwc = ((hwc_procs_v20*) listener)->hwc;
+	struct wlr_hwcomposer_backend_hwc2 *hwc2 = ((hwc_procs_v20*) listener)->hwc2;
 
 	wlr_log(WLR_INFO, "onHotplugReceived(%d, %" PRIu64 ", %s, %s)",
 		sequence_id, display,
 		connected ? "connected" : "disconnected",
 		primary_display ? "primary\n" : "external\n");
 
-	hwc2_compat_device_on_hotplug(hwc->hwc2_device, display, connected);
+	hwc2_compat_device_on_hotplug(hwc2->hwc2_device, display, connected);
 }
 
-void hwcomposer2_refresh_callback(HWC2EventListener* listener, int32_t sequence_id,
+static void hwcomposer2_refresh_callback(HWC2EventListener* listener, int32_t sequence_id,
 		hwc2_display_t display)
 {
 }
 
-bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc)
+struct wlr_hwcomposer_backend* hwcomposer2_api_init(hw_device_t *hwc_device)
 {
 	int err;
 	static int composer_sequence_id = 0;
+	struct wlr_hwcomposer_backend *hwc;
+	struct wlr_hwcomposer_backend_hwc2 *hwc2 =
+		calloc(1, sizeof(struct wlr_hwcomposer_backend_hwc2));
+	if (!hwc2) {
+		wlr_log(WLR_ERROR, "Failed to allocate wlr_hwcomposer_backend_hwc2");
+		return NULL;
+	}
+
+	hwcomposer_init (&hwc2->hwc_backend);
+	hwc = &hwc2->hwc_backend;
 
 	hwc_procs_v20* procs = malloc(sizeof(hwc_procs_v20));
 	procs->listener.on_vsync_received = hwcomposer2_vsync_callback;
 	procs->listener.on_hotplug_received = hwcomposer2_hotplug_callback;
 	procs->listener.on_refresh_received = hwcomposer2_refresh_callback;
-	procs->hwc = hwc;
+	procs->hwc2 = hwc2;
 
-	hwc2_compat_device_t* hwc2_device = hwc->hwc2_device = hwc2_compat_device_new(false);
+	hwc2_compat_device_t* hwc2_device = hwc2->hwc2_device = hwc2_compat_device_new(false);
 	assert(hwc2_device);
 
 	//hwc_set_power_mode(pScrn, HWC_DISPLAY_PRIMARY, 1);
@@ -70,14 +97,14 @@ bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc)
 
 	for (int i = 0; i < 5 * 1000; ++i) {
 		// Wait at most 5s for hotplug events
-		if ((hwc->hwc2_primary_display =
+		if ((hwc2->hwc2_primary_display =
 			hwc2_compat_device_get_display_by_id(hwc2_device, 0)))
 			break;
 		sleep(1000);
 	}
-	assert(hwc->hwc2_primary_display);
+	assert(hwc2->hwc2_primary_display);
 
-	HWC2DisplayConfig *config = hwc2_compat_display_get_active_config(hwc->hwc2_primary_display);
+	HWC2DisplayConfig *config = hwc2_compat_display_get_active_config(hwc2->hwc2_primary_display);
 	assert(config);
 
 	hwc->hwc_width = config->width;
@@ -87,8 +114,8 @@ bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc)
 		(1000000000000LL / HWCOMPOSER_DEFAULT_REFRESH) : config->vsyncPeriod;
 	wlr_log(WLR_INFO, "width: %i height: %i Refresh: %i\n", config->width, config->height, hwc->hwc_refresh);
 
-	hwc2_compat_layer_t* layer = hwc->hwc2_primary_layer =
-		hwc2_compat_display_create_layer(hwc->hwc2_primary_display);
+	hwc2_compat_layer_t* layer = hwc2->hwc2_primary_layer =
+		hwc2_compat_display_create_layer(hwc2->hwc2_primary_display);
 
 	hwc2_compat_layer_set_composition_type(layer, HWC2_COMPOSITION_CLIENT);
 	hwc2_compat_layer_set_blend_mode(layer, HWC2_BLEND_MODE_NONE);
@@ -96,17 +123,43 @@ bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc)
 	hwc2_compat_layer_set_display_frame(layer, 0, 0, hwc->hwc_width, hwc->hwc_height);
 	hwc2_compat_layer_set_visible_region(layer, 0, 0, hwc->hwc_width, hwc->hwc_height);
 
-	return true;
+	hwc2->hwc_backend.impl = &hwcomposer_hwc2;
+
+	return &hwc2->hwc_backend;
 }
 
-void hwcomposer2_close(struct wlr_hwcomposer_backend *hwc)
+static void hwcomposer2_close(struct wlr_hwcomposer_backend *hwc_backend)
 {
 }
 
-void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
+static void hwcomposer2_vsync_control(struct wlr_hwcomposer_backend *hwc_backend, bool enable)
+{
+	struct wlr_hwcomposer_backend_hwc2 *hwc2 = hwc2_backend_from_base(hwc_backend);
+
+	if (hwc_backend->hwc_vsync_enabled == enable) {
+		return;
+	}
+
+	hwc2_compat_display_set_vsync_enabled(hwc2->hwc2_primary_display, enable ? HWC2_VSYNC_ENABLE : HWC2_VSYNC_DISABLE);
+	hwc_backend->hwc_vsync_enabled = enable;
+}
+
+static void hwcomposer2_set_power_mode(struct wlr_hwcomposer_backend *hwc_backend, bool enable)
+{
+	struct wlr_hwcomposer_backend_hwc2 *hwc2 = hwc2_backend_from_base(hwc_backend);
+
+	hwc_backend->is_blank = !hwc_backend->is_blank;
+	hwcomposer2_vsync_control(hwc_backend, hwc_backend->is_blank);
+
+	hwc2_compat_display_set_power_mode(hwc2->hwc2_primary_display, hwc_backend->is_blank ? HWC2_POWER_MODE_OFF : HWC2_POWER_MODE_ON);
+}
+
+static void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
 		struct ANativeWindowBuffer *buffer)
 {
 	struct wlr_hwcomposer_backend *hwc = (struct wlr_hwcomposer_backend *)user_data;
+	struct wlr_hwcomposer_backend_hwc2 *hwc2 = hwc2_backend_from_base(hwc);
+
 	static int last_present_fence = -1;
 
 	uint32_t num_types = 0;
@@ -123,7 +176,7 @@ void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
 		acquireFenceFd = -1;
 	}
 
-	hwc2_compat_display_t* hwc_display = hwc->hwc2_primary_display;
+	hwc2_compat_display_t* hwc_display = hwc2->hwc2_primary_display;
 
 	error = hwc2_compat_display_validate(hwc_display, &num_types,
 		&num_requests);
@@ -148,7 +201,7 @@ void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
 		acquireFenceFd,
 		HAL_DATASPACE_UNKNOWN);
 
-	hwcomposer_vsync_control(hwc, true);
+	hwcomposer2_vsync_control(hwc, true);
 	int present_fence = -1;
 	hwc2_compat_display_present(hwc_display, &present_fence);
 
@@ -161,4 +214,11 @@ void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
 
 	HWCNativeBufferSetFence(buffer, present_fence);
 }
+
+const struct hwcomposer_impl hwcomposer_hwc2 = {
+	.present = hwcomposer2_present,
+	.vsync_control = hwcomposer2_vsync_control,
+	.set_power_mode = hwcomposer2_set_power_mode,
+	.close = hwcomposer2_close,
+};
 #endif // HWC_DEVICE_API_VERSION_2_0
