@@ -13,8 +13,12 @@
 
 #define HWCOMPOSER_DEFAULT_REFRESH (60 * 1000) // 60 Hz
 
+struct hwcomposer_impl;
+
 struct wlr_hwcomposer_backend {
 	struct wlr_backend backend;
+
+	const struct hwcomposer_impl *impl;
 	struct wlr_egl egl;
 	struct wlr_renderer *renderer;
 	struct wl_display *display;
@@ -24,9 +28,6 @@ struct wlr_hwcomposer_backend {
 	bool started;
 	bool is_blank;
 
-	hwc_composer_device_1_t *hwc_device_ptr;
-	hwc_display_contents_1_t **hwc_contents;
-	hwc_layer_1_t *fblayer;
 	uint32_t hwc_version;
 	int hwc_width;
 	int hwc_height;
@@ -35,17 +36,13 @@ struct wlr_hwcomposer_backend {
 
 	int64_t idle_time; // nsec
 
-	// FIXME: Store the last vsync event timestamp. This really
-	// belongs to wlr_hwcomposer_output, but for simplicity's sake
-	// until we support multiple outputs we'll keep it here.
+	// Per the Android docs, every display is driven by the VSYNC signal
+	// of the internal one, so it makes sense to keep this into the backend.
+	bool vsync_frame_pending;
+	int vsync_timer_fd;
+	struct wl_event_source *vsync_event;
 	int64_t hwc_vsync_last_timestamp;
 	// TODO: Also store 'vsyncPeriodNanos' if vsync2_4 is supported
-
-#ifdef HWC_DEVICE_API_VERSION_2_0
-	hwc2_compat_device_t* hwc2_device;
-	hwc2_compat_display_t* hwc2_primary_display;
-	hwc2_compat_layer_t* hwc2_primary_layer;
-#endif
 };
 
 struct wlr_hwcomposer_output {
@@ -57,29 +54,25 @@ struct wlr_hwcomposer_output {
 	struct ANativeWindow *egl_window;
 	void *egl_display;
 	void *egl_surface;
+
+	bool needs_frame;
+
 	struct wl_event_source *vsync_timer;
 	int frame_delay; // ms
-	int vsync_timer_fd;
-	struct wl_event_source *vsync_event;
 };
 
-void hwcomposer_vsync_control(struct wlr_hwcomposer_backend *hwc, bool enable);
-void hwcomposer_vsync_wait(struct wlr_hwcomposer_backend *hwc);
-void hwcomposer_vsync_wake(struct wlr_hwcomposer_backend *hwc);
-void hwcomposer_blank_toggle(struct wlr_hwcomposer_backend *hwc);
-bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc);
+struct hwcomposer_impl {
+	void (*present)(void *user_data, struct ANativeWindow *window, struct ANativeWindowBuffer *buffer);
+	void (*vsync_control)(struct wlr_hwcomposer_backend *hwc_backend, bool enable);
+	void (*set_power_mode)(struct wlr_hwcomposer_backend *hwc_backend, bool enable);
+	void (*close)(struct wlr_hwcomposer_backend *hwc_backend);
+};
+
+void hwcomposer_init(struct wlr_hwcomposer_backend *hwc_backend);
+void hwcomposer_schedule_frame(struct wlr_hwcomposer_backend *hwc_backend);
+struct wlr_hwcomposer_backend *hwcomposer_api_init(hw_device_t *hwc_device);
 #ifdef HWC_DEVICE_API_VERSION_2_0
-bool hwcomposer2_api_init(struct wlr_hwcomposer_backend *hwc);
-void hwcomposer2_vsync_callback(HWC2EventListener* listener, int32_t sequence_id,
-	hwc2_display_t display, int64_t timestamp);
-void hwcomposer2_hotplug_callback(HWC2EventListener* listener, int32_t sequence_id,
-	hwc2_display_t display, bool connected,
-	bool primary_display);
-void hwcomposer2_refresh_callback(HWC2EventListener* listener, int32_t sequence_id,
-	hwc2_display_t display);
-void hwcomposer2_close(struct wlr_hwcomposer_backend *hwc);
-void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
-	struct ANativeWindowBuffer *buffer);
+struct wlr_hwcomposer_backend *hwcomposer2_api_init(hw_device_t *hwc_device);
 #endif
 
 #endif

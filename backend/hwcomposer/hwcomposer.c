@@ -12,50 +12,88 @@
 
 #include "backend/hwcomposer.h"
 
-void hwcomposer_vsync_control(struct wlr_hwcomposer_backend *hwc, bool enable)
+/* NOTICE: This is only compile-tested, and it **DOESN'T WORK**.
+ * Droidian only uses hwc2, and this is being kept around "just in case".
+ *
+ * Interested parties should:
+ * a) register callbacks to get hotplug and vsync events
+ * b) feed hotplug and vsync events to the backend
+ * c) tidy up the code and add multiple output support
+*/
+
+const struct hwcomposer_impl hwcomposer_hwc1;
+
+struct wlr_hwcomposer_backend_hwc1
 {
+	struct wlr_hwcomposer_backend hwc_backend;
+
+	hwc_composer_device_1_t *hwc_device_ptr;
+	hwc_display_contents_1_t **hwc_contents;
+	hwc_layer_1_t *fblayer;
+};
+
+static struct wlr_hwcomposer_backend_hwc1 *hwc1_backend_from_base(struct wlr_hwcomposer_backend *hwc_backend)
+{
+	assert(hwc_backend->impl == &hwcomposer_hwc1);
+	return (struct wlr_hwcomposer_backend_hwc1 *)hwc_backend;
+}
+
+static void hwcomposer_vsync_control(struct wlr_hwcomposer_backend *hwc, bool enable)
+{
+	struct wlr_hwcomposer_backend_hwc1 *hwc1 = hwc1_backend_from_base(hwc);
+
 	if (hwc->hwc_vsync_enabled == enable) {
 		return;
 	}
 	int result = 0;
-#if defined(HWC_DEVICE_API_VERSION_2_0)
-	if (hwc->hwc_version == HWC_DEVICE_API_VERSION_2_0)
-		hwc2_compat_display_set_vsync_enabled(hwc->hwc2_primary_display, enable ? HWC2_VSYNC_ENABLE : HWC2_VSYNC_DISABLE);
-	else
-#endif
-		result = hwc->hwc_device_ptr->eventControl(hwc->hwc_device_ptr, 0, HWC_EVENT_VSYNC, enable ? 1 : 0);
+	result = hwc1->hwc_device_ptr->eventControl(hwc1->hwc_device_ptr, 0, HWC_EVENT_VSYNC, enable ? 1 : 0);
 	hwc->hwc_vsync_enabled = enable && (result == 0);
 }
 
-void hwcomposer_blank_toggle(struct wlr_hwcomposer_backend *hwc)
+static void hwcomposer_set_power_mode(struct wlr_hwcomposer_backend *hwc, bool enable)
 {
+	struct wlr_hwcomposer_backend_hwc1 *hwc1 = hwc1_backend_from_base(hwc);
+
 	hwc->is_blank = !hwc->is_blank;
 	hwcomposer_vsync_control(hwc, hwc->is_blank);
-#ifdef HWC_DEVICE_API_VERSION_2_0
-	if (hwc->hwc_version == HWC_DEVICE_API_VERSION_2_0)
-		hwc2_compat_display_set_power_mode(hwc->hwc2_primary_display, hwc->is_blank ? HWC2_POWER_MODE_OFF : HWC2_POWER_MODE_ON);
-	else
-#endif
 #if defined(HWC_DEVICE_API_VERSION_1_4) || defined(HWC_DEVICE_API_VERSION_1_5)
 	if (hwc->hwc_version > HWC_DEVICE_API_VERSION_1_3)
-		hwc->hwc_device_ptr->setPowerMode(hwc->hwc_device_ptr, 0, hwc->is_blank ? HWC_POWER_MODE_OFF : HWC_POWER_MODE_NORMAL);
+		hwc1->hwc_device_ptr->setPowerMode(hwc1->hwc_device_ptr, 0, hwc->is_blank ? HWC_POWER_MODE_OFF : HWC_POWER_MODE_NORMAL);
 	else
 #endif
-		hwc->hwc_device_ptr->blank(hwc->hwc_device_ptr, 0, hwc->is_blank ? 1 : 0);
+		hwc1->hwc_device_ptr->blank(hwc1->hwc_device_ptr, 0, hwc->is_blank ? 1 : 0);
 }
 
-inline static uint32_t interpreted_version(hw_device_t *hwc_device)
+static void hwcomposer_present(void *user_data, struct ANativeWindow *window,
+		struct ANativeWindowBuffer *buffer)
 {
-	uint32_t version = hwc_device->version;
+	struct wlr_hwcomposer_backend_hwc1 *hwc1 = hwc1_backend_from_base(user_data);
 
-	if ((version & 0xffff0000) == 0) {
-		// Assume header version is always 1
-		uint32_t header_version = 1;
+	hwc_display_contents_1_t **contents = hwc1->hwc_contents;
+	hwc_layer_1_t *fblayer = hwc1->fblayer;
+	hwc_composer_device_1_t *hwcdevice = hwc1->hwc_device_ptr;
 
-		// Legacy version encoding
-		version = (version << 16) | header_version;
+	int oldretire = contents[0]->retireFenceFd;
+	contents[0]->retireFenceFd = -1;
+
+	fblayer->handle = buffer->handle;
+	fblayer->acquireFenceFd = HWCNativeBufferGetFence(buffer);
+	fblayer->releaseFenceFd = -1;
+	int err = hwcdevice->prepare(hwcdevice, HWC_NUM_DISPLAY_TYPES, contents);
+	assert(err == 0);
+
+	err = hwcdevice->set(hwcdevice, HWC_NUM_DISPLAY_TYPES, contents);
+	// in android surfaceflinger ignores the return value as not all display types may be supported
+	HWCNativeBufferSetFence(buffer, fblayer->releaseFenceFd);
+
+	if (oldretire != -1) {
+		sync_wait(oldretire, -1);
+		close(oldretire);
 	}
-	return version;
+}
+
+static void hwcomposer_close(struct wlr_hwcomposer_backend *hwc)
+{
 }
 
 static void init_hwcomposer_layer(hwc_layer_1_t *layer, const hwc_rect_t *rect, int layerCompositionType)
@@ -86,63 +124,21 @@ static void init_hwcomposer_layer(hwc_layer_1_t *layer, const hwc_rect_t *rect, 
 #endif
 }
 
-bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
+struct wlr_hwcomposer_backend *hwcomposer_api_init(hw_device_t *hwc_device)
 {
 	int err;
-
-	hw_module_t *hwc_module = 0;
-
-	err = hw_get_module(HWC_HARDWARE_MODULE_ID, (const hw_module_t **) &hwc_module);
-	assert(err == 0);
-
-	wlr_log(WLR_INFO, "== hwcomposer module ==\n");
-	wlr_log(WLR_INFO, " * Address: %p\n", hwc_module);
-	wlr_log(WLR_INFO, " * Module API Version: %x\n", hwc_module->module_api_version);
-	wlr_log(WLR_INFO, " * HAL API Version: %x\n", hwc_module->hal_api_version); /* should be zero */
-	wlr_log(WLR_INFO, " * Identifier: %s\n", hwc_module->id);
-	wlr_log(WLR_INFO, " * Name: %s\n", hwc_module->name);
-	wlr_log(WLR_INFO, " * Author: %s\n", hwc_module->author);
-	wlr_log(WLR_INFO, "== hwcomposer module ==\n");
-
-	// Get idle time from the environment, if specified
-	char *idle_time_env = getenv("WLR_HWC_IDLE_TIME");
-	if (idle_time_env) {
-		char *end;
-		int idle_time = (int)strtol(idle_time_env, &end, 10);
-
-		hwc->idle_time = (*end || idle_time < 2) ? 2 * 1000000 : idle_time * 1000000;
-	} else {
-		// Default to 2
-		hwc->idle_time = 2 * 1000000;
+	struct wlr_hwcomposer_backend *hwc;
+	struct wlr_hwcomposer_backend_hwc1 *hwc1 =
+		calloc(1, sizeof(struct wlr_hwcomposer_backend_hwc1));
+	if (!hwc1) {
+		wlr_log(WLR_ERROR, "Failed to allocate wlr_hwcomposer_backend_hwc1");
+		return NULL;
 	}
 
-	hw_device_t *hwcDevice = NULL;
-	err = hwc_module->methods->open(hwc_module, HWC_HARDWARE_COMPOSER, &hwcDevice);
-#ifdef HWC_DEVICE_API_VERSION_2_0
-	if (err) {
-		// For weird reason module open seems to currently fail on tested HWC2 device
-		hwc->hwc_version = HWC_DEVICE_API_VERSION_2_0;
-	} else
-#endif
-		hwc->hwc_version = interpreted_version(hwcDevice);
-	hwc->is_blank = false;
-#ifdef HWC_DEVICE_API_VERSION_2_0
-	if (hwc->hwc_version == HWC_DEVICE_API_VERSION_2_0) {
-		err = hwcomposer2_api_init(hwc);
-		hwc2_compat_display_set_power_mode(hwc->hwc2_primary_display, HWC2_POWER_MODE_ON);
-		return err;
-	}
-#endif
+	hwcomposer_init (&hwc1->hwc_backend);
+	hwc = &hwc1->hwc_backend;
 
-	hwc_composer_device_1_t *hwc_device_ptr = (hwc_composer_device_1_t*) hwcDevice;
-	wlr_log(WLR_INFO, "HWC Version=%x\n", hwc->hwc_version);
-
-#ifdef defined(HWC_DEVICE_API_VERSION_1_4) || defined(HWC_DEVICE_API_VERSION_1_5)
-	if (hwc->hwc_version > HWC_DEVICE_API_VERSION_1_3) {
-		hwc_device_ptr->setPowerMode(hwc_device_ptr, 0, HWC_POWER_MODE_NORMAL);
-	} else
-#endif
-		hwc_device_ptr->blank(hwc_device_ptr, 0, 0);
+	hwc_composer_device_1_t *hwc_device_ptr = hwc1->hwc_device_ptr = (hwc_composer_device_1_t*) hwc_device;
 
 	uint32_t configs[5];
 	size_t numConfigs = 5;
@@ -164,15 +160,15 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 
 	size_t size = sizeof(hwc_display_contents_1_t) + 2 * sizeof(hwc_layer_1_t);
 	hwc_display_contents_1_t *list = (hwc_display_contents_1_t *) malloc(size);
-	hwc->hwc_contents = (hwc_display_contents_1_t **) malloc(HWC_NUM_DISPLAY_TYPES * sizeof(hwc_display_contents_1_t *));
+	hwc1->hwc_contents = (hwc_display_contents_1_t **) malloc(HWC_NUM_DISPLAY_TYPES * sizeof(hwc_display_contents_1_t *));
 
 	int counter = 0;
 	for (; counter < HWC_NUM_DISPLAY_TYPES; counter++)
-		hwc->hwc_contents[counter] = NULL;
+		hwc1->hwc_contents[counter] = NULL;
 	// Assign the layer list only to the first display,
 	// otherwise HWC might freeze if others are disconnected
-	hwc->hwc_contents[0] = list;
-	hwc->fblayer = &list->hwLayers[1];
+	hwc1->hwc_contents[0] = list;
+	hwc1->fblayer = &list->hwLayers[1];
 
 	const hwc_rect_t rect = { 0, 0, attr_values[0], attr_values[1] };
 	init_hwcomposer_layer(&list->hwLayers[0], &rect, HWC_FRAMEBUFFER);
@@ -182,5 +178,14 @@ bool hwcomposer_api_init(struct wlr_hwcomposer_backend *hwc)
 	list->flags = HWC_GEOMETRY_CHANGED;
 	list->numHwLayers = 2;
 
-	return true;
+	hwc1->hwc_backend.impl = &hwcomposer_hwc1;
+
+	return &hwc1->hwc_backend;
 }
+
+const struct hwcomposer_impl hwcomposer_hwc1 = {
+	.present = hwcomposer_present,
+	.vsync_control = hwcomposer_vsync_control,
+	.set_power_mode = hwcomposer_set_power_mode,
+	.close = hwcomposer_close,
+};
