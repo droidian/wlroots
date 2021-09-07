@@ -22,48 +22,48 @@ inline static uint32_t interpreted_version(hw_device_t *hwc_device)
 }
 
 static bool backend_start(struct wlr_backend *wlr_backend) {
-	struct wlr_hwcomposer_backend *backend =
+	struct wlr_hwcomposer_backend *hwc_backend =
 		(struct wlr_hwcomposer_backend *)wlr_backend;
 	wlr_log(WLR_INFO, "Starting hwcomposer backend");
 
 	struct wlr_hwcomposer_output *output;
-	wl_list_for_each(output, &backend->outputs, link) {
+	wl_list_for_each(output, &hwc_backend->outputs, link) {
 		wl_event_source_timer_update(output->vsync_timer, output->frame_delay);
 		wlr_output_update_enabled(&output->wlr_output, true);
-		wlr_signal_emit_safe(&backend->backend.events.new_output,
+		wlr_signal_emit_safe(&hwc_backend->backend.events.new_output,
 			&output->wlr_output);
 	}
 
-	backend->started = true;
+	hwc_backend->started = true;
 	return true;
 }
 
 static void backend_destroy(struct wlr_backend *wlr_backend) {
-	struct wlr_hwcomposer_backend *backend =
+	struct wlr_hwcomposer_backend *hwc_backend =
 		(struct wlr_hwcomposer_backend *)wlr_backend;
 	if (!wlr_backend) {
 		return;
 	}
 
-	wl_list_remove(&backend->display_destroy.link);
+	wl_list_remove(&hwc_backend->display_destroy.link);
 
 	struct wlr_hwcomposer_output *output, *output_tmp;
-	wl_list_for_each_safe(output, output_tmp, &backend->outputs, link) {
+	wl_list_for_each_safe(output, output_tmp, &hwc_backend->outputs, link) {
 		wlr_output_destroy(&output->wlr_output);
 	}
 
-	wlr_signal_emit_safe(&wlr_backend->events.destroy, backend);
+	wlr_signal_emit_safe(&wlr_backend->events.destroy, hwc_backend);
 
-	wlr_renderer_destroy(backend->renderer);
-	wlr_egl_finish(&backend->egl);
-	free(backend);
+	wlr_renderer_destroy(hwc_backend->renderer);
+	wlr_egl_finish(&hwc_backend->egl);
+	free(hwc_backend);
 }
 
 static struct wlr_renderer *backend_get_renderer(
 		struct wlr_backend *wlr_backend) {
-	struct wlr_hwcomposer_backend *backend =
+	struct wlr_hwcomposer_backend *hwc_backend =
 		(struct wlr_hwcomposer_backend *)wlr_backend;
-	return backend->renderer;
+	return hwc_backend->renderer;
 }
 
 static const struct wlr_backend_impl backend_impl = {
@@ -73,9 +73,9 @@ static const struct wlr_backend_impl backend_impl = {
 };
 
 static void handle_display_destroy(struct wl_listener *listener, void *data) {
-	struct wlr_hwcomposer_backend *backend =
-		wl_container_of(listener, backend, display_destroy);
-	backend_destroy(&backend->backend);
+	struct wlr_hwcomposer_backend *hwc_backend =
+		wl_container_of(listener, hwc_backend, display_destroy);
+	backend_destroy(&hwc_backend->backend);
 }
 
 void hwcomposer_init(struct wlr_hwcomposer_backend *hwc_backend) {
@@ -99,7 +99,7 @@ void hwcomposer_init(struct wlr_hwcomposer_backend *hwc_backend) {
 struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 		wlr_renderer_create_func_t create_renderer_func) {
 	int err;
-	struct wlr_hwcomposer_backend *backend;
+	struct wlr_hwcomposer_backend *hwc_backend;
 	hw_module_t *hwc_module = 0;
 	hw_device_t *hwc_device = NULL;
 #ifdef HWC_DEVICE_API_VERSION_2_0
@@ -129,18 +129,18 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 
 #ifdef HWC_DEVICE_API_VERSION_2_0
 	if (hwc_version == HWC_DEVICE_API_VERSION_2_0)
-		backend = hwcomposer2_api_init(hwc_device);
+		hwc_backend = hwcomposer2_api_init(hwc_device);
 	else
 #endif // HWC_DEVICE_API_VERSION_2_0
-		backend = hwcomposer_api_init(hwc_device);
+		hwc_backend = hwcomposer_api_init(hwc_device);
 
 	wlr_log(WLR_INFO, "HWC Version=%x\n", hwc_version);
 
-	backend->hwc_version = hwc_version;
-	backend->display = display;
-	backend->is_blank = true; // reset by the set_power_mode call below
+	hwc_backend->hwc_version = hwc_version;
+	hwc_backend->display = display;
+	hwc_backend->is_blank = true; // reset by the set_power_mode call below
 
-	backend->impl->set_power_mode(backend, true);
+	hwc_backend->impl->set_power_mode(hwc_backend, true);
 
 	static EGLint config_attribs[] = {
 		EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
@@ -158,19 +158,19 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 		create_renderer_func = wlr_renderer_autocreate;
 	}
 
-	backend->renderer = create_renderer_func(&backend->egl, EGL_PLATFORM_ANDROID_KHR,
+	hwc_backend->renderer = create_renderer_func(&hwc_backend->egl, EGL_PLATFORM_ANDROID_KHR,
 		NULL, config_attribs, HAL_PIXEL_FORMAT_RGBA_8888);
 
-	if (!backend->renderer) {
+	if (!hwc_backend->renderer) {
 		wlr_log(WLR_ERROR, "Failed to create renderer");
-		free(backend);
+		free(hwc_backend);
 		return NULL;
 	}
 
-	backend->display_destroy.notify = handle_display_destroy;
-	wl_display_add_destroy_listener(display, &backend->display_destroy);
+	hwc_backend->display_destroy.notify = handle_display_destroy;
+	wl_display_add_destroy_listener(display, &hwc_backend->display_destroy);
 
-	return &backend->backend;
+	return &hwc_backend->backend;
 }
 
 bool wlr_backend_is_hwcomposer(struct wlr_backend *backend) {

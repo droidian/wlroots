@@ -38,30 +38,30 @@ static struct wlr_hwcomposer_backend_hwc1 *hwc1_backend_from_base(struct wlr_hwc
 	return (struct wlr_hwcomposer_backend_hwc1 *)hwc_backend;
 }
 
-static void hwcomposer_vsync_control(struct wlr_hwcomposer_backend *hwc, bool enable)
+static void hwcomposer_vsync_control(struct wlr_hwcomposer_backend *hwc_backend, bool enable)
 {
-	struct wlr_hwcomposer_backend_hwc1 *hwc1 = hwc1_backend_from_base(hwc);
+	struct wlr_hwcomposer_backend_hwc1 *hwc1 = hwc1_backend_from_base(hwc_backend);
 
-	if (hwc->hwc_vsync_enabled == enable) {
+	if (hwc_backend->hwc_vsync_enabled == enable) {
 		return;
 	}
 	int result = 0;
 	result = hwc1->hwc_device_ptr->eventControl(hwc1->hwc_device_ptr, 0, HWC_EVENT_VSYNC, enable ? 1 : 0);
-	hwc->hwc_vsync_enabled = enable && (result == 0);
+	hwc_backend->hwc_vsync_enabled = enable && (result == 0);
 }
 
-static void hwcomposer_set_power_mode(struct wlr_hwcomposer_backend *hwc, bool enable)
+static void hwcomposer_set_power_mode(struct wlr_hwcomposer_backend *hwc_backend, bool enable)
 {
-	struct wlr_hwcomposer_backend_hwc1 *hwc1 = hwc1_backend_from_base(hwc);
+	struct wlr_hwcomposer_backend_hwc1 *hwc1 = hwc1_backend_from_base(hwc_backend);
 
-	hwc->is_blank = !hwc->is_blank;
-	hwcomposer_vsync_control(hwc, hwc->is_blank);
+	hwc_backend->is_blank = !hwc_backend->is_blank;
+	hwcomposer_vsync_control(hwc_backend, hwc_backend->is_blank);
 #if defined(HWC_DEVICE_API_VERSION_1_4) || defined(HWC_DEVICE_API_VERSION_1_5)
-	if (hwc->hwc_version > HWC_DEVICE_API_VERSION_1_3)
-		hwc1->hwc_device_ptr->setPowerMode(hwc1->hwc_device_ptr, 0, hwc->is_blank ? HWC_POWER_MODE_OFF : HWC_POWER_MODE_NORMAL);
+	if (hwc_backend->hwc_version > HWC_DEVICE_API_VERSION_1_3)
+		hwc1->hwc_device_ptr->setPowerMode(hwc1->hwc_device_ptr, 0, hwc_backend->is_blank ? HWC_POWER_MODE_OFF : HWC_POWER_MODE_NORMAL);
 	else
 #endif
-		hwc1->hwc_device_ptr->blank(hwc1->hwc_device_ptr, 0, hwc->is_blank ? 1 : 0);
+		hwc1->hwc_device_ptr->blank(hwc1->hwc_device_ptr, 0, hwc_backend->is_blank ? 1 : 0);
 }
 
 static void hwcomposer_present(void *user_data, struct ANativeWindow *window,
@@ -127,7 +127,7 @@ static void init_hwcomposer_layer(hwc_layer_1_t *layer, const hwc_rect_t *rect, 
 struct wlr_hwcomposer_backend *hwcomposer_api_init(hw_device_t *hwc_device)
 {
 	int err;
-	struct wlr_hwcomposer_backend *hwc;
+	struct wlr_hwcomposer_backend *hwc_backend;
 	struct wlr_hwcomposer_backend_hwc1 *hwc1 =
 		calloc(1, sizeof(struct wlr_hwcomposer_backend_hwc1));
 	if (!hwc1) {
@@ -136,7 +136,7 @@ struct wlr_hwcomposer_backend *hwcomposer_api_init(hw_device_t *hwc_device)
 	}
 
 	hwcomposer_init (&hwc1->hwc_backend);
-	hwc = &hwc1->hwc_backend;
+	hwc_backend = &hwc1->hwc_backend;
 
 	hwc_composer_device_1_t *hwc_device_ptr = hwc1->hwc_device_ptr = (hwc_composer_device_1_t*) hwc_device;
 
@@ -153,9 +153,9 @@ struct wlr_hwcomposer_backend *hwcomposer_api_init(hw_device_t *hwc_device)
 		configs[0], attributes, attr_values);
 
 	wlr_log(WLR_INFO, "width: %i height: %i\n", attr_values[0], attr_values[1]);
-	hwc->hwc_width = attr_values[0];
-	hwc->hwc_height = attr_values[1];
-	hwc->hwc_refresh = (attr_values[2] == 0) ?
+	hwc_backend->hwc_width = attr_values[0];
+	hwc_backend->hwc_height = attr_values[1];
+	hwc_backend->hwc_refresh = (attr_values[2] == 0) ?
 		(1000000000000LL / HWCOMPOSER_DEFAULT_REFRESH) : attr_values[2];
 
 	size_t size = sizeof(hwc_display_contents_1_t) + 2 * sizeof(hwc_layer_1_t);

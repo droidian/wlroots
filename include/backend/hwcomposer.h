@@ -48,7 +48,7 @@ struct wlr_hwcomposer_backend {
 struct wlr_hwcomposer_output {
 	struct wlr_output wlr_output;
 
-	struct wlr_hwcomposer_backend *backend;
+	struct wlr_hwcomposer_backend *hwc_backend;
 	struct wl_list link;
 
 	struct ANativeWindow *egl_window;
