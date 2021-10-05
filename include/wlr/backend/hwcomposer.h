@@ -22,6 +22,11 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
  * destroy a connected output.
  */
 void wlr_hwcomposer_output_schedule_destroy(struct wlr_output *wlr_output);
+/**
+ * Handle hwcomposer hotplug events.
+*/
+void wlr_hwcomposer_backend_handle_hotplug(struct wlr_backend *wlr_backend,
+	uint64_t display, bool connected, bool primary_display);
 
 bool wlr_backend_is_hwcomposer(struct wlr_backend *backend);
 bool wlr_output_is_hwcomposer(struct wlr_output *output);

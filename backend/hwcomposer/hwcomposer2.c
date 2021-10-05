@@ -74,6 +74,9 @@ static void hwcomposer2_hotplug_callback(HWC2EventListener* listener, int32_t se
 		primary_display ? "primary\n" : "external\n");
 
 	hwc2_compat_device_on_hotplug(hwc2->hwc2_device, display, connected);
+
+	wlr_hwcomposer_backend_handle_hotplug((struct wlr_backend *)hwc2,
+		(uint64_t)display, connected, primary_display);
 }
 
 static void hwcomposer2_refresh_callback(HWC2EventListener* listener, int32_t sequence_id,

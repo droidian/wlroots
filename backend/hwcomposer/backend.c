@@ -4,6 +4,7 @@
 
 #include "util/signal.h"
 #include <stdlib.h>
+#include <wayland-util.h>
 #include <wlr/interfaces/wlr_output.h>
 #include <wlr/render/egl.h>
 #include <wlr/render/gles2.h>
@@ -186,6 +187,26 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 	hwc_backend->impl->register_callbacks(hwc_backend);
 
 	return &hwc_backend->backend;
+}
+
+void wlr_hwcomposer_backend_handle_hotplug(struct wlr_backend *wlr_backend,
+	uint64_t display, bool connected, bool primary_display) {
+
+	struct wlr_hwcomposer_backend *hwc_backend =
+		(struct wlr_hwcomposer_backend *)wlr_backend;
+	struct wlr_hwcomposer_output *output, *tmp_output;
+
+	if (connected) {
+		wlr_hwcomposer_add_output((struct wlr_backend *)hwc_backend, display,
+			primary_display);
+	} else {
+		wl_list_for_each_reverse_safe(output, tmp_output, &hwc_backend->outputs, link) {
+			if (output->hwc_display_id == display) {
+				wlr_hwcomposer_output_schedule_destroy(&output->wlr_output);
+				break;
+			}
+		}
+	}
 }
 
 bool wlr_backend_is_hwcomposer(struct wlr_backend *backend) {
