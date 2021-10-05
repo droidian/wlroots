@@ -215,7 +215,25 @@ static void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
 	HWCNativeBufferSetFence(buffer, present_fence);
 }
 
+static void hwcomposer2_register_callbacks(struct wlr_hwcomposer_backend *hwc_backend)
+{
+	int composer_sequence_id = 0;
+	struct wlr_hwcomposer_backend_hwc2 *hwc2 = hwc2_backend_from_base(hwc_backend);
+
+	hwc_procs_v20* procs = malloc(sizeof(hwc_procs_v20));
+	procs->listener.on_vsync_received = hwcomposer2_vsync_callback;
+	procs->listener.on_hotplug_received = hwcomposer2_hotplug_callback;
+	procs->listener.on_refresh_received = hwcomposer2_refresh_callback;
+	procs->hwc2 = hwc2;
+
+	hwc2_compat_device_register_callback(hwc2->hwc2_device, &procs->listener,
+		composer_sequence_id++);
+
+	wlr_log(WLR_DEBUG, "hwcomposer2: register_callbaks: callbacks registered");
+}
+
 const struct hwcomposer_impl hwcomposer_hwc2 = {
+	.register_callbacks = hwcomposer2_register_callbacks,
 	.present = hwcomposer2_present,
 	.vsync_control = hwcomposer2_vsync_control,
 	.set_power_mode = hwcomposer2_set_power_mode,

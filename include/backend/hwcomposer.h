@@ -62,6 +62,7 @@ struct wlr_hwcomposer_output {
 };
 
 struct hwcomposer_impl {
+	void (*register_callbacks)(struct wlr_hwcomposer_backend *hwc_backend);
 	void (*present)(void *user_data, struct ANativeWindow *window, struct ANativeWindowBuffer *buffer);
 	void (*vsync_control)(struct wlr_hwcomposer_backend *hwc_backend, bool enable);
 	void (*set_power_mode)(struct wlr_hwcomposer_backend *hwc_backend, bool enable);

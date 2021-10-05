@@ -183,7 +183,14 @@ struct wlr_hwcomposer_backend *hwcomposer_api_init(hw_device_t *hwc_device)
 	return &hwc1->hwc_backend;
 }
 
+static void hwcomposer_register_callbacks(struct wlr_hwcomposer_backend *hwc_backend)
+{
+	// TODO: implement this
+}
+
+
 const struct hwcomposer_impl hwcomposer_hwc1 = {
+	.register_callbacks = hwcomposer_register_callbacks,
 	.present = hwcomposer_present,
 	.vsync_control = hwcomposer_vsync_control,
 	.set_power_mode = hwcomposer_set_power_mode,
