@@ -170,6 +170,9 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 	hwc_backend->display_destroy.notify = handle_display_destroy;
 	wl_display_add_destroy_listener(display, &hwc_backend->display_destroy);
 
+	// Register hwc callbacks
+	hwc_backend->impl->register_callbacks(hwc_backend);
+
 	return &hwc_backend->backend;
 }
 
