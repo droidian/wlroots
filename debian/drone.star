@@ -15,7 +15,9 @@ BUILD_ON = [
 # Extra Debian repositories to add. These can be used to pull packages
 # from other feature branches.
 # Note that builds with EXTRA_REPOS won't start on production or staging.
-EXTRA_REPOS = []
+EXTRA_REPOS = [
+	"deb http://droidian-libhybris.repo.droidian.org/bullseye-multiwindow/ bullseye main",
+]
 
 # Host architecture. This can be used to instruct the buildd to
 # assume the packages are built (host -> should be executed on) for the
