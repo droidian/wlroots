@@ -43,7 +43,12 @@ static void schedule_frame(struct wlr_hwcomposer_output *output) {
 	// If the delta of the current time and the predicted next vsync
 	// is too close, we won't make it, so defer the render on the next
 	// cycle.
-	if ((next_vsync - time) <= output->hwc_backend->idle_time) {
+	//
+	// If the should_destroy flag is set, schedule the timer a bit farther,
+	// we don't care about syncronization anymore anyway.
+	if (output->should_destroy) {
+		scheduled_next = next_vsync + (display_refresh * 3);
+	} else if ((next_vsync - time) <= output->hwc_backend->idle_time) {
 		// Too close! Sad
 		scheduled_next = next_vsync + display_refresh - output->hwc_backend->idle_time;
 	} else {
@@ -109,6 +114,10 @@ static bool output_commit(struct wlr_output *wlr_output) {
 	struct wlr_hwcomposer_backend *hwc_backend = output->hwc_backend;
 
 	bool should_schedule_frame = false;
+
+	if (output->should_destroy) {
+		return false;
+	}
 
 	if (wlr_output->pending.committed & WLR_OUTPUT_STATE_ENABLED) {
 		wlr_log(WLR_DEBUG, "output_commit: STATE_ENABLE, pending state %d", wlr_output->pending.enabled);
@@ -276,8 +285,10 @@ static int signal_frame(int fd, uint32_t mask, void *data) {
 	struct wlr_hwcomposer_output *output = data;
 
 	uint64_t res;
-	if (read(fd, &res, sizeof(res)) > 0) {
+	if (read(fd, &res, sizeof(res)) > 0 && !output->should_destroy) {
 		wlr_output_send_frame(&output->wlr_output);
+	} else if (output->should_destroy) {
+		wlr_output_destroy(&output->wlr_output);
 	}
 
 	return 0;
@@ -306,6 +317,20 @@ static int on_vsync_timer_elapsed(void *data) {
 	return 0;
 }
 
+void wlr_hwcomposer_output_schedule_destroy(struct wlr_output *wlr_output) {
+	struct wlr_hwcomposer_output *output =
+		(struct wlr_hwcomposer_output *)wlr_output;
+
+	// Set should_destroy flag
+	output->should_destroy = true;
+
+	// Schedule a new frame. This shouldn't be racy since the only other
+	// place where we schedule a new frame is during commits - so in
+	// the worst case the timer would be rearmed (but since the flag
+	// is set the callback would still destroy the output).
+	schedule_frame(output);
+}
+
 struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
 	uint64_t display, bool primary_display) {
 
@@ -317,6 +342,8 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
 	wlr_output_init(&output->wlr_output, &hwc_backend->backend, &output_impl,
 		hwc_backend->display);
 	struct wlr_output *wlr_output = &output->wlr_output;
+
+	output->should_destroy = false;
 
 	output->hwc_display_id = display;
 	output->hwc_is_primary = primary_display;

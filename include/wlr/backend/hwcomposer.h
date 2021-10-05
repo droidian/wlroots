@@ -17,6 +17,11 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
  */
 struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
 	uint64_t display, bool primary_display);
+/**
+ * Schedule the destroy of an hwcomposer output. You can use this to safely
+ * destroy a connected output.
+ */
+void wlr_hwcomposer_output_schedule_destroy(struct wlr_output *wlr_output);
 
 bool wlr_backend_is_hwcomposer(struct wlr_backend *backend);
 bool wlr_output_is_hwcomposer(struct wlr_output *output);
