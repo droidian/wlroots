@@ -31,6 +31,9 @@ static bool backend_start(struct wlr_backend *wlr_backend) {
 		(struct wlr_hwcomposer_backend *)wlr_backend;
 	wlr_log(WLR_INFO, "Starting hwcomposer backend");
 
+	hwc_backend->started = true;
+
+	// FIXME: Drop this
 	struct wlr_hwcomposer_output *output;
 	wl_list_for_each(output, &hwc_backend->outputs, link) {
 		wl_event_source_timer_update(output->vsync_timer, output->frame_delay);
@@ -39,7 +42,6 @@ static bool backend_start(struct wlr_backend *wlr_backend) {
 			&output->wlr_output);
 	}
 
-	hwc_backend->started = true;
 	return true;
 }
 
@@ -143,9 +145,6 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 
 	hwc_backend->hwc_version = hwc_version;
 	hwc_backend->display = display;
-	hwc_backend->is_blank = true; // reset by the set_power_mode call below
-
-	hwc_backend->impl->set_power_mode(hwc_backend, true);
 
 	static EGLint config_attribs[] = {
 		EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
@@ -174,6 +173,8 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 
 	hwc_backend->display_destroy.notify = handle_display_destroy;
 	wl_display_add_destroy_listener(display, &hwc_backend->display_destroy);
+
+	hwc_backend->egl.display = eglGetDisplay(NULL);
 
 	// Prepare global vsync variables
 	struct timespec now;
