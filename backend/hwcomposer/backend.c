@@ -1,3 +1,7 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "util/signal.h"
 #include <stdlib.h>
 #include <wlr/interfaces/wlr_output.h>
@@ -5,6 +9,7 @@
 #include <wlr/render/gles2.h>
 #include <wlr/util/log.h>
 #include <assert.h>
+#include "time.h"
 #include "backend/hwcomposer.h"
 
 inline static uint32_t interpreted_version(hw_device_t *hwc_device)
@@ -169,6 +174,12 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 
 	hwc_backend->display_destroy.notify = handle_display_destroy;
 	wl_display_add_destroy_listener(display, &hwc_backend->display_destroy);
+
+	// Prepare global vsync variables
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	hwc_backend->hwc_vsync_last_timestamp = now.tv_sec * 1000000000 + now.tv_nsec;
+	hwc_backend->hwc_vsync_enabled = false;
 
 	// Register hwc callbacks
 	hwc_backend->impl->register_callbacks(hwc_backend);

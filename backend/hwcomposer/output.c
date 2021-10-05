@@ -349,11 +349,6 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend) {
 
 	wl_list_insert(&hwc_backend->outputs, &output->link);
 
-	// FIXME: This will break on multiple outputs!
-	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	hwc_backend->hwc_vsync_last_timestamp = now.tv_sec * 1000000000 + now.tv_nsec;
-
 	output->vsync_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
 	if (output->vsync_timer_fd < 0) {
 		wlr_log(WLR_ERROR, "Failed to create vsync timer fd");
