@@ -9,6 +9,7 @@
 #include <sync/sync.h>
 
 #include <wlr/util/log.h>
+#include <wlr/interfaces/wlr_output.h>
 
 #include "backend/hwcomposer.h"
 
@@ -32,42 +33,70 @@ struct wlr_hwcomposer_backend_hwc1
 	hwc_layer_1_t *fblayer;
 };
 
+struct wlr_hwcomposer_output_hwc1
+{
+	struct wlr_hwcomposer_output output;
+};
+
 static struct wlr_hwcomposer_backend_hwc1 *hwc1_backend_from_base(struct wlr_hwcomposer_backend *hwc_backend)
 {
 	assert(hwc_backend->impl == &hwcomposer_hwc1);
 	return (struct wlr_hwcomposer_backend_hwc1 *)hwc_backend;
 }
 
-static void hwcomposer_vsync_control(struct wlr_hwcomposer_backend *hwc_backend, bool enable)
+static struct wlr_hwcomposer_output_hwc1 *hwc1_output_from_base(struct wlr_hwcomposer_output *output)
 {
+	// TODO: ensure it's the correct one?
+	return (struct wlr_hwcomposer_output_hwc1 *)output;
+}
+
+static bool hwcomposer_vsync_control(struct wlr_hwcomposer_output *output, bool enable)
+{
+	struct wlr_hwcomposer_backend *hwc_backend = output->hwc_backend;
 	struct wlr_hwcomposer_backend_hwc1 *hwc1 = hwc1_backend_from_base(hwc_backend);
 
 	if (hwc_backend->hwc_vsync_enabled == enable) {
-		return;
+		return true;
 	}
-	int result = 0;
-	result = hwc1->hwc_device_ptr->eventControl(hwc1->hwc_device_ptr, 0, HWC_EVENT_VSYNC, enable ? 1 : 0);
-	hwc_backend->hwc_vsync_enabled = enable && (result == 0);
+
+	if (hwc1->hwc_device_ptr->eventControl(hwc1->hwc_device_ptr, 0, HWC_EVENT_VSYNC, enable ? 1 : 0)) {
+		hwc_backend->hwc_vsync_enabled = enable;
+
+		return true;
+	}
+
+	return false;
 }
 
-static void hwcomposer_set_power_mode(struct wlr_hwcomposer_backend *hwc_backend, bool enable)
+static bool hwcomposer_set_power_mode(struct wlr_hwcomposer_output *output, bool enable)
 {
+	struct wlr_hwcomposer_backend *hwc_backend = output->hwc_backend;
 	struct wlr_hwcomposer_backend_hwc1 *hwc1 = hwc1_backend_from_base(hwc_backend);
+	int result;
 
-	hwc_backend->is_blank = !hwc_backend->is_blank;
-	hwcomposer_vsync_control(hwc_backend, hwc_backend->is_blank);
+	hwcomposer_vsync_control(output, enable);
 #if defined(HWC_DEVICE_API_VERSION_1_4) || defined(HWC_DEVICE_API_VERSION_1_5)
 	if (hwc_backend->hwc_version > HWC_DEVICE_API_VERSION_1_3)
-		hwc1->hwc_device_ptr->setPowerMode(hwc1->hwc_device_ptr, 0, hwc_backend->is_blank ? HWC_POWER_MODE_OFF : HWC_POWER_MODE_NORMAL);
+		result = hwc1->hwc_device_ptr->setPowerMode(hwc1->hwc_device_ptr, 0, enable ?
+			HWC_POWER_MODE_NORMAL : HWC_POWER_MODE_OFF);
 	else
 #endif
-		hwc1->hwc_device_ptr->blank(hwc1->hwc_device_ptr, 0, hwc_backend->is_blank ? 1 : 0);
+		result = hwc1->hwc_device_ptr->blank(hwc1->hwc_device_ptr, 0, enable ? 0 : 1);
+
+	if (result) {
+		wlr_output_update_enabled(&output->wlr_output, enable);
+
+		return true;
+	}
+
+	return false;
 }
 
 static void hwcomposer_present(void *user_data, struct ANativeWindow *window,
 		struct ANativeWindowBuffer *buffer)
 {
-	struct wlr_hwcomposer_backend_hwc1 *hwc1 = hwc1_backend_from_base(user_data);
+	struct wlr_hwcomposer_output *output = (struct wlr_hwcomposer_output *)user_data;
+	struct wlr_hwcomposer_backend_hwc1 *hwc1 = hwc1_backend_from_base(output->hwc_backend);
 
 	hwc_display_contents_1_t **contents = hwc1->hwc_contents;
 	hwc_layer_1_t *fblayer = hwc1->fblayer;
@@ -126,8 +155,6 @@ static void init_hwcomposer_layer(hwc_layer_1_t *layer, const hwc_rect_t *rect, 
 
 struct wlr_hwcomposer_backend *hwcomposer_api_init(hw_device_t *hwc_device)
 {
-	int err;
-	struct wlr_hwcomposer_backend *hwc_backend;
 	struct wlr_hwcomposer_backend_hwc1 *hwc1 =
 		calloc(1, sizeof(struct wlr_hwcomposer_backend_hwc1));
 	if (!hwc1) {
@@ -136,26 +163,48 @@ struct wlr_hwcomposer_backend *hwcomposer_api_init(hw_device_t *hwc_device)
 	}
 
 	hwcomposer_init (&hwc1->hwc_backend);
-	hwc_backend = &hwc1->hwc_backend;
 
-	hwc_composer_device_1_t *hwc_device_ptr = hwc1->hwc_device_ptr = (hwc_composer_device_1_t*) hwc_device;
+	hwc1->hwc_device_ptr = (hwc_composer_device_1_t*) hwc_device;
 
+	hwc1->hwc_backend.impl = &hwcomposer_hwc1;
+
+	return &hwc1->hwc_backend;
+}
+
+static struct wlr_hwcomposer_output* hwcomposer_add_output(struct wlr_hwcomposer_backend *hwc_backend, int display)
+{
+	int err;
 	uint32_t configs[5];
 	size_t numConfigs = 5;
+	struct wlr_hwcomposer_backend_hwc1 *hwc1 = hwc1_backend_from_base(hwc_backend);
+	struct wlr_hwcomposer_output_hwc1 *hwc1_output;
 
-	err = hwc_device_ptr->getDisplayConfigs(hwc_device_ptr, 0, configs, &numConfigs);
+	if (display > 0) {
+		wlr_log(WLR_ERROR, "hwcomposer1 backend only supports one display for now");
+		return NULL;
+	}
+
+	hwc1_output = calloc(1, sizeof(struct wlr_hwcomposer_output_hwc1));
+	if (hwc1_output == NULL) {
+		wlr_log(WLR_ERROR, "Failed to allocate wlr_hwcomposer_output_hwc1");
+		return NULL;
+	}
+
+	err = hwc1->hwc_device_ptr->getDisplayConfigs(hwc1->hwc_device_ptr, 0, configs, &numConfigs);
 	assert (err == 0);
 
-	int32_t attr_values[2];
+	hwc1_output->output.hwc_is_primary = (display == 0);
+
+	int32_t attr_values[3];
 	uint32_t attributes[] = { HWC_DISPLAY_WIDTH, HWC_DISPLAY_HEIGHT, HWC_DISPLAY_VSYNC_PERIOD, HWC_DISPLAY_NO_ATTRIBUTE };
 
-	hwc_device_ptr->getDisplayAttributes(hwc_device_ptr, 0,
+	hwc1->hwc_device_ptr->getDisplayAttributes(hwc1->hwc_device_ptr, 0,
 		configs[0], attributes, attr_values);
 
 	wlr_log(WLR_INFO, "width: %i height: %i\n", attr_values[0], attr_values[1]);
-	hwc_backend->hwc_width = attr_values[0];
-	hwc_backend->hwc_height = attr_values[1];
-	hwc_backend->hwc_refresh = (attr_values[2] == 0) ?
+	hwc1_output->output.hwc_width = attr_values[0];
+	hwc1_output->output.hwc_height = attr_values[1];
+	hwc1_output->output.hwc_refresh = (attr_values[2] == 0) ?
 		(1000000000000LL / HWCOMPOSER_DEFAULT_REFRESH) : attr_values[2];
 
 	size_t size = sizeof(hwc_display_contents_1_t) + 2 * sizeof(hwc_layer_1_t);
@@ -178,9 +227,19 @@ struct wlr_hwcomposer_backend *hwcomposer_api_init(hw_device_t *hwc_device)
 	list->flags = HWC_GEOMETRY_CHANGED;
 	list->numHwLayers = 2;
 
-	hwc1->hwc_backend.impl = &hwcomposer_hwc1;
+	// FIXME: This being here is wrong
+	if (hwc1_output->output.hwc_is_primary) {
+		hwc1->hwc_backend.hwc_device_refresh = hwc1_output->output.hwc_refresh;
+	}
 
-	return &hwc1->hwc_backend;
+	return &hwc1_output->output;
+}
+
+static void hwcomposer_destroy_output(struct wlr_hwcomposer_output *output)
+{
+	struct wlr_hwcomposer_output_hwc1 *hwc1_output = hwc1_output_from_base(output);
+
+	free(hwc1_output);
 }
 
 static void hwcomposer_register_callbacks(struct wlr_hwcomposer_backend *hwc_backend)
@@ -194,5 +253,7 @@ const struct hwcomposer_impl hwcomposer_hwc1 = {
 	.present = hwcomposer_present,
 	.vsync_control = hwcomposer_vsync_control,
 	.set_power_mode = hwcomposer_set_power_mode,
+	.add_output = hwcomposer_add_output,
+	.destroy_output = hwcomposer_destroy_output,
 	.close = hwcomposer_close,
 };
