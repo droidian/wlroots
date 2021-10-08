@@ -80,9 +80,9 @@ const GLchar tex_fragment_src_external[] =
 "#extension GL_OES_EGL_image_external : require\n\n"
 "precision mediump float;\n"
 "varying vec2 v_texcoord;\n"
-"uniform samplerExternalOES texture0;\n"
+"uniform samplerExternalOES tex;\n"
 "uniform float alpha;\n"
 "\n"
 "void main() {\n"
-"	gl_FragColor = texture2D(texture0, v_texcoord) * alpha;\n"
+"	gl_FragColor = texture2D(tex, v_texcoord) * alpha;\n"
 "}\n";
