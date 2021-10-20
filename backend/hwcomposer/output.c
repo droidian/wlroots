@@ -179,13 +179,22 @@ static bool output_commit(struct wlr_output *wlr_output) {
 			wlr_log(WLR_ERROR, "WLR_OUTPUT_STATE_BUFFER_SCANOUT not implemented");
 			break;
 		}
-
-		wlr_output_send_present(wlr_output, NULL);
 	}
 
 	wlr_egl_unset_current(&output->backend->egl);
 
 	if (should_schedule_frame) {
+		// FIXME: wlroots submits a presentation event with commit_seq =
+		//  output_commit_seq + 1. For some unknown reason, we aren't
+		// off-by-one and the output commit sequence won't match the feedback's,
+		// thus presentation feedback will not be reported to the client.
+		// Also we should check why there appears a "ghost" presentation
+		// event just after the good one.
+		struct wlr_output_event_present present_event = {
+			.output = &output->wlr_output,
+			.commit_seq = output->wlr_output.commit_seq,
+		};
+		wlr_output_send_present(&output->wlr_output, &present_event);
 		schedule_frame(output);
 	}
 
