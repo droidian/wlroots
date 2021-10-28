@@ -44,7 +44,7 @@ Architecture: any
 Multi-Arch: same
 Depends:
  ${misc:Depends},
- libwlroots7 (= ${binary:Version}),
+ libwlroots7c (= ${binary:Version}),
  libcap-dev,
  libdrm-dev,
  libegl1-mesa-dev,
@@ -73,7 +73,7 @@ Description: Modular wayland compositor library - development headers
  .
  This package contains the development headers.
 
-Package: libwlroots7
+Package: libwlroots7c
 Architecture: any
 Multi-Arch: same
 Depends:
