@@ -99,6 +99,7 @@ conf_data.set10('WLR_HAS_XWAYLAND', false)
 conf_data.set10('WLR_HAS_XCB_ERRORS', false)
 conf_data.set10('WLR_HAS_XCB_ICCCM', false)
 conf_data.set10('WLR_HAS_EGLMESAEXT_H', false)
+conf_data.set10('WLR_HAS_DROIDIAN_EXTENSIONS', false)
 
 # Clang complains about some zeroed initializer lists (= {0}), even though they
 # are valid
@@ -124,6 +125,10 @@ rt = cc.find_library('rt')
 
 if cc.has_header('EGL/eglmesaext.h', dependencies: egl)
 	conf_data.set10('WLR_HAS_EGLMESAEXT_H', true)
+endif
+
+if get_option('with-droidian-extensions')
+	conf_data.set10('WLR_HAS_DROIDIAN_EXTENSIONS', true)
 endif
 
 wlr_files = []
