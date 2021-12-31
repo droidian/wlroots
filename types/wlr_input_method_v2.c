@@ -157,9 +157,22 @@ static void popup_surface_surface_role_commit(struct wlr_surface *surface) {
 		&& popup_surface->input_method->client_active);
 }
 
+static void popup_surface_surface_role_precommit(struct wlr_surface *surface) {
+	struct wlr_input_popup_surface_v2 *popup_surface = surface->role_data;
+	if (popup_surface == NULL) {
+		return;
+	}
+	if (surface->pending.committed & WLR_SURFACE_STATE_BUFFER &&
+			surface->pending.buffer == NULL) {
+		// This is a NULL commit
+		popup_surface_set_mapped(popup_surface, false);
+	}
+}
+
 static const struct wlr_surface_role input_popup_surface_v2_role = {
 	.name = "zwp_input_popup_surface_v2",
 	.commit = popup_surface_surface_role_commit,
+	.precommit = popup_surface_surface_role_precommit,
 };
 
 bool wlr_surface_is_input_popup_surface_v2(struct wlr_surface *surface) {
