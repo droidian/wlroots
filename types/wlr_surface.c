@@ -207,8 +207,12 @@ static void surface_update_damage(pixman_region32_t *buffer_damage,
 	pixman_region32_clear(buffer_damage);
 
 	if (pending->width != current->width ||
-			pending->height != current->height) {
-		// Damage the whole buffer on resize
+			pending->height != current->height ||
+			pending->viewport.src.x != current->viewport.src.x ||
+			pending->viewport.src.y != current->viewport.src.y ||
+			pending->viewport.src.width != current->viewport.src.width ||
+			pending->viewport.src.height != current->viewport.src.height) {
+		// Damage the whole buffer on resize or viewport source box change
 		pixman_region32_union_rect(buffer_damage, buffer_damage, 0, 0,
 			pending->buffer_width, pending->buffer_height);
 	} else {
@@ -491,7 +495,7 @@ static void collect_subsurface_damage_iter(struct wlr_surface *surface,
 
 static void subsurface_parent_commit(struct wlr_subsurface *subsurface) {
 	struct wlr_surface *surface = subsurface->surface;
-	
+
 	bool moved = subsurface->current.x != subsurface->pending.x ||
 		subsurface->current.y != subsurface->pending.y;
 	if (subsurface->mapped && moved) {
