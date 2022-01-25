@@ -534,6 +534,9 @@ static void subsurface_commit(struct wlr_subsurface *subsurface) {
 		}
 		subsurface->has_cache = true;
 		subsurface->cached_seq = wlr_surface_lock_pending(surface);
+	} else if (subsurface->has_cache) {
+		wlr_surface_unlock_cached(surface, subsurface->cached_seq);
+		subsurface->has_cache = false;
 	}
 }
 
