@@ -236,6 +236,9 @@ bool wlr_output_layout_contains_point(struct wlr_output_layout *layout,
 	if (reference) {
 		struct wlr_output_layout_output *l_output =
 			wlr_output_layout_get(layout, reference);
+		if (!l_output) {
+			return false;
+		}
 		struct wlr_box *box = output_layout_output_get_box(l_output);
 		return wlr_box_contains_point(box, lx, ly);
 	} else {
