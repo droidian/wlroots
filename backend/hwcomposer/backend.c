@@ -117,22 +117,31 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 #endif // HWC_DEVICE_API_VERSION_2_0
 
 	err = hw_get_module(HWC_HARDWARE_MODULE_ID, (const hw_module_t **) &hwc_module);
-	assert(err == 0);
 
-	wlr_log(WLR_INFO, "== hwcomposer module ==\n");
-	wlr_log(WLR_INFO, " * Address: %p\n", hwc_module);
-	wlr_log(WLR_INFO, " * Module API Version: %x\n", hwc_module->module_api_version);
-	wlr_log(WLR_INFO, " * HAL API Version: %x\n", hwc_module->hal_api_version); /* should be zero */
-	wlr_log(WLR_INFO, " * Identifier: %s\n", hwc_module->id);
-	wlr_log(WLR_INFO, " * Name: %s\n", hwc_module->name);
-	wlr_log(WLR_INFO, " * Author: %s\n", hwc_module->author);
-	wlr_log(WLR_INFO, "== hwcomposer module ==\n");
+	if (err == 0) {
+		wlr_log(WLR_INFO, "== hwcomposer module ==\n");
+		wlr_log(WLR_INFO, " * Address: %p\n", hwc_module);
+		wlr_log(WLR_INFO, " * Module API Version: %x\n", hwc_module->module_api_version);
+		wlr_log(WLR_INFO, " * HAL API Version: %x\n", hwc_module->hal_api_version); /* should be zero */
+		wlr_log(WLR_INFO, " * Identifier: %s\n", hwc_module->id);
+		wlr_log(WLR_INFO, " * Name: %s\n", hwc_module->name);
+		wlr_log(WLR_INFO, " * Author: %s\n", hwc_module->author);
+		wlr_log(WLR_INFO, "== hwcomposer module ==\n");
 
-	err = hwc_module->methods->open(hwc_module, HWC_HARDWARE_COMPOSER, &hwc_device);
+		err = hwc_module->methods->open(hwc_module, HWC_HARDWARE_COMPOSER, &hwc_device);
+	}
+
 	if (!err) {
+#ifdef HWC_DEVICE_API_VERSION_2_0
 		// If there is an error, use the default (hwc2). It seems that on some
 		// hwc2 devices the open call fails.
+		wlr_log(WLR_ERROR, "Unable to determine hwc version. Fallbacking to hwc2");
 		hwc_version = interpreted_version(hwc_device);
+#else
+		// We can't use hwc2_compat_layer, bail out
+		wlr_log(WLR_ERROR, "Unable to determine hwc version.");
+		return NULL;
+#endif // HWC_DEVICE_API_VERSION_2_0
 	}
 
 #ifdef HWC_DEVICE_API_VERSION_2_0
