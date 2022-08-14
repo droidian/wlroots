@@ -15,7 +15,7 @@ project(
 # necessary for bugfix releases. Increasing soversion is required because
 # wlroots never guarantees ABI stability -- only API stability is guaranteed
 # between minor releases.
-soversion = '7c'
+soversion = '7d'
 
 add_project_arguments([
 	'-DWLR_USE_UNSTABLE',
