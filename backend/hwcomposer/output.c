@@ -69,7 +69,7 @@ static void schedule_frame(struct wlr_hwcomposer_output *output) {
 }
 
 static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
-		int32_t height, int32_t refresh) {
+		int32_t height, int32_t refresh, int32_t phys_width, int32_t phys_height) {
 	struct wlr_hwcomposer_output *output =
 		(struct wlr_hwcomposer_output *)wlr_output;
 	struct wlr_hwcomposer_backend *hwc_backend = output->hwc_backend;
@@ -95,6 +95,8 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 	output->frame_delay = 1000000 / refresh;
 
 	wlr_output_update_custom_mode(&output->wlr_output, width, height, refresh);
+	output->wlr_output.phys_width = phys_width;
+	output->wlr_output.phys_height = phys_height;
 	return true;
 }
 
@@ -142,7 +144,9 @@ static bool output_commit(struct wlr_output *wlr_output) {
 		if (!output_set_custom_mode(wlr_output,
 				wlr_output->pending.custom_mode.width,
 				wlr_output->pending.custom_mode.height,
-				wlr_output->pending.custom_mode.refresh)) {
+				wlr_output->pending.custom_mode.refresh,
+				wlr_output->phys_width,
+				wlr_output->phys_height)) {
 			return false;
 		}
 	}
@@ -357,8 +361,9 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
 	output_set_custom_mode(wlr_output, output->hwc_width,
 		output->hwc_height,
 		output->hwc_refresh ?
-			(1000000000000LL / output->hwc_refresh) :
-			0);
+			(1000000000000LL / output->hwc_refresh) : 0,
+		output->hwc_phys_width,
+		output->hwc_phys_height);
 	strncpy(wlr_output->make, "hwcomposer", sizeof(wlr_output->make));
 	strncpy(wlr_output->model, "hwcomposer", sizeof(wlr_output->model));
 	snprintf(wlr_output->name, sizeof(wlr_output->name), "HWCOMPOSER-%d",

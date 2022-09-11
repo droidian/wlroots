@@ -204,6 +204,8 @@ static struct wlr_hwcomposer_output* hwcomposer_add_output(struct wlr_hwcomposer
 	wlr_log(WLR_INFO, "width: %i height: %i\n", attr_values[0], attr_values[1]);
 	hwc1_output->output.hwc_width = attr_values[0];
 	hwc1_output->output.hwc_height = attr_values[1];
+	hwc1_output->output.hwc_phys_width = 0;
+	hwc1_output->output.hwc_phys_height = 0;
 	hwc1_output->output.hwc_refresh = (attr_values[2] == 0) ?
 		(1000000000000LL / HWCOMPOSER_DEFAULT_REFRESH) : attr_values[2];
 

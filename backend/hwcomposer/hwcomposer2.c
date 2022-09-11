@@ -226,6 +226,8 @@ static struct wlr_hwcomposer_output* hwcomposer2_add_output(struct wlr_hwcompose
 
 	hwc2_output->output.hwc_width = config->width;
 	hwc2_output->output.hwc_height = config->height;
+	hwc2_output->output.hwc_phys_width = config->width / config->dpiX * 25.4; // inches to mm
+	hwc2_output->output.hwc_phys_height = config->height / config->dpiY * 25.4; // inches to mm
 	hwc2_output->output.hwc_refresh = (config->vsyncPeriod == 0) ?
 		(1000000000000LL / HWCOMPOSER_DEFAULT_REFRESH) : config->vsyncPeriod;
 	wlr_log(WLR_INFO, "width: %i height: %i Refresh: %i\n", config->width, config->height, hwc2_output->output.hwc_refresh);

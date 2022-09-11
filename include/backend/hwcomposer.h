@@ -61,6 +61,8 @@ struct wlr_hwcomposer_output {
 	int hwc_top;
 	int hwc_width;
 	int hwc_height;
+	int hwc_phys_width;
+	int hwc_phys_height;
 	int64_t hwc_refresh;
 
 	struct wl_event_source *vsync_timer;
