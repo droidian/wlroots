@@ -154,7 +154,6 @@ static void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
 {
 	struct wlr_hwcomposer_output *output = (struct wlr_hwcomposer_output *)user_data;
 	struct wlr_hwcomposer_output_hwc2 *hwc2_output = hwc2_output_from_base(output);
-	struct wlr_hwcomposer_backend *hwc_backend = output->hwc_backend;
 
 	uint32_t num_types = 0;
 	uint32_t num_requests = 0;
@@ -174,13 +173,13 @@ static void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
 	error = hwc2_compat_display_validate(hwc_display, &num_types,
 		&num_requests);
 	if (error != HWC2_ERROR_NONE && error != HWC2_ERROR_HAS_CHANGES) {
-		wlr_log(WLR_ERROR, "prepare: validate failed for display %lld: %d",
+		wlr_log(WLR_ERROR, "prepare: validate failed for display %ld: %d",
 			output->hwc_display_id, error);
 		return;
 	}
 
 	if (num_types || num_requests) {
-		wlr_log(WLR_ERROR, "prepare: validate required changes for display %lld: %d",
+		wlr_log(WLR_ERROR, "prepare: validate required changes for display %ld: %d",
 			output->hwc_display_id, error);
 		return;
 	}
@@ -230,7 +229,7 @@ static struct wlr_hwcomposer_output* hwcomposer2_add_output(struct wlr_hwcompose
 	hwc2_output->output.hwc_phys_height = config->height / config->dpiY * 25.4; // inches to mm
 	hwc2_output->output.hwc_refresh = (config->vsyncPeriod == 0) ?
 		(1000000000000LL / HWCOMPOSER_DEFAULT_REFRESH) : config->vsyncPeriod;
-	wlr_log(WLR_INFO, "width: %i height: %i Refresh: %i\n", config->width, config->height, hwc2_output->output.hwc_refresh);
+	wlr_log(WLR_INFO, "width: %d, height: %d, refresh: %ld\n", config->width, config->height, hwc2_output->output.hwc_refresh);
 
 	hwc2_compat_layer_t* layer = hwc2_output->hwc2_layer =
 		hwc2_compat_display_create_layer(hwc2_output->hwc2_display);

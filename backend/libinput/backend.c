@@ -9,6 +9,10 @@
 #include "backend/libinput.h"
 #include "util/signal.h"
 
+#if WLR_HAS_DROIDIAN_EXTENSIONS
+#include <unistd.h>
+#endif // WLR_HAS_DROIDIAN_EXTENSIONS
+
 static struct wlr_libinput_backend *get_libinput_backend_from_backend(
 		struct wlr_backend *wlr_backend) {
 	assert(wlr_backend_is_libinput(wlr_backend));
@@ -17,8 +21,6 @@ static struct wlr_libinput_backend *get_libinput_backend_from_backend(
 
 static int libinput_open_restricted(const char *path,
 		int flags, void *_backend) {
-	struct wlr_libinput_backend *backend = _backend;
-
 #if WLR_HAS_DROIDIAN_EXTENSIONS
 	// Droidian: avoid going through wlr_session to avoid take/pause/release
 	// loops with ever-changing file descriptors on sleep "loops".
@@ -28,17 +30,19 @@ static int libinput_open_restricted(const char *path,
 	// This is equivalent to the 'noop' wlroots session backend.
 	return open(path, O_RDWR | O_CLOEXEC | O_NONBLOCK);
 #else
+	struct wlr_libinput_backend *backend = _backend;
+
 	return wlr_session_open_file(backend->session, path);
 #endif // WLR_HAS_DROIDIAN_EXTENSIONS
 }
 
 static void libinput_close_restricted(int fd, void *_backend) {
-	struct wlr_libinput_backend *backend = _backend;
-
 #if WLR_HAS_DROIDIAN_EXTENSIONS
 	// Droidian: as above
 	close(fd);
 #else
+	struct wlr_libinput_backend *backend = _backend;
+
 	wlr_session_close_file(backend->session, fd);
 #endif // WLR_HAS_DROIDIAN_EXTENSIONS
 }

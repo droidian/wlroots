@@ -16,18 +16,16 @@
 
 #include <wlr/interfaces/wlr_output.h>
 #include <wlr/render/wlr_renderer.h>
+#include <wlr/util/region.h>
 #include <wlr/util/log.h>
 #include "backend/hwcomposer.h"
 #include "util/signal.h"
+#include "util/time.h"
 
-#include "time.h"
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 
 static void schedule_frame(struct wlr_hwcomposer_output *output) {
-	struct wlr_output *wlr_output =
-		(struct wl_output *)output;
-
 	int64_t time, display_refresh, next_vsync, scheduled_next;
 	struct timespec now, frame_tspec;
 
@@ -74,7 +72,7 @@ static bool output_set_custom_mode(struct wlr_output *wlr_output, int32_t width,
 		(struct wlr_hwcomposer_output *)wlr_output;
 	struct wlr_hwcomposer_backend *hwc_backend = output->hwc_backend;
 
-	wlr_log(WLR_INFO, "output_set_custom_mode width=%d height=%d refresh=%d idle_time=%d",
+	wlr_log(WLR_INFO, "output_set_custom_mode width=%d height=%d refresh=%d idle_time=%ld",
 		width, height, refresh, hwc_backend->idle_time);
 
 	if (refresh <= 0) {
@@ -366,7 +364,7 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
 		output->hwc_phys_height);
 	strncpy(wlr_output->make, "hwcomposer", sizeof(wlr_output->make));
 	strncpy(wlr_output->model, "hwcomposer", sizeof(wlr_output->model));
-	snprintf(wlr_output->name, sizeof(wlr_output->name), "HWCOMPOSER-%d",
+	snprintf(wlr_output->name, sizeof(wlr_output->name), "HWCOMPOSER-%ld",
 		display + 1);
 	if (!wlr_egl_make_current(&hwc_backend->egl, output->egl_surface,
 			NULL)) {

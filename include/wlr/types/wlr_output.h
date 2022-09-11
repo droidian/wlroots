@@ -352,6 +352,11 @@ bool wlr_output_preferred_read_format(struct wlr_output *output,
 void wlr_output_set_damage(struct wlr_output *output,
 	pixman_region32_t *damage);
 /**
+ * Calls backend's handle_damage(), if available.
+ */
+bool wlr_output_handle_damage(struct wlr_output *output,
+	pixman_region32_t *damage);
+/**
  * Test whether the pending output state would be accepted by the backend. If
  * this function returns true, `wlr_output_commit` can only fail due to a
  * runtime error.

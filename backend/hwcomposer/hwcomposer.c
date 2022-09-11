@@ -11,6 +11,8 @@
 #include <wlr/util/log.h>
 #include <wlr/interfaces/wlr_output.h>
 
+#include <hybris/hwcomposerwindow/hwcomposer.h>
+
 #include "backend/hwcomposer.h"
 
 /* NOTICE: This is only compile-tested, and it **DOESN'T WORK**.
