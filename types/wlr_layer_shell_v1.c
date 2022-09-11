@@ -328,11 +328,6 @@ static void layer_surface_role_commit(struct wlr_surface *wlr_surface) {
 		return;
 	}
 
-	if (surface->closed) {
-		// Ignore commits after the compositor has closed it
-		return;
-	}
-
 	surface->current = surface->pending;
 	surface->pending.committed = 0;
 
@@ -368,7 +363,7 @@ static void layer_surface_role_precommit(struct wlr_surface *wlr_surface) {
 	}
 
 	if (wlr_surface->pending.committed & WLR_SURFACE_STATE_BUFFER &&
-			wlr_surface->pending.buffer == NULL) {
+			wlr_surface->pending.buffer_resource == NULL) {
 		// This is a NULL commit
 		if (surface->configured && surface->mapped) {
 			layer_surface_unmap(surface);
