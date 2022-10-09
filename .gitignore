@@ -7,3 +7,6 @@ build/
 build-*/
 wayland-*-protocol.*
 wlr-example.ini
+
+# Added by Droidian
+!.circleci/
