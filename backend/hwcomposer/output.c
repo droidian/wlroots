@@ -257,7 +257,9 @@ static void output_destroy(struct wlr_output *wlr_output) {
 
 	wl_list_remove(&output->link);
 
-	wl_event_source_remove(output->vsync_timer);
+	if (output->vsync_timer) {
+		wl_event_source_remove(output->vsync_timer);
+	}
 
 	wlr_egl_destroy_surface(&hwc_backend->egl, output->egl_surface);
 
@@ -345,6 +347,8 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
 		hwc_backend->display);
 	struct wlr_output *wlr_output = &output->wlr_output;
 
+	wl_list_insert(&hwc_backend->outputs, &output->link);
+
 	output->should_destroy = false;
 
 	output->hwc_display_id = display;
@@ -356,20 +360,24 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
 
 	output->egl_display = hwc_backend->egl.display;
 
-	output_set_custom_mode(wlr_output, output->hwc_width,
-		output->hwc_height,
-		output->hwc_refresh ?
-			(1000000000000LL / output->hwc_refresh) : 0,
-		output->hwc_phys_width,
-		output->hwc_phys_height);
-	strncpy(wlr_output->make, "hwcomposer", sizeof(wlr_output->make));
-	strncpy(wlr_output->model, "hwcomposer", sizeof(wlr_output->model));
-	snprintf(wlr_output->name, sizeof(wlr_output->name), "HWCOMPOSER-%ld",
-		display + 1);
+	if (!output_set_custom_mode(wlr_output, output->hwc_width,
+			output->hwc_height,
+			output->hwc_refresh ?
+				(1000000000000LL / output->hwc_refresh) : 0,
+			output->hwc_phys_width,
+			output->hwc_phys_height)) {
+		goto error;
+	}
+
 	if (!wlr_egl_make_current(&hwc_backend->egl, output->egl_surface,
 			NULL)) {
 		goto error;
 	}
+
+	strncpy(wlr_output->make, "hwcomposer", sizeof(wlr_output->make));
+	strncpy(wlr_output->model, "hwcomposer", sizeof(wlr_output->model));
+	snprintf(wlr_output->name, sizeof(wlr_output->name), "HWCOMPOSER-%ld",
+		display + 1);
 
 	wlr_renderer_begin(hwc_backend->renderer, wlr_output->width, wlr_output->height);
 	wlr_renderer_clear(hwc_backend->renderer, (float[]){ 1.0, 1.0, 1.0, 1.0 });
@@ -377,8 +385,6 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
 
 	struct wl_event_loop *ev = wl_display_get_event_loop(hwc_backend->display);
 	output->vsync_timer = wl_event_loop_add_timer(ev, on_vsync_timer_elapsed, output);
-
-	wl_list_insert(&hwc_backend->outputs, &output->link);
 
 	output->vsync_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
 	if (output->vsync_timer_fd < 0) {
