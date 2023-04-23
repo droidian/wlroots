@@ -218,7 +218,7 @@ static struct wlr_hwcomposer_output* hwcomposer2_add_output(struct wlr_hwcompose
 	}
 
 	hwc2_output->hwc2_display = hwc2_compat_device_get_display_by_id(hwc2->hwc2_device, display);
-	hwc2_output->output.hwc_is_primary = (display == 0);
+	hwc2_output->output.hwc_is_primary = 1;
 
 	HWC2DisplayConfig *config = hwc2_compat_display_get_active_config(hwc2_output->hwc2_display);
 	assert(config);

@@ -208,6 +208,10 @@ void wlr_hwcomposer_backend_handle_hotplug(struct wlr_backend *wlr_backend,
 		(struct wlr_hwcomposer_backend *)wlr_backend;
 	struct wlr_hwcomposer_output *output, *tmp_output;
 
+	//test
+	if (display != 1)
+		return;
+
 	if (connected) {
 		wlr_hwcomposer_add_output((struct wlr_backend *)hwc_backend, display,
 			primary_display);
