@@ -417,20 +417,20 @@ void create_xdg_popup(struct wlr_xdg_surface *surface, struct wlr_xdg_surface *p
 		&positioner->rules, &surface->popup->scheduled.geometry);
 	surface->popup->scheduled.rules = positioner->rules;
 
+	wl_signal_init(&surface->popup->events.destroy);
 	wl_signal_init(&surface->popup->events.reposition);
 
 	if (parent) {
 		surface->popup->parent = parent->surface;
 		wl_list_insert(&parent->popups, &surface->popup->link);
+		wl_signal_emit_mutable(&parent->events.new_popup, surface->popup);
 	} else {
 		wl_list_init(&surface->popup->link);
 	}
 
 	set_xdg_surface_role_object(surface, surface->popup->resource);
 
-	if (parent) {
-		wl_signal_emit_mutable(&parent->events.new_popup, surface->popup);
-	}
+	wl_signal_emit_mutable(&surface->client->shell->events.new_popup, surface->popup);
 }
 
 void reset_xdg_popup(struct wlr_xdg_popup *popup) {
@@ -465,14 +465,9 @@ void destroy_xdg_popup(struct wlr_xdg_popup *popup) {
 	wlr_surface_unmap(popup->base->surface);
 	reset_xdg_popup(popup);
 
-	// TODO: improve events
-	if (popup->base->added) {
-		wl_signal_emit_mutable(&popup->base->events.destroy, NULL);
-		popup->base->added = false;
-	}
+	wl_signal_emit_mutable(&popup->events.destroy, NULL);
 
 	popup->base->popup = NULL;
-
 	wl_list_remove(&popup->link);
 	wl_resource_set_user_data(popup->resource, NULL);
 	free(popup);
