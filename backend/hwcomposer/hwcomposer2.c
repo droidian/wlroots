@@ -178,7 +178,7 @@ static void hwcomposer2_present(void *user_data, struct ANativeWindow *window,
 		return;
 	}
 
-	if (num_types || num_requests) {
+	if ((error == HWC2_ERROR_HAS_CHANGES && num_types) || num_requests) {
 		wlr_log(WLR_ERROR, "prepare: validate required changes for display %ld: %d",
 			output->hwc_display_id, error);
 		return;
