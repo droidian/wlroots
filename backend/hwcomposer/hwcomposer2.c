@@ -225,11 +225,17 @@ static struct wlr_hwcomposer_output* hwcomposer2_add_output(struct wlr_hwcompose
 
 	hwc2_output->output.hwc_width = config->width;
 	hwc2_output->output.hwc_height = config->height;
-	hwc2_output->output.hwc_phys_width = config->width / config->dpiX * 25.4; // inches to mm
-	hwc2_output->output.hwc_phys_height = config->height / config->dpiY * 25.4; // inches to mm
+	if (config->dpiX > 0 && config->dpiY > 0) {
+		hwc2_output->output.hwc_phys_width = config->width / config->dpiX * 25.4; // inches to mm
+		hwc2_output->output.hwc_phys_height = config->height / config->dpiY * 25.4; // inches to mm
+	} else {
+		hwc2_output->output.hwc_phys_width = 0;
+		hwc2_output->output.hwc_phys_height = 0;
+	}
 	hwc2_output->output.hwc_refresh = (config->vsyncPeriod == 0) ?
 		(1000000000000LL / HWCOMPOSER_DEFAULT_REFRESH) : config->vsyncPeriod;
-	wlr_log(WLR_INFO, "width: %d, height: %d, refresh: %ld\n", config->width, config->height, hwc2_output->output.hwc_refresh);
+	wlr_log(WLR_INFO, "width: %d, height: %d, refresh: %ld, dpiX: %f, dpiY: %f\n", config->width,
+		config->height, hwc2_output->output.hwc_refresh, config->dpiX, config->dpiY);
 
 	hwc2_compat_layer_t* layer = hwc2_output->hwc2_layer =
 		hwc2_compat_display_create_layer(hwc2_output->hwc2_display);
