@@ -369,19 +369,17 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
 		goto error;
 	}
 
-	if (!wlr_egl_make_current(&hwc_backend->egl, output->egl_surface,
+	if (wlr_egl_make_current(&hwc_backend->egl, output->egl_surface,
 			NULL)) {
-		goto error;
+		wlr_renderer_begin(hwc_backend->renderer, wlr_output->width, wlr_output->height);
+		wlr_renderer_clear(hwc_backend->renderer, (float[]){ 1.0, 1.0, 1.0, 1.0 });
+		wlr_renderer_end(hwc_backend->renderer);
 	}
 
 	strncpy(wlr_output->make, "hwcomposer", sizeof(wlr_output->make));
 	strncpy(wlr_output->model, "hwcomposer", sizeof(wlr_output->model));
 	snprintf(wlr_output->name, sizeof(wlr_output->name), "HWCOMPOSER-%ld",
 		display + 1);
-
-	wlr_renderer_begin(hwc_backend->renderer, wlr_output->width, wlr_output->height);
-	wlr_renderer_clear(hwc_backend->renderer, (float[]){ 1.0, 1.0, 1.0, 1.0 });
-	wlr_renderer_end(hwc_backend->renderer);
 
 	struct wl_event_loop *ev = wl_display_get_event_loop(hwc_backend->display);
 	output->vsync_timer = wl_event_loop_add_timer(ev, on_vsync_timer_elapsed, output);
