@@ -214,7 +214,6 @@ struct wlr_surface {
 	bool unmap_commit;
 
 	bool opaque;
-	bool has_buffer;
 
 	int32_t preferred_buffer_scale;
 	bool preferred_buffer_transform_sent;
