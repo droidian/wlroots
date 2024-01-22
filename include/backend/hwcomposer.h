@@ -11,7 +11,7 @@
 #include <hybris/hwc2/hwc2_compatibility_layer.h>
 #endif
 
-#define HWCOMPOSER_DEFAULT_REFRESH (60 * 1000) // 60 Hz
+#define HWCOMPOSER_DEFAULT_REFRESH (120 * 1000) // 60 Hz
 
 struct hwcomposer_impl;
 
