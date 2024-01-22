@@ -12,6 +12,13 @@
 #include <assert.h>
 #include "time.h"
 #include "backend/hwcomposer.h"
+#include <android-config.h>
+#include <stdio.h>
+#include <dlfcn.h>
+
+void *android_dlopen(const char *filename, int flags);
+void *android_dlsym(void *handle, const char *symbol);
+int android_dlclose(void *handle);
 
 inline static uint32_t interpreted_version(hw_device_t *hwc_device)
 {
@@ -86,6 +93,30 @@ static void handle_display_destroy(struct wl_listener *listener, void *data) {
 	backend_destroy(&hwc_backend->backend);
 }
 
+void start_fake_surfaceflinger() {
+	void* libminisf;
+	void (*startMiniSurfaceFlinger)(void) = NULL;
+
+	// Adapted from https://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin/blob/master/hwcomposer/hwcomposer_backend.cpp#L88
+
+	// A reason for calling this method here is to initialize the binder
+	// thread pool such that services started from for example the
+	// hwcomposer plugin don't get stuck.
+
+	libminisf = android_dlopen("libminisf.so", RTLD_LAZY);
+
+	if (libminisf) {
+		startMiniSurfaceFlinger = (void(*)(void))android_dlsym(libminisf, "startMiniSurfaceFlinger");
+	}
+
+	if (startMiniSurfaceFlinger) {
+		wlr_log(WLR_INFO, "starting mini surface flinger");
+		startMiniSurfaceFlinger();
+	} else {
+		wlr_log(WLR_INFO, "libminisf is incompatible or missing. Can not possibly start the fake SurfaceFlinger service.");
+	}
+}
+
 void hwcomposer_init(struct wlr_hwcomposer_backend *hwc_backend) {
 	wlr_log(WLR_INFO, "Creating hwcomposer backend");
 	wlr_backend_init(&hwc_backend->backend, &backend_impl);
@@ -110,6 +141,9 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display,
 	struct wlr_hwcomposer_backend *hwc_backend;
 	hw_module_t *hwc_module = 0;
 	hw_device_t *hwc_device = NULL;
+
+	start_fake_surfaceflinger();
+
 #ifdef HWC_DEVICE_API_VERSION_2_0
 	int hwc_version = HWC_DEVICE_API_VERSION_2_0;
 #else

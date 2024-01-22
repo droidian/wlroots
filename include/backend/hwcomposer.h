@@ -83,6 +83,7 @@ struct hwcomposer_impl {
 	void (*close)(struct wlr_hwcomposer_backend *hwc_backend);
 };
 
+void start_fake_surfaceflinger();
 void hwcomposer_init(struct wlr_hwcomposer_backend *hwc_backend);
 struct wlr_hwcomposer_backend *hwcomposer_api_init(hw_device_t *hwc_device);
 #ifdef HWC_DEVICE_API_VERSION_2_0
