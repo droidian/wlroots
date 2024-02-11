@@ -48,6 +48,7 @@ add_project_link_arguments(
                '-lsync',
                '-lhybris-hwcomposerwindow',
                '-lhwc2',
+               '-lhybris-common'
        ],
        language: 'c',
 )
