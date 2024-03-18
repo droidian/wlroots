@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdlib.h>
+#include <wlr/types/wlr_alpha_modifier_v1.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
@@ -154,10 +155,18 @@ static void surface_reconfigure(struct wlr_scene_surface *scene_surface) {
 		return;
 	}
 
+	float opacity = 1.0;
+	const struct wlr_alpha_modifier_surface_v1_state *alpha_modifier_state =
+		wlr_alpha_modifier_v1_get_surface_state(surface);
+	if (alpha_modifier_state != NULL) {
+		opacity = (float)alpha_modifier_state->multiplier;
+	}
+
 	wlr_scene_buffer_set_opaque_region(scene_buffer, &opaque);
 	wlr_scene_buffer_set_source_box(scene_buffer, &src_box);
 	wlr_scene_buffer_set_dest_size(scene_buffer, width, height);
 	wlr_scene_buffer_set_transform(scene_buffer, state->transform);
+	wlr_scene_buffer_set_opacity(scene_buffer, opacity);
 
 	scene_buffer_unmark_client_buffer(scene_buffer);
 
