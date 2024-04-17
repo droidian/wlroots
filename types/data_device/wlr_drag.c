@@ -260,11 +260,11 @@ static uint32_t drag_handle_touch_down(struct wlr_seat_touch_grab *grab,
 	return 0;
 }
 
-static void drag_handle_touch_up(struct wlr_seat_touch_grab *grab,
+static uint32_t drag_handle_touch_up(struct wlr_seat_touch_grab *grab,
 		uint32_t time, struct wlr_touch_point *point) {
 	struct wlr_drag *drag = grab->data;
 	if (drag->grab_touch_id != point->touch_id) {
-		return;
+		return 0;
 	}
 
 	if (drag->focus_client) {
@@ -272,6 +272,7 @@ static void drag_handle_touch_up(struct wlr_seat_touch_grab *grab,
 	}
 
 	drag_destroy(drag);
+	return 0;
 }
 
 static void drag_handle_touch_motion(struct wlr_seat_touch_grab *grab,

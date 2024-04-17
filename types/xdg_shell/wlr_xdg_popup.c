@@ -149,9 +149,9 @@ static uint32_t xdg_touch_grab_down(struct wlr_seat_touch_grab *grab,
 			point->touch_id, point->sx, point->sy);
 }
 
-static void xdg_touch_grab_up(struct wlr_seat_touch_grab *grab,
+static uint32_t xdg_touch_grab_up(struct wlr_seat_touch_grab *grab,
 		uint32_t time, struct wlr_touch_point *point) {
-	wlr_seat_touch_send_up(grab->seat, time, point->touch_id);
+	return wlr_seat_touch_send_up(grab->seat, time, point->touch_id);
 }
 
 static void xdg_touch_grab_motion(struct wlr_seat_touch_grab *grab,
