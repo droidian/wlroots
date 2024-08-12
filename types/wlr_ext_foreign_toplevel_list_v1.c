@@ -13,14 +13,18 @@
 
 #define FOREIGN_TOPLEVEL_LIST_V1_VERSION 1
 
-static const struct ext_foreign_toplevel_list_v1_interface toplevel_handle_impl;
+static const struct ext_foreign_toplevel_handle_v1_interface toplevel_handle_impl;
 
 static void foreign_toplevel_handle_destroy(struct wl_client *client,
 		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource,
+		&ext_foreign_toplevel_handle_v1_interface,
+		&toplevel_handle_impl));
+
 	wl_resource_destroy(resource);
 }
 
-static const struct ext_foreign_toplevel_list_v1_interface toplevel_handle_impl = {
+static const struct ext_foreign_toplevel_handle_v1_interface toplevel_handle_impl = {
 	.destroy = foreign_toplevel_handle_destroy,
 };
 
@@ -192,12 +196,23 @@ static void foreign_toplevel_list_handle_stop(struct wl_client *client,
 		&foreign_toplevel_list_impl));
 
 	ext_foreign_toplevel_list_v1_send_finished(resource);
+	wl_list_remove(wl_resource_get_link(resource));
+	wl_list_init(wl_resource_get_link(resource));
+}
+
+static void foreign_toplevel_list_handle_destroy(struct wl_client *client,
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource,
+		&ext_foreign_toplevel_list_v1_interface,
+		&foreign_toplevel_list_impl));
+
 	wl_resource_destroy(resource);
 }
 
 static const struct ext_foreign_toplevel_list_v1_interface
 		foreign_toplevel_list_impl = {
-	.stop = foreign_toplevel_list_handle_stop
+	.stop = foreign_toplevel_list_handle_stop,
+	.destroy = foreign_toplevel_list_handle_destroy
 };
 
 static void foreign_toplevel_list_resource_destroy(
