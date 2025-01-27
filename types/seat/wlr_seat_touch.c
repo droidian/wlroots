@@ -215,9 +215,10 @@ uint32_t wlr_seat_touch_notify_up(struct wlr_seat *seat, uint32_t time,
 		return 0;
 	}
 
-	return grab->interface->up(grab, time, point);
+	uint32_t serial = grab->interface->up(grab, time, point);
 
 	touch_point_destroy(point);
+	return serial;
 }
 
 void wlr_seat_touch_notify_motion(struct wlr_seat *seat, uint32_t time,
