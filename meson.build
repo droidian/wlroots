@@ -15,7 +15,7 @@ project(
 # necessary for bugfix releases. Increasing soversion is required because
 # wlroots never guarantees ABI stability -- only API stability is guaranteed
 # between minor releases.
-soversion = 12
+soversion = '12a'
 
 little_endian = target_machine.endian() == 'little'
 big_endian = target_machine.endian() == 'big'
@@ -188,7 +188,7 @@ symbols_file = 'wlroots.syms'
 symbols_flag = '-Wl,--version-script,@0@/@1@'.format(meson.current_source_dir(), symbols_file)
 lib_wlr = library(
 	meson.project_name(), wlr_files,
-	soversion: soversion.to_string(),
+	soversion: soversion,
 	dependencies: wlr_deps,
 	include_directories: [wlr_inc],
 	install: true,
