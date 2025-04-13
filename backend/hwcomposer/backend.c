@@ -153,10 +153,18 @@ struct wlr_backend *wlr_hwcomposer_backend_create(struct wl_display *display) {
 	hwc_backend->hwc_vsync_enabled = false;
 
 	// Create a udev instance for panel brightness control
-	if (getenv("WLR_HWC_SYSFS_BACKLIGHT") != NULL)
-		hwc_backend->droid_leds = droid_leds_new();
-	else
+	if (getenv("WLR_HWC_SYSFS_BACKLIGHT") != NULL) {
+		g_autoptr (GError) libdroid_err = NULL;
+		hwc_backend->droid_leds = droid_leds_new(&libdroid_err);
+
+		if (libdroid_err != NULL) {
+			wlr_log(WLR_ERROR, "WLR_HWC_SYSFS_BACKLIGHT specified, but unable to to init DroidLeds: %s",
+				libdroid_err->message);
+			g_clear_object(&hwc_backend->droid_leds);
+		}
+	} else {
 		hwc_backend->droid_leds = NULL;
+	}
 
 	// Register hwc callbacks
 	hwc_backend->impl->register_callbacks(hwc_backend);

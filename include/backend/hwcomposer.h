@@ -8,6 +8,7 @@
 #include <hardware/hwcomposer.h>
 
 #include <hybris/hwc2/hwc2_compatibility_layer.h>
+#include <glib.h>
 #include <libdroid/leds.h>
 
 #include "render/drm_format_set.h"
