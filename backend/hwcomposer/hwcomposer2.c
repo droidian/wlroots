@@ -250,8 +250,8 @@ static struct wlr_hwcomposer_output* hwcomposer2_add_output(struct wlr_hwcompose
 	hwc2_compat_layer_t* layer = hwc2_output->hwc2_layer =
 		hwc2_compat_display_create_layer(hwc2_output->hwc2_display);
 
-	hwc2_compat_layer_set_composition_type(layer, HWC2_COMPOSITION_CLIENT);
 	hwc2_compat_layer_set_blend_mode(layer, HWC2_BLEND_MODE_NONE);
+	hwc2_compat_layer_set_composition_type(layer, HWC2_COMPOSITION_CLIENT);
 	hwc2_compat_layer_set_source_crop(layer, 0.0f, 0.0f, hwc2_output->output.hwc_width, hwc2_output->output.hwc_height);
 	hwc2_compat_layer_set_display_frame(layer, 0, 0, hwc2_output->output.hwc_width, hwc2_output->output.hwc_height);
 	hwc2_compat_layer_set_visible_region(layer, 0, 0, hwc2_output->output.hwc_width, hwc2_output->output.hwc_height);
