@@ -7,6 +7,7 @@
 #include <malloc.h>
 #include <sys/cdefs.h> // for __BEGIN_DECLS/__END_DECLS found in sync.h
 #include <sync/sync.h>
+#include <libudev.h>
 
 #include <hybris/hwcomposerwindow/hwcomposer.h>
 
@@ -39,6 +40,7 @@ struct wlr_hwcomposer_output_hwc2
 	hwc2_compat_display_t *hwc2_display;
 	hwc2_compat_layer_t *hwc2_layer;
 	int hwc2_last_present_fence;
+	int restore_brightness;
 };
 
 static struct wlr_hwcomposer_backend_hwc2 *hwc2_backend_from_base(struct wlr_hwcomposer_backend *hwc_backend)
@@ -130,7 +132,7 @@ static bool hwcomposer2_vsync_control(struct wlr_hwcomposer_output *output, bool
 static bool hwcomposer2_set_power_mode(struct wlr_hwcomposer_output *output, bool enable)
 {
 	struct wlr_hwcomposer_output_hwc2 *hwc2_output = hwc2_output_from_base(output);
-	bool change_backlight = (output->hwc_is_primary && output->hwc_backend->droid_leds);
+	struct udev_device *udev_backlight = NULL;
 
 	wlr_log(WLR_DEBUG, "hwcomposer2: set_power_mode: display %p, enable %d",
 		hwc2_output->hwc2_display, enable);
@@ -139,8 +141,29 @@ static bool hwcomposer2_set_power_mode(struct wlr_hwcomposer_output *output, boo
 		wlr_log(WLR_ERROR, "hwcomposer2: set_power_mode: unable to disable vsync");
 	}
 
-	if (!enable && change_backlight && !droid_leds_set_backlight (output->hwc_backend->droid_leds, 0, FALSE)) {
-		wlr_log(WLR_ERROR, "hwcomposer2: set_power_mode: unable to disable backlight via libdroid");
+	// If this is the built-in screen, we should control the backlight
+	// The udev instance is only created if the environment variable is set
+	if (output->hwc_is_primary && output->hwc_backend->udev)
+		udev_backlight = udev_device_new_from_syspath(
+			output->hwc_backend->udev, "/sys/class/leds/lcd-backlight");
+
+	if (udev_backlight) {
+		const char *actual_value = NULL;
+		if (!enable) {
+			actual_value = udev_device_get_sysattr_value(udev_backlight, "brightness");
+
+			if (actual_value) {
+				hwc2_output->restore_brightness = atoi(actual_value);
+				if (udev_device_set_sysattr_value(udev_backlight, "brightness", "0") < 0)
+					wlr_log(WLR_ERROR, "hwcomposer2: backlight: unable to set brightness to 0");
+			}
+		}
+
+		if (hwc2_output->restore_brightness == 0) {
+			actual_value = udev_device_get_sysattr_value(udev_backlight, "max_brightness");
+			if (actual_value)
+				hwc2_output->restore_brightness = atoi(actual_value);
+		}
 	}
 
 	if (hwc2_compat_display_set_power_mode(hwc2_output->hwc2_display, enable ?
@@ -150,9 +173,11 @@ static bool hwcomposer2_set_power_mode(struct wlr_hwcomposer_output *output, boo
 		wlr_output_state_set_enabled(&state, enable);
 		wlr_output_state_finish(&state);
 
-		if (enable && change_backlight &&
-				!droid_leds_set_backlight (output->hwc_backend->droid_leds, MAX(5, droid_leds_get_backlight (output->hwc_backend->droid_leds)), FALSE)) {
-			wlr_log(WLR_ERROR, "hwcomposer2: set_power_mode: unable to restore backlight via libdroid");
+		if (enable && udev_backlight) {
+			char tmp[4];
+			snprintf(tmp, 4, "%d", hwc2_output->restore_brightness);
+			if (udev_device_set_sysattr_value(udev_backlight, "brightness", tmp) < 0)
+				wlr_log(WLR_ERROR, "hwcomposer2: backlight: unable to restore brightness");
 		}
 
 		return true;
@@ -257,6 +282,7 @@ static struct wlr_hwcomposer_output* hwcomposer2_add_output(struct wlr_hwcompose
 	hwc2_compat_layer_set_visible_region(layer, 0, 0, hwc2_output->output.hwc_width, hwc2_output->output.hwc_height);
 
 	hwc2_output->hwc2_last_present_fence = -1;
+	hwc2_output->restore_brightness = 0;
 
 	// FIXME: This being here is wrong
 	if (hwc2_output->output.hwc_is_primary) {

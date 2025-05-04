@@ -8,8 +8,6 @@
 #include <hardware/hwcomposer.h>
 
 #include <hybris/hwc2/hwc2_compatibility_layer.h>
-#include <glib.h>
-#include <libdroid/leds.h>
 
 #include "render/drm_format_set.h"
 
@@ -43,8 +41,8 @@ struct wlr_hwcomposer_backend {
 	// TODO: Also store 'vsyncPeriodNanos' if vsync2_4 is supported
 
 	// A udev instance for panel brightness control
-	DroidLeds *droid_leds;
-	struct wlr_drm_format_set shm_formats;
+	struct udev *udev;
+    struct wlr_drm_format_set shm_formats;
 };
 
 struct wlr_hwcomposer_output {
