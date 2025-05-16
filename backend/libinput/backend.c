@@ -10,6 +10,8 @@
 #include "backend/libinput.h"
 #include "util/env.h"
 
+#include <wlr/config.h>
+
 #if WLR_HAS_DROIDIAN_EXTENSIONS
 #include <unistd.h>
 #endif // WLR_HAS_DROIDIAN_EXTENSIONS
