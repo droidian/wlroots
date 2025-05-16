@@ -99,6 +99,7 @@ endif
 
 features = {
 	'drm-backend': false,
+	'droidian-extensions': false,
 	'x11-backend': false,
 	'libinput-backend': false,
 	'hwcomposer-backend': false,
@@ -215,6 +216,10 @@ summary(features + internal_features, bool_yn: true)
 if get_option('examples')
 	subdir('examples')
 	subdir('tinywl')
+endif
+
+if get_option('droidian-extensions')
+	features += { 'droidian-extensions': true }
 endif
 
 pkgconfig = import('pkgconfig')
