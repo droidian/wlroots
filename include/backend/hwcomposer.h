@@ -47,6 +47,12 @@ struct wlr_hwcomposer_backend {
 	struct wlr_drm_format_set shm_formats;
 };
 
+struct wlr_hwcomposer_mode {
+	struct wlr_output_mode wlr_mode;
+	uint32_t hwc_config_id;
+	int64_t hwc_vsync_period;
+};
+
 struct wlr_hwcomposer_output {
 	struct wlr_output wlr_output;
 
@@ -67,6 +73,9 @@ struct wlr_hwcomposer_output {
 	int hwc_phys_height;
 	int64_t hwc_refresh;
 
+
+	struct wlr_hwcomposer_mode *hwc_modes;
+	size_t hwc_mode_count;
 	struct wl_event_source *vsync_timer;
 	int frame_delay; // ms
 	int vsync_timer_fd;
@@ -80,7 +89,8 @@ struct hwcomposer_impl {
 	void (*present)(void *user_data, struct ANativeWindow *window, struct ANativeWindowBuffer *buffer);
 	bool (*vsync_control)(struct wlr_hwcomposer_output *output, bool enable);
 	bool (*set_power_mode)(struct wlr_hwcomposer_output *output, bool enable);
-	struct wlr_hwcomposer_output *(*add_output)(struct wlr_hwcomposer_backend *hwc_backend, int display);
+		bool (*set_mode)(struct wlr_hwcomposer_output *output, uint32_t config_id);
+struct wlr_hwcomposer_output *(*add_output)(struct wlr_hwcomposer_backend *hwc_backend, int display);
 	void (*destroy_output)(struct wlr_hwcomposer_output *output);
 	void (*close)(struct wlr_hwcomposer_backend *hwc_backend);
 };
