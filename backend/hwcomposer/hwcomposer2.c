@@ -16,6 +16,7 @@
 #include <wlr/interfaces/wlr_output.h>
 
 #include "backend/hwcomposer.h"
+#include <time.h>
 
 typedef struct
 {
@@ -127,6 +128,27 @@ static bool hwcomposer2_vsync_control(struct wlr_hwcomposer_output *output, bool
 	return false;
 }
 
+static bool hwcomposer2_set_mode(struct wlr_hwcomposer_output *output, uint32_t config_id)
+{
+	struct wlr_hwcomposer_output_hwc2 *hwc2_output = hwc2_output_from_base(output);
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+
+	HWC2VsyncPeriodChangeConstraints constraints = {
+		.desiredTimeNanos = (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec,
+		.seamlessRequired = false,
+	};
+	HWC2VsyncPeriodChangeTimeline timeline = {0};
+	hwc2_error_t error =
+		hwc2_compat_display_set_active_config_with_constraints(
+			hwc2_output->hwc2_display, config_id, &constraints, &timeline);
+	if (error != HWC2_ERROR_NONE) {
+		wlr_log(WLR_ERROR, "hwcomposer2: setActiveConfig(%u) failed: %d", config_id, error);
+		return false;
+	}
+	return true;
+}
+
 static bool hwcomposer2_set_power_mode(struct wlr_hwcomposer_output *output, bool enable)
 {
 	struct wlr_hwcomposer_output_hwc2 *hwc2_output = hwc2_output_from_base(output);
@@ -232,6 +254,37 @@ static struct wlr_hwcomposer_output* hwcomposer2_add_output(struct wlr_hwcompose
 
 	HWC2DisplayConfig *config = hwc2_compat_display_get_active_config(hwc2_output->hwc2_display);
 	assert(config);
+	size_t config_count = hwc2_compat_display_get_config_count(hwc2_output->hwc2_display);
+	if (config_count > 0) {
+		hwc2_output->output.hwc_modes = calloc(config_count, sizeof(*hwc2_output->output.hwc_modes));
+		if (!hwc2_output->output.hwc_modes) {
+			wlr_log(WLR_ERROR, "Failed to allocate HWC mode list");
+			free(hwc2_output);
+			return NULL;
+		}
+
+		for (size_t i = 0; i < config_count; ++i) {
+			HWC2DisplayConfig candidate = {0};
+			hwc2_error_t error = hwc2_compat_display_get_config(hwc2_output->hwc2_display, i, &candidate);
+			if (error != HWC2_ERROR_NONE) {
+				wlr_log(WLR_ERROR, "Failed to read HWC config %zu: %d", i, error);
+				continue;
+			}
+			if (candidate.width != config->width || candidate.height != config->height || candidate.vsyncPeriod <= 0)
+				continue;
+
+			struct wlr_hwcomposer_mode *mode = &hwc2_output->output.hwc_modes[hwc2_output->output.hwc_mode_count++];
+			mode->hwc_config_id = candidate.id;
+			mode->hwc_vsync_period = candidate.vsyncPeriod;
+			mode->wlr_mode.width = candidate.width;
+			mode->wlr_mode.height = candidate.height;
+			mode->wlr_mode.refresh = 1000000000000LL / candidate.vsyncPeriod;
+			mode->wlr_mode.preferred = candidate.id == config->id;
+			wlr_log(WLR_INFO, "HWC mode config=%u %dx%d@%d mHz%s",
+				mode->hwc_config_id, mode->wlr_mode.width, mode->wlr_mode.height,
+				mode->wlr_mode.refresh, mode->wlr_mode.preferred ? " preferred" : "");
+		}
+	}
 
 	hwc2_output->output.hwc_width = config->width;
 	hwc2_output->output.hwc_height = config->height;
@@ -273,7 +326,8 @@ static void hwcomposer2_destroy_output(struct wlr_hwcomposer_output *output)
 
 	hwc2_compat_device_destroy_display(hwc2->hwc2_device, hwc2_output->hwc2_display);
 
-	free(hwc2_output);
+		free(output->hwc_modes);
+free(hwc2_output);
 }
 
 static void hwcomposer2_register_callbacks(struct wlr_hwcomposer_backend *hwc_backend)
@@ -298,7 +352,8 @@ const struct hwcomposer_impl hwcomposer_hwc2 = {
 	.present = hwcomposer2_present,
 	.vsync_control = hwcomposer2_vsync_control,
 	.set_power_mode = hwcomposer2_set_power_mode,
-	.add_output = hwcomposer2_add_output,
+		.set_mode = hwcomposer2_set_mode,
+.add_output = hwcomposer2_add_output,
 	.destroy_output = hwcomposer2_destroy_output,
 	.close = hwcomposer2_close,
 };

@@ -78,7 +78,41 @@ static bool output_commit(struct wlr_output *wlr_output,
 		return false;
 	}
 
-	if (state->committed & WLR_OUTPUT_STATE_ENABLED) {
+
+	if (state->committed & WLR_OUTPUT_STATE_MODE) {
+		struct wlr_hwcomposer_mode *selected = NULL;
+
+		if (state->mode_type == WLR_OUTPUT_STATE_MODE_FIXED && state->mode) {
+			selected = wl_container_of(state->mode, selected, wlr_mode);
+		} else if (state->mode_type == WLR_OUTPUT_STATE_MODE_CUSTOM) {
+			for (size_t i = 0; i < output->hwc_mode_count; ++i) {
+				struct wlr_hwcomposer_mode *candidate = &output->hwc_modes[i];
+				if (candidate->wlr_mode.width == state->custom_mode.width &&
+						candidate->wlr_mode.height == state->custom_mode.height &&
+						(state->custom_mode.refresh == 0 || candidate->wlr_mode.refresh == state->custom_mode.refresh)) {
+					selected = candidate;
+					break;
+				}
+			}
+		}
+
+		if (!selected) {
+			wlr_log(WLR_ERROR, "output_commit: requested HWC mode not found");
+			return false;
+		}
+		if (!hwc_backend->impl->set_mode || !hwc_backend->impl->set_mode(output, selected->hwc_config_id)) {
+			wlr_log(WLR_ERROR, "output_commit: failed to switch HWC config %u", selected->hwc_config_id);
+			return false;
+		}
+
+		output->hwc_refresh = selected->hwc_vsync_period;
+		output->frame_delay = 1000000 / MAX(1, selected->wlr_mode.refresh);
+		if (output->hwc_is_primary)
+			hwc_backend->hwc_device_refresh = selected->hwc_vsync_period;
+		wlr_log(WLR_INFO, "output_commit: switched HWC config=%u %dx%d@%d mHz",
+			selected->hwc_config_id, selected->wlr_mode.width, selected->wlr_mode.height, selected->wlr_mode.refresh);
+	}
+if (state->committed & WLR_OUTPUT_STATE_ENABLED) {
 		wlr_log(WLR_DEBUG, "output_commit: STATE_ENABLE, pending state %d", state->enabled);
 		if (!hwc_backend->impl->set_power_mode(output, state->enabled)) {
 			wlr_log(WLR_ERROR, "output_commit: unable to change display power mode");
@@ -251,6 +285,20 @@ struct wlr_output *wlr_hwcomposer_add_output(struct wlr_backend *wlr_backend,
 	wlr_output_init(&output->wlr_output, &hwc_backend->backend, &output_impl,
 					hwc_backend->display, &state);
 	wlr_output_state_finish(&state);
+
+	struct wlr_hwcomposer_mode *preferred = NULL;
+	for (size_t i = 0; i < output->hwc_mode_count; ++i) {
+		struct wlr_hwcomposer_mode *mode = &output->hwc_modes[i];
+		wl_list_insert(wlr_output->modes.prev, &mode->wlr_mode.link);
+		if (mode->wlr_mode.preferred)
+			preferred = mode;
+	}
+	if (preferred) {
+		wlr_output->current_mode = &preferred->wlr_mode;
+		wlr_output->width = preferred->wlr_mode.width;
+		wlr_output->height = preferred->wlr_mode.height;
+		wlr_output->refresh = preferred->wlr_mode.refresh;
+	}
 	wlr_log(WLR_INFO, "wlr_hwcomposer_add_output width=%d height=%d refresh=%d idle_time=%ld",
 			output->hwc_width, output->hwc_height, refresh, hwc_backend->idle_time);
 
